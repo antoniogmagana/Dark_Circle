@@ -11,4 +11,3 @@ Capstone LVC Toolkit
   h.	RFI’s for customer: How do you request information about the customer your   capstone targets?
   i.	Mentor Info: Dr. Kristin E. Schaefer-Lay, Dr. Damon Conover, Henry Reimert
   j.	Customer Info: Dr. Carl Busart
-<img width="468" height="276" alt="image" src="https://github.com/user-attachments/assets/18502b3c-ce98-4286-b504-0d07c13d8520" />
