@@ -18,7 +18,7 @@ List similar papers and repositories that do similar things to what you are solv
 
 ### Anticipated Tasks
 List the tasks you are planning to do, and which have been solved. Use a checkbox system to indicate progress.
-- [X] Phase 1
+- [ ] Phase 1
 - [ ] Phase 2
 - [ ] Phase 3
 - [ ] Phase 4
