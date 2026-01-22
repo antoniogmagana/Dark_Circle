@@ -44,7 +44,7 @@ Provide a step-by-step procedure that unambiguously demonstrates how to take the
 *Note: In general, this should be as verbose as possible - it’s far easier to make a set of instructions that are not detailed enough than the opposite.*
 
 ```bash
-git clone [[https://github.com/your-org/Dark_Circle.git](https://github.com/antoniogmagana/Dark_Circle.git)](https://github.com/your-org/Dark_Circle.git)
+git clone https://github.com/antoniogmagana/Dark_Circle.git
 
 cd Dark_Circle
 pip install -r requirements.txt
