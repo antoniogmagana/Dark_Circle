@@ -39,6 +39,8 @@ How do you request information about the customer your capstone targets?
 * **Mentor Info:** Dr. Kristin E. Schaefer-Lay, Dr. Damon Conover, Henry Reimert
 * **Customer Info:** Dr. Carl Busart
 
+* **Capstone Team:** Brandon Taylor, John Tomaselli, Larry Parrotte, Antonio Magana
+
 ## Installation Instructions
 Provide a step-by-step procedure that unambiguously demonstrates how to take the repo, clone it, download the dependencies, and install them accordingly.
 
