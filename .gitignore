@@ -1,0 +1,27 @@
+# Large data files - store these separately (Google Drive, Dropbox, etc.)
+# Only include small CSV files in git, exclude large audio files
+raw_data/**/*.wav
+raw_data/**/aud16000.csv
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# Virtual environments
+venv/
+env/
+ENV/
