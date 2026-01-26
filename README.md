@@ -41,13 +41,65 @@ How do you request information about the customer your capstone targets?
 
 * **Capstone Team:** Brandon Taylor, John Tomaselli, Larry Parrotte, Antonio Magana
 
+## Data Files
+
+### Large Files (Not Included in Repository)
+The following large data files are excluded from the repository due to GitHub file size limits:
+
+- `raw_data/**/rs1/aud16000.csv` - Audio data CSV files (16kHz audio samples)
+- `raw_data/**/rs1/aud16k.wav` - Audio WAV files
+
+**⚠️ These files are required to run the data exploration notebook.**
+
+### Download Data Files
+
+**Option 1: Google Drive / OneDrive / Dropbox (Recommended)**
+[Add your shared link here once you upload the data]
+
+**Option 2: Git LFS (For files < 2GB)**
+If your team has Git LFS set up:
+```bash
+git lfs install
+git lfs pull
+```
+
+**Option 3: Contact the Team**
+Contact the capstone team for access to the data files.
+
+### Expected Data Structure
+After downloading, your directory should look like:
+```
+Dark_Circle/
+├── Data exploration.ipynb
+├── raw_data/
+│   ├── Polaris0150pm/
+│   │   └── rs1/
+│   │       ├── aud16000.csv     (LARGE - download separately)
+│   │       ├── aud16k.wav       (LARGE - download separately)
+│   │       ├── ehz.csv
+│   │       └── gps.csv
+│   ├── Polaris0215pm/
+│   │   └── rs1/...
+│   └── ... (other experiment folders)
+```
+
 ## Installation Instructions
-Provide a step-by-step procedure that unambiguously demonstrates how to take the repo, clone it, download the dependencies, and install them accordingly.
 
-*Note: In general, this should be as verbose as possible - it’s far easier to make a set of instructions that are not detailed enough than the opposite.*
-
+### 1. Clone the Repository
 ```bash
 git clone https://github.com/antoniogmagana/Dark_Circle.git
-
 cd Dark_Circle
+```
+
+### 2. Install Python Dependencies
+```bash
 pip install -r requirements.txt
+```
+
+### 3. Download Data Files
+Download the large data files from [shared drive link] and place them in the appropriate `raw_data/*/rs1/` folders.
+
+### 4. Run the Notebook
+```bash
+jupyter notebook "Data exploration.ipynb"
+```
