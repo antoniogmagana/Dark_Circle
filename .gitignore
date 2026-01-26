@@ -1,7 +1,5 @@
-# Large data files - store these separately (Google Drive, Dropbox, etc.)
-# Only include small CSV files in git, exclude large audio files
-raw_data/**/*.wav
-raw_data/**/aud16000.csv
+# Large data files - now handled by Git LFS (see .gitattributes)
+# Git LFS will track: raw_data/**/aud16000.csv and raw_data/**/*.wav
 
 # OS files
 .DS_Store
