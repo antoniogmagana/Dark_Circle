@@ -3,7 +3,7 @@
 ## Description
 **Capstone LVC Toolkit**
 
-*Note: Describe precisely what the code is and what it is supposed to do. Provide sufficient detail so others understand the intent of the capstone project.*
+*Detecting potential adversaries earlier and more accurately often provides a decisive advantage in combat.  This reason underlies many of the frameworks through which intellectuals often articulate desired combatant and system behavior, most prominently the Observe, Orient, Decide, and Act*
 
 ## Project Breakdown
 
