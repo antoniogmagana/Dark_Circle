@@ -18,10 +18,10 @@ List similar papers and repositories that do similar things to what you are solv
 
 ### Anticipated Tasks
 List the tasks you are planning to do, and which have been solved. Use a checkbox system to indicate progress.
-- [ ] Phase 1
-- [ ] Phase 2
-- [ ] Phase 3
-- [ ] Phase 4
+- [ ] Requirements Gathering and Design
+- [ ] Data Engineering and Modeling
+- [ ] Deployment and Intergration
+- [ ] Evaluation and Redeployment
 
 ### Capacity Gaps
 What are the capacity gaps that can be critical?
