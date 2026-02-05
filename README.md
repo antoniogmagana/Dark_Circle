@@ -49,12 +49,12 @@ The core of our research is based on the following empirical hypothesis:
 
 | Task | Metric | Target |
 | :--- | :--- | :--- |
-| **Vehicle vs. Background Noise** | Accuracy | ≥ 90% |
-| | Recall (Pd) | ≥ 90% |
-| | False Alarm Rate | ≤ 10% |
-| **Vehicle vs. Other Vehicles** | Accuracy | ≥ 70% |
+| **Vehicle vs. Background Noise** | Accuracy | ≥ 85% |
+| | Recall (Pd) | ≥ 85% |
+| | False Alarm Rate | ≤ 15% |
+| **Vehicle vs. Other Vehicles** | Accuracy | ≥ 65% |
 | | Recall (Pd) | ≥ 65% |
-| | False Alarm Rate | ≤ 20% |
+| | False Alarm Rate | ≤ 25% |
 
 ## 5. System Architecture & Design
 
