@@ -1,86 +1,122 @@
-# Dark Circle
+# Live, Virtual, and Constructive (LVC) Toolkit
 
-## Description
-**Capstone LVC Toolkit**
+**Project Codename:** Dark Circle  
+**Team:** AI Technician Capstone Group 5, Carnegie Mellon University, ARL  
+**Team Members:** Brandon Taylor, Antonio Magana, Larry Parrotte, John Tomaselli  
+**Mentors:** Dr. Kristin E. Schaefer-Lay, Dr. Damon Conover, Henry Reimert
 
-*Detecting potential adversaries earlier and more accurately often provides a decisive advantage in combat.  This reason underlies many of the frameworks through which intellectuals often articulate desired combatant and system behavior, most prominently the Observe, Orient, Decide, and Act*
+---
 
-## Project Breakdown
+## 1. Project Overview
 
-### Problem
-How can LVC Toolkit users enhance situational awareness and operational decision-making during simulated small-unit tactical robotic engagements?
+This project is a Capstone effort for the Carnegie Mellon University AI Technician Program, developed in collaboration with the Army Research Laboratory (ARL). The primary goal is to explore and develop Artificial Intelligence/Machine Learning (AI/ML) techniques to enhance ARL's Live, Virtual, and Constructive (LVC) Toolkit.
 
-### Motivation
-What motivated the solution of the problem, and why is this problem important?
+The project focuses on developing a **multi-modal classification model** that utilizes acoustic and seismic sensor data to automatically detect the presence of vehicles and classify their specific types. This capability aims to provide high-fidelity, actionable intelligence to improve situational awareness for researchers, soldiers, and test & evaluation teams operating within the LVC simulation environment.
 
-### Related Work
-List similar papers and repositories that do similar things to what you are solving, which you consulted when trying to solve your problem of interest.
+## 2. Problem Statement
+
+In modern military operations, the ability to detect and identify potential threats early and accurately is a decisive advantage. However, visual identification is often hindered by terrain, foliage, and adversary camouflage. This creates a critical need for non-visual detection methods.
+
+The Army Research Laboratory faces a capability gap in the automated interpretation of data from tactical edge sensors. While the LVC Toolkit can aggregate raw sensor data, it lacks the robust AI mechanisms to transform this data into actionable intelligence. Any technical solution must be:
+* **Lightweight and Power-Efficient:** To run on soldier-carried or embedded devices.
+* **Resilient:** To function in austere field conditions with limited connectivity.
+* **Integratable:** To work with existing Army tactical systems.
+
+This project addresses the challenge of fusing "big data" from multiple battlefield sources to reduce noise, provide intelligent information, and enable more optimal outcomes for Army operations.
+
+## 3. Proposed Solution
+
+We propose a two-part solution: a multi-modal AI model and a containerized inference engine.
+
+1.  **AI Model:** A classification model that processes synchronized acoustic and seismic time-series data to perform:
+    * **Vehicle Detection:** A binary classification to determine if a vehicle is present versus background noise.
+    * **Vehicle Classification:** A multi-class classification to identify the specific type of vehicle detected (e.g., "Pickup Truck," "Tank").
+
+2.  **Inference Engine:** A containerized service (using Docker) designed for seamless integration into the ARL LVC Toolkit. The engine will:
+    * Ingest live or historical sensor data from LVC data sources (e.g., PostgreSQL database).
+    * Execute the AI model to produce near real-time classifications.
+    * Export enriched data (e.g., detection status, vehicle class, confidence score) back into the LVC environment for use by autonomy stacks or for operator visualization.
+
+![Solution Concept Diagram](https://github.com/antoniogmagana/Dark_Circle/blob/main/images/solution-concept.png)
+
+## 4. Scientific Hypothesis
+
+The core of our research is based on the following empirical hypothesis:
+
+> Using ARL-approved seismic and acoustic data, a **multi-modal classification model** will perform better than the most promising single-mode classification models for identifying selected vehicles from each other and from random background noise.
+
+#### Target Performance Metrics:
+
+| Task | Metric | Target |
+| :--- | :--- | :--- |
+| **Vehicle vs. Background Noise** | Accuracy | ≥ 90% |
+| | Recall (Pd) | ≥ 90% |
+| | False Alarm Rate | ≤ 10% |
+| **Vehicle vs. Other Vehicles** | Accuracy | ≥ 70% |
+| | Recall (Pd) | ≥ 65% |
+| | False Alarm Rate | ≤ 20% |
+
+## 5. System Architecture & Design
+
+The solution operates as an inference engine within the broader LVC ecosystem. It can process data from live sensor feeds or a historical database. The processed output is then fed back into the LVC Autonomy Stack and Simulation Environment.
+
+The development environment is an on-premise server infrastructure at the Army Artificial Intelligence Integration Center (AI2C), leveraging Proxmox, Kubernetes (K8s), Docker, and a PostgreSQL database for a robust and scalable workflow.
+
+![Architecture Diagram](https://github.com/antoniogmagana/Dark_Circle/blob/main/images/architecture.png)
+
+## 6. Methodology
+
+Our development process follows a structured experimental design for signal processing and machine learning:
+
+1.  **Data Preparation:** Ingesting and synchronizing raw acoustic/seismic data, followed by applying digital signal processing (DSP) techniques for noise reduction and feature extraction.
+2.  **Model Exploration:** Evaluating several candidate algorithms suitable for time-series classification, including **Convolutional Neural Networks (CNNs)**, **Long Short-Term Memory (LSTM)** networks, and **ROCKET**.
+3.  **Model Training & Tuning:** Training the models on labeled datasets and iteratively optimizing hyperparameters to maximize performance.
+4.  **Evaluation & Analysis:** Assessing model performance with metrics like F1-score, precision-recall curves, and confusion matrices, and performing error analysis to identify failure points.
+
+## 7. Project Status & Roadmap
 
 ### Anticipated Tasks
-List the tasks you are planning to do, and which have been solved. 
-- [ ] Requirements Gathering and Design
+- [x] Requirements Gathering and Design
 - [ ] Data Engineering and Modeling
-- [ ] Deployment and Intergration
+- [ ] Deployment and Integration
 - [ ] Evaluation and Redeployment
 
-### Capacity Gaps
-What are the capacity gaps that can be critical?
+---
 
-### Capability Gaps
-What are the capability gaps that can be critical?
-
-### AI2C Fit
-How does this project fit to AI2C goals?
-
-### RFI’s for Customer
-How do you request information about the customer your capstone targets?
-
-## Stakeholders
-* **Mentor Info:** Dr. Kristin E. Schaefer-Lay, Dr. Damon Conover, Henry Reimert
-* **Customer Info:** Dr. Carl Busart
-
-* **Capstone Team:** Brandon Taylor, John Tomaselli, Larry Parrotte, Antonio Magana
-
-## Data Files
+## 8. Data Management
 
 ### Large Files (Not Included in Repository)
-The following large data files are excluded from the repository due to GitHub file size limits:
+Due to GitHub file size limits, the following raw data files are excluded from the main repository:
 
-- `raw_data/**/rs1/aud16000.csv` - Audio data CSV files (16kHz audio samples)
-- `raw_data/**/rs1/aud16k.wav` - Audio WAV files
+* `raw_data/**/rs1/aud16000.csv` - Audio data CSV files (16kHz audio samples)
+* `raw_data/**/rs1/aud16k.wav` - Audio WAV files
 
-**⚠️ These files are required to run the data exploration notebook.**
+> [!WARNING]
+> **These files are required to run the data exploration notebook.**
 
 ### Download Data Files
-
-**Option 1: Google Drive / OneDrive / Dropbox (Recommended)**
-[Add your shared link here once you upload the data]
-
-**Option 2: Git LFS (For files < 2GB)**
-If your team has Git LFS set up:
-```bash
-git lfs install
-git lfs pull
-```
-
-**Option 3: Contact the Team**
-Contact the capstone team for access to the data files.
+* **Option 1: Cloud Storage (Recommended):** [Add your shared link here once you upload the data]
+* **Option 2: Git LFS:** If your team has Git LFS set up, use:
+    ```bash
+    git lfs install
+    git lfs pull
+    ```
+* **Option 3: Team Access:** Contact the CMU Capstone Team Group 5 for direct access.
 
 ### Expected Data Structure
-After downloading, your directory should look like:
-```
+After downloading and extracting data, ensure your directory is organized as follows:
+
+```text
 Dark_Circle/
 ├── Data exploration.ipynb
 ├── raw_data/
 │   ├── Polaris0150pm/
 │   │   └── rs1/
-│   │       ├── aud16000.csv     (LARGE - download separately)
-│   │       ├── aud16k.wav       (LARGE - download separately)
+│   │       ├── aud16000.csv     (Separately Downloaded)
+│   │       ├── aud16k.wav       (Separately Downloaded)
 │   │       ├── ehz.csv
 │   │       └── gps.csv
-│   ├── Polaris0215pm/
-│   │   └── rs1/...
-│   └── ... (other experiment folders)
+│   └── ... (Other experiment folders)
 ```
 
 ## Installation Instructions
