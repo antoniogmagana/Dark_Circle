@@ -8,7 +8,7 @@
 ## Project Breakdown
 
 ### Problem
-What, precisely, is the problem you are trying to solve in this project?
+How can LVC Toolkit users enhance situational awareness and operational decision-making during simulated small-unit tactical robotic engagements?
 
 ### Motivation
 What motivated the solution of the problem, and why is this problem important?
@@ -17,7 +17,7 @@ What motivated the solution of the problem, and why is this problem important?
 List similar papers and repositories that do similar things to what you are solving, which you consulted when trying to solve your problem of interest.
 
 ### Anticipated Tasks
-List the tasks you are planning to do, and which have been solved. Use a checkbox system to indicate progress.
+List the tasks you are planning to do, and which have been solved. 
 - [ ] Requirements Gathering and Design
 - [ ] Data Engineering and Modeling
 - [ ] Deployment and Intergration
