@@ -2,7 +2,7 @@
 
 **Project Codename:** Dark Circle  
 **Team:** AI Technician Capstone Group 5, Carnegie Mellon University, ARL  
-**Team Members:** Brandon Taylor, Antonio Magana, Larry Parrotte, John Tomaselli  
+**Team Members:** Brandon Taylor, Larry Parrotte, John Tomaselli, Antonio Magana  
 **Mentors:** Dr. Kristin E. Schaefer-Lay, Dr. Damon Conover, Henry Reimert
 
 ---
