@@ -1,0 +1,15 @@
+2026-02-12 15:56:59.891 EST [36996] LOG:  starting PostgreSQL 18.1 (Homebrew) on aarch64-apple-darwin25.2.0, compiled by Apple clang version 17.0.0 (clang-1700.6.3.2), 64-bit
+2026-02-12 15:56:59.893 EST [36996] LOG:  listening on IPv6 address "::1", port 5432
+2026-02-12 15:56:59.893 EST [36996] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+2026-02-12 15:56:59.893 EST [36996] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2026-02-12 15:56:59.898 EST [37002] LOG:  database system was shut down at 2026-02-12 15:54:01 EST
+2026-02-12 15:56:59.899 EST [36996] LOG:  database system is ready to accept connections
+2026-02-12 15:58:02.298 EST [37331] ERROR:  database "postgres" already exists
+2026-02-12 15:58:02.298 EST [37331] STATEMENT:  CREATE DATABASE postgres;
+2026-02-12 16:01:17.543 EST [36996] LOG:  received fast shutdown request
+2026-02-12 16:01:17.594 EST [36996] LOG:  aborting any active transactions
+2026-02-12 16:01:17.595 EST [36996] LOG:  background worker "logical replication launcher" (PID 37005) exited with exit code 1
+2026-02-12 16:01:17.595 EST [37000] LOG:  shutting down
+2026-02-12 16:01:17.596 EST [37000] LOG:  checkpoint starting: shutdown immediate
+2026-02-12 16:01:17.610 EST [37000] LOG:  checkpoint complete: wrote 44 buffers (0.3%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.001 s, sync=0.012 s, total=0.015 s; sync files=11, longest=0.003 s, average=0.002 s; distance=334 kB, estimate=334 kB; lsn=0/17DEA18, redo lsn=0/17DEA18
+2026-02-12 16:01:17.613 EST [36996] LOG:  database system is shut down
