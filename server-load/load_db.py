@@ -252,9 +252,11 @@ def load_tri_axial_data(
 def load_m3nvc_dataset(conn, cursor, root_path):
     """
     Loads M3N-VC parquet files.
-    - Handles 'i22' list-based labels by joining them (e.g., "gle350+mustang").
+    - Handles 'i22' list-based labels by joining them.
     - Manually assigns "background" label to Runs 8 and 9.
-    - Skips empty files and handles duplicate metadata columns.
+    - Skips empty files.
+    - FIXED: Generates time_stamp using fixed sampling rates (ACOUSTIC_PR2 / SEISMIC_PR2)
+      instead of relying on potentially drifty/integer-formatted file timestamps.
     """
     root = Path(root_path).expanduser()
     if not root.exists():
@@ -275,11 +277,8 @@ def load_m3nvc_dataset(conn, cursor, root_path):
         if meta_path.exists():
             try:
                 meta_df = pd.read_parquet(meta_path)
-
-                # --- FIX 1: Handle Duplicate Columns (e.g. two 'label' columns) ---
                 meta_df = meta_df.loc[:, ~meta_df.columns.duplicated()]
 
-                # --- FIX 2: Handle Lists in Label Column (for scene i22) ---
                 def clean_label(val):
                     if isinstance(val, (list, np.ndarray)):
                         return "+".join(str(v) for v in val)
@@ -288,14 +287,11 @@ def load_m3nvc_dataset(conn, cursor, root_path):
                 if "label" in meta_df.columns:
                     meta_df["label"] = meta_df["label"].apply(clean_label)
 
-                # Create map: int(run_id) -> str(label)
-                # Drop duplicates to prevent errors if run_id appears twice
                 meta_df = meta_df.drop_duplicates(subset=["run_id"])
                 run_map = meta_df.set_index("run_id")["label"].to_dict()
 
             except Exception as e:
                 print(f"  - Failed to load metadata properly: {e}")
-                # We continue, because we might still be able to load runs 8/9 manually
         else:
             print(
                 f"  - Missing run_ids.parquet in {scene.name}. Only manual runs will load."
@@ -305,7 +301,6 @@ def load_m3nvc_dataset(conn, cursor, root_path):
         for p_file in scene.glob("*.parquet"):
             fname = p_file.name
 
-            # Skip metadata/gps files
             if (
                 fname in ["run_ids.parquet", "sensor_location.parquet"]
                 or "gps" in fname
@@ -313,7 +308,6 @@ def load_m3nvc_dataset(conn, cursor, root_path):
             ):
                 continue
 
-            # Parse Filename: run<ID>_rs<ID>_<type>.parquet
             match = re.match(r"run(\d+)_rs(\d+)_([a-z]{3})\.parquet", fname)
             if not match:
                 continue
@@ -322,9 +316,10 @@ def load_m3nvc_dataset(conn, cursor, root_path):
             sensor_node = f"rs{match.group(2)}"
             modality = match.group(3)
 
-            # Identify Target Table
+            # --- CONFIGURATION: Set Table and Period ---
             if modality == "mic":
                 table_name = "m3nvc_audio"
+                sample_period = variables.ACOUSTIC_PR2  # 0.000625
                 db_cols = (
                     "vehicle_id",
                     "sensor_id",
@@ -334,6 +329,7 @@ def load_m3nvc_dataset(conn, cursor, root_path):
                 )
             elif modality == "geo":
                 table_name = "m3nvc_seismic"
+                sample_period = variables.SEISMIC_PR2  # 0.005
                 db_cols = (
                     "vehicle_id",
                     "sensor_id",
@@ -344,44 +340,36 @@ def load_m3nvc_dataset(conn, cursor, root_path):
                 )
             else:
                 continue
+            # -------------------------------------------
 
-            # --- FIX 3: Get Label or Apply Manual Override ---
+            # Get Label or Apply Manual Override
             vehicle_label = run_map.get(run_num)
-
-            # Manually handle known background runs missing from metadata
-            if run_num == 8:
-                vehicle_label = "background"
-            elif run_num == 9:
+            if run_num == 8 or run_num == 9:
                 vehicle_label = "background"
 
-            # If still no label (unknown run), skip it
             if not vehicle_label:
-                # print(f"  - Warning: Unknown run {run_num} in {fname}")
                 continue
 
-            # Get DB IDs
             v_id = get_vehicle_id(conn, cursor, str(vehicle_label))
             s_id = get_sensor_id(conn, cursor, sensor_node)
 
-            # Load Data
             try:
                 df = pd.read_parquet(p_file)
 
-                # --- FIX 4: Check for Empty Files ---
                 if df.empty:
                     print(f"  - Warning: File {fname} is empty. Skipping.")
                     continue
 
-                # --- TIME CALCULATION: ABSOLUTE TO RELATIVE ---
-                # This uses the file's OWN timestamps, so missing metadata start/stop doesn't matter.
+                # --- FIX: Re-calculate Time based on Index ---
+                # 1. Sort by original timestamp to ensure samples are in order
                 df = df.sort_values("timestamp")
-                start_time = df["timestamp"].iloc[0]
-                df["timestamp"] = df["timestamp"] - start_time
 
-                # Rename columns
-                df = df.rename(
-                    columns={"timestamp": "time_stamp", "samples": "amplitude"}
-                )
+                # 2. Generate perfect time sequence: 0, 1, 2... * period
+                # This prevents drift and ignores bad formatting in the source file
+                df["time_stamp"] = np.arange(len(df)) * sample_period
+
+                # 3. Rename samples to amplitude
+                df = df.rename(columns={"samples": "amplitude"})
 
                 # Add Foreign Keys
                 df["vehicle_id"] = v_id
