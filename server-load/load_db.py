@@ -252,7 +252,9 @@ def load_tri_axial_data(
 def load_m3nvc_dataset(conn, cursor, root_path):
     """
     Loads M3N-VC parquet files.
-    Converts absolute Epoch timestamps to relative time (starting at 0.0) per file.
+    - Handles 'i22' list-based labels by joining them (e.g., "gle350+mustang").
+    - Manually assigns "background" label to Runs 8 and 9.
+    - Skips empty files and handles duplicate metadata columns.
     """
     root = Path(root_path).expanduser()
     if not root.exists():
@@ -268,23 +270,42 @@ def load_m3nvc_dataset(conn, cursor, root_path):
 
         # 1. Load Metadata (Run IDs)
         meta_path = scene / "run_ids.parquet"
-        if not meta_path.exists():
-            print(f"  - Missing run_ids.parquet in {scene.name}. Skipping.")
-            continue
+        run_map = {}
 
-        try:
-            meta_df = pd.read_parquet(meta_path)
-            # Create map: int(run_id) -> str(label)
-            run_map = {row["run_id"]: row["label"] for _, row in meta_df.iterrows()}
-        except Exception as e:
-            print(f"  - Failed to load metadata: {e}")
-            continue
+        if meta_path.exists():
+            try:
+                meta_df = pd.read_parquet(meta_path)
+
+                # --- FIX 1: Handle Duplicate Columns (e.g. two 'label' columns) ---
+                meta_df = meta_df.loc[:, ~meta_df.columns.duplicated()]
+
+                # --- FIX 2: Handle Lists in Label Column (for scene i22) ---
+                def clean_label(val):
+                    if isinstance(val, (list, np.ndarray)):
+                        return "+".join(str(v) for v in val)
+                    return val
+
+                if "label" in meta_df.columns:
+                    meta_df["label"] = meta_df["label"].apply(clean_label)
+
+                # Create map: int(run_id) -> str(label)
+                # Drop duplicates to prevent errors if run_id appears twice
+                meta_df = meta_df.drop_duplicates(subset=["run_id"])
+                run_map = meta_df.set_index("run_id")["label"].to_dict()
+
+            except Exception as e:
+                print(f"  - Failed to load metadata properly: {e}")
+                # We continue, because we might still be able to load runs 8/9 manually
+        else:
+            print(
+                f"  - Missing run_ids.parquet in {scene.name}. Only manual runs will load."
+            )
 
         # 2. Process Sensor Files
         for p_file in scene.glob("*.parquet"):
             fname = p_file.name
 
-            # Skip metadata files
+            # Skip metadata/gps files
             if (
                 fname in ["run_ids.parquet", "sensor_location.parquet"]
                 or "gps" in fname
@@ -324,25 +345,36 @@ def load_m3nvc_dataset(conn, cursor, root_path):
             else:
                 continue
 
-            # Get Vehicle Label
+            # --- FIX 3: Get Label or Apply Manual Override ---
             vehicle_label = run_map.get(run_num)
+
+            # Manually handle known background runs missing from metadata
+            if run_num == 8:
+                vehicle_label = "background"
+            elif run_num == 9:
+                vehicle_label = "background"
+
+            # If still no label (unknown run), skip it
             if not vehicle_label:
-                print(f"  - Warning: Unknown run {run_num} in {fname}")
+                # print(f"  - Warning: Unknown run {run_num} in {fname}")
                 continue
 
             # Get DB IDs
-            v_id = get_vehicle_id(conn, cursor, vehicle_label)
+            v_id = get_vehicle_id(conn, cursor, str(vehicle_label))
             s_id = get_sensor_id(conn, cursor, sensor_node)
 
             # Load Data
             try:
                 df = pd.read_parquet(p_file)
 
-                # --- TIME CALCULATION: ABSOLUTE TO RELATIVE ---
-                # 1. Sort to be safe
-                df = df.sort_values("timestamp")
+                # --- FIX 4: Check for Empty Files ---
+                if df.empty:
+                    print(f"  - Warning: File {fname} is empty. Skipping.")
+                    continue
 
-                # 2. Subtract the first timestamp from all rows
+                # --- TIME CALCULATION: ABSOLUTE TO RELATIVE ---
+                # This uses the file's OWN timestamps, so missing metadata start/stop doesn't matter.
+                df = df.sort_values("timestamp")
                 start_time = df["timestamp"].iloc[0]
                 df["timestamp"] = df["timestamp"] - start_time
 
@@ -362,8 +394,8 @@ def load_m3nvc_dataset(conn, cursor, root_path):
                         ["vehicle_id", "sensor_id", "run_id", "time_stamp", "amplitude"]
                     ]
                 else:
-                    if "channel" not in final_df.columns:
-                        final_df["channel"] = "UD"
+                    if "channel" not in df.columns:
+                        df["channel"] = "UD"
                     final_df = df[
                         [
                             "vehicle_id",
@@ -476,60 +508,60 @@ if __name__ == "__main__":
         ],
     )
 
-    # 4. Load Original Dataset
-    load_data(
-        conn,
-        cursor,
-        "MOD_vehicle",
-        Path(variables.MOD_path).expanduser(),
-        "audio_data",
-        "aud16000.csv",
-        ",",
-        {"amplitude": "float32"},
-        [0],
-        variables.ACOUSTIC_PR,
-    )
+    # # 4. Load Original Dataset
+    # load_data(
+    #     conn,
+    #     cursor,
+    #     "MOD_vehicle",
+    #     Path(variables.MOD_path).expanduser(),
+    #     "audio_data",
+    #     "aud16000.csv",
+    #     ",",
+    #     {"amplitude": "float32"},
+    #     [0],
+    #     variables.ACOUSTIC_PR,
+    # )
 
-    load_data(
-        conn,
-        cursor,
-        "MOD_vehicle",
-        Path(variables.MOD_path).expanduser(),
-        "audio_data",
-        "aud.csv",
-        ",",
-        {"amplitude": "float32", "raw": "float32"},
-        [0],
-        variables.ACOUSTIC_PR,
-    )
+    # load_data(
+    #     conn,
+    #     cursor,
+    #     "MOD_vehicle",
+    #     Path(variables.MOD_path).expanduser(),
+    #     "audio_data",
+    #     "aud.csv",
+    #     ",",
+    #     {"amplitude": "float32", "raw": "float32"},
+    #     [0],
+    #     variables.ACOUSTIC_PR,
+    # )
 
-    load_data(
-        conn,
-        cursor,
-        "MOD_vehicle",
-        Path(variables.MOD_path).expanduser(),
-        "seismic_data",
-        "ehz.csv",
-        " ",
-        {"amplitude": "float32"},
-        [0],
-        variables.SEISMIC_PR,
-    )
+    # load_data(
+    #     conn,
+    #     cursor,
+    #     "MOD_vehicle",
+    #     Path(variables.MOD_path).expanduser(),
+    #     "seismic_data",
+    #     "ehz.csv",
+    #     " ",
+    #     {"amplitude": "float32"},
+    #     [0],
+    #     variables.SEISMIC_PR,
+    # )
 
-    accel_mapping = {
-        "accel_x_ew": "ene.csv",
-        "accel_y_ns": "enn.csv",
-        "accel_z_ud": "enz.csv",
-    }
-    load_tri_axial_data(
-        conn,
-        cursor,
-        "MOD_vehicle",
-        Path(variables.MOD_path).expanduser(),
-        "accelerometer_data",
-        accel_mapping,
-        variables.SEISMIC_PR,
-    )
+    # accel_mapping = {
+    #     "accel_x_ew": "ene.csv",
+    #     "accel_y_ns": "enn.csv",
+    #     "accel_z_ud": "enz.csv",
+    # }
+    # load_tri_axial_data(
+    #     conn,
+    #     cursor,
+    #     "MOD_vehicle",
+    #     Path(variables.MOD_path).expanduser(),
+    #     "accelerometer_data",
+    #     accel_mapping,
+    #     variables.SEISMIC_PR,
+    # )
 
     # 5. Load M3N-VC Dataset
     print("\n--- Starting M3N-VC Import ---")
