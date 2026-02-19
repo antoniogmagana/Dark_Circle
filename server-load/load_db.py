@@ -508,60 +508,60 @@ if __name__ == "__main__":
         ],
     )
 
-    # # 4. Load Original Dataset
-    # load_data(
-    #     conn,
-    #     cursor,
-    #     "MOD_vehicle",
-    #     Path(variables.MOD_path).expanduser(),
-    #     "audio_data",
-    #     "aud16000.csv",
-    #     ",",
-    #     {"amplitude": "float32"},
-    #     [0],
-    #     variables.ACOUSTIC_PR,
-    # )
+    # 4. Load Original Dataset
+    load_data(
+        conn,
+        cursor,
+        "MOD_vehicle",
+        Path(variables.MOD_path).expanduser(),
+        "audio_data",
+        "aud16000.csv",
+        ",",
+        {"amplitude": "float32"},
+        [0],
+        variables.ACOUSTIC_PR,
+    )
 
-    # load_data(
-    #     conn,
-    #     cursor,
-    #     "MOD_vehicle",
-    #     Path(variables.MOD_path).expanduser(),
-    #     "audio_data",
-    #     "aud.csv",
-    #     ",",
-    #     {"amplitude": "float32", "raw": "float32"},
-    #     [0],
-    #     variables.ACOUSTIC_PR,
-    # )
+    load_data(
+        conn,
+        cursor,
+        "MOD_vehicle",
+        Path(variables.MOD_path).expanduser(),
+        "audio_data",
+        "aud.csv",
+        ",",
+        {"amplitude": "float32", "raw": "float32"},
+        [0],
+        variables.ACOUSTIC_PR,
+    )
 
-    # load_data(
-    #     conn,
-    #     cursor,
-    #     "MOD_vehicle",
-    #     Path(variables.MOD_path).expanduser(),
-    #     "seismic_data",
-    #     "ehz.csv",
-    #     " ",
-    #     {"amplitude": "float32"},
-    #     [0],
-    #     variables.SEISMIC_PR,
-    # )
+    load_data(
+        conn,
+        cursor,
+        "MOD_vehicle",
+        Path(variables.MOD_path).expanduser(),
+        "seismic_data",
+        "ehz.csv",
+        " ",
+        {"amplitude": "float32"},
+        [0],
+        variables.SEISMIC_PR,
+    )
 
-    # accel_mapping = {
-    #     "accel_x_ew": "ene.csv",
-    #     "accel_y_ns": "enn.csv",
-    #     "accel_z_ud": "enz.csv",
-    # }
-    # load_tri_axial_data(
-    #     conn,
-    #     cursor,
-    #     "MOD_vehicle",
-    #     Path(variables.MOD_path).expanduser(),
-    #     "accelerometer_data",
-    #     accel_mapping,
-    #     variables.SEISMIC_PR,
-    # )
+    accel_mapping = {
+        "accel_x_ew": "ene.csv",
+        "accel_y_ns": "enn.csv",
+        "accel_z_ud": "enz.csv",
+    }
+    load_tri_axial_data(
+        conn,
+        cursor,
+        "MOD_vehicle",
+        Path(variables.MOD_path).expanduser(),
+        "accelerometer_data",
+        accel_mapping,
+        variables.SEISMIC_PR,
+    )
 
     # 5. Load M3N-VC Dataset
     print("\n--- Starting M3N-VC Import ---")
