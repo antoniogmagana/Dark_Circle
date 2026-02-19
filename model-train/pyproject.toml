@@ -1,0 +1,18 @@
+[project]
+name = "model-train"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Brandon Taylor",email = "btaylor9273@gmail.com"}
+]
+requires-python = ">=3.13"
+dependencies = [
+    "psycopg2-binary (>=2.9.11,<3.0.0)",
+    "numpy (>=2.4.2,<3.0.0)",
+    "pandas (>=3.0.1,<4.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
