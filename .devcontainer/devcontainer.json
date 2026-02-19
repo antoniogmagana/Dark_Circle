@@ -1,0 +1,17 @@
+{
+    "name": "ROS 2 Pipeline (Jazzy/Ubuntu 24.04)",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-vscode.cpptools",
+                "ms-iot.vscode-ros"
+            ]
+        }
+    },
+    "postCreateCommand": "sudo apt update && rosdep update",
+    "remoteUser": "ros"
+}
