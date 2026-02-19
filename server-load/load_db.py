@@ -86,6 +86,26 @@ def get_sensor_id(conn, cursor, sensor_name):
         return cursor.fetchone()[0]
 
 
+def get_scene_id(conn, cursor, scene_name):
+    check_query = "SELECT scene_id FROM scene_ids WHERE scene = %s"
+    try:
+        cursor.execute(check_query, (scene_name,))
+        result = cursor.fetchone()
+    except (Exception, psycopg2.Error) as e:
+        print(f"Error checking scene_id for {scene_name}: {e}")
+        return None
+
+    if result:
+        return result[0]
+    else:
+        sql_insert_query = (
+            "INSERT INTO scene_ids (scene) VALUES (%s) RETURNING scene_id"
+        )
+        cursor.execute(sql_insert_query, (scene_name,))
+        conn.commit()
+        return cursor.fetchone()[0]
+
+
 def copy_to_postgres(conn, cursor, df, table_name, db_columns):
     """
     Efficiently streams a dataframe to Postgres using COPY.
@@ -271,6 +291,8 @@ def load_m3nvc_dataset(conn, cursor, root_path):
         print(f"Processing Scene: {scene.name}")
 
         # 1. Load Metadata (Run IDs)
+        # --- NEW: Get Scene ID ---
+        sc_id = get_scene_id(conn, cursor, scene.name)
         meta_path = scene / "run_ids.parquet"
         run_map = {}
 
@@ -355,37 +377,45 @@ def load_m3nvc_dataset(conn, cursor, root_path):
 
             try:
                 df = pd.read_parquet(p_file)
-
                 if df.empty:
-                    print(f"  - Warning: File {fname} is empty. Skipping.")
                     continue
 
-                # --- FIX: Re-calculate Time based on Index ---
-                # 1. Sort by original timestamp to ensure samples are in order
                 df = df.sort_values("timestamp")
-
-                # 2. Generate perfect time sequence: 0, 1, 2... * period
-                # This prevents drift and ignores bad formatting in the source file
                 df["time_stamp"] = np.arange(len(df)) * sample_period
-
-                # 3. Rename samples to amplitude
                 df = df.rename(columns={"samples": "amplitude"})
 
                 # Add Foreign Keys
+                df["scene_id"] = sc_id  # <--- NEW
                 df["vehicle_id"] = v_id
                 df["sensor_id"] = s_id
                 df["run_id"] = run_num
 
-                # Select Columns
+                # Select Columns (Make sure scene_id is first to match db_cols)
                 if modality == "mic":
                     final_df = df[
-                        ["vehicle_id", "sensor_id", "run_id", "time_stamp", "amplitude"]
+                        [
+                            "scene_id",
+                            "vehicle_id",
+                            "sensor_id",
+                            "run_id",
+                            "time_stamp",
+                            "amplitude",
+                        ]
                     ]
+                    db_cols = (
+                        "scene_id",
+                        "vehicle_id",
+                        "sensor_id",
+                        "run_id",
+                        "time_stamp",
+                        "amplitude",
+                    )
                 else:
                     if "channel" not in df.columns:
                         df["channel"] = "UD"
                     final_df = df[
                         [
+                            "scene_id",
                             "vehicle_id",
                             "sensor_id",
                             "run_id",
@@ -394,6 +424,15 @@ def load_m3nvc_dataset(conn, cursor, root_path):
                             "amplitude",
                         ]
                     ]
+                    db_cols = (
+                        "scene_id",
+                        "vehicle_id",
+                        "sensor_id",
+                        "run_id",
+                        "time_stamp",
+                        "channel",
+                        "amplitude",
+                    )
 
                 copy_to_postgres(conn, cursor, final_df, table_name, db_cols)
 
@@ -422,6 +461,13 @@ if __name__ == "__main__":
         cursor,
         "sensor_ids",
         ["sensor_id SERIAL PRIMARY KEY", "sensor VARCHAR(10)"],
+    )
+
+    generate_table(
+        conn,
+        cursor,
+        "scene_ids",
+        ["scene_id SERIAL PRIMARY KEY", "scene VARCHAR(50)"],
     )
 
     # 2. Generate Original Tables
@@ -473,10 +519,11 @@ if __name__ == "__main__":
         "m3nvc_audio",
         [
             "sample_id BIGSERIAL PRIMARY KEY",
+            "scene_id INTEGER NOT NULL",  # <--- NEW
             "vehicle_id INTEGER NOT NULL",
             "sensor_id INTEGER NOT NULL",
             "run_id INTEGER",
-            "time_stamp REAL NOT NULL",  # Changed to REAL for relative time
+            "time_stamp REAL NOT NULL",
             "amplitude REAL",
         ],
     )
@@ -487,10 +534,11 @@ if __name__ == "__main__":
         "m3nvc_seismic",
         [
             "sample_id BIGSERIAL PRIMARY KEY",
+            "scene_id INTEGER NOT NULL",  # <--- NEW
             "vehicle_id INTEGER NOT NULL",
             "sensor_id INTEGER NOT NULL",
             "run_id INTEGER",
-            "time_stamp REAL NOT NULL",  # Changed to REAL for relative time
+            "time_stamp REAL NOT NULL",
             "channel VARCHAR(10)",
             "amplitude REAL",
         ],
