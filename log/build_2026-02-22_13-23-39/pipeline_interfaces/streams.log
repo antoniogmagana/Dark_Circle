@@ -1,0 +1,247 @@
+[0.049s] Invoking command in '/workspaces/Dark_Circle/build/pipeline_interfaces': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --build /workspaces/Dark_Circle/build/pipeline_interfaces -- -j12 -l12
+[0.247s] -- Found ament_cmake: 2.5.4 (/opt/ros/jazzy/share/ament_cmake/cmake)
+[0.358s] -- Found Python3: /usr/bin/python3 (found version "3.12.3") found components: Interpreter 
+[0.526s] -- Found rosidl_default_generators: 1.6.0 (/opt/ros/jazzy/share/rosidl_default_generators/cmake)
+[0.531s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[0.568s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[0.593s] -- Found rosidl_adapter: 4.6.6 (/opt/ros/jazzy/share/rosidl_adapter/cmake)
+[0.594s] -- Found builtin_interfaces: 2.0.3 (/opt/ros/jazzy/share/builtin_interfaces/cmake)
+[1.301s] -- Found ament_cmake_ros: 0.12.0 (/opt/ros/jazzy/share/ament_cmake_ros/cmake)
+[1.621s] -- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c
+[2.085s] -- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp
+[2.086s] -- Found python_cmake_module: 0.11.1 (/opt/ros/jazzy/share/python_cmake_module/cmake)
+[2.744s] -- Found Python3: /usr/bin/python3 (found version "3.12.3") found components: Interpreter Development NumPy Development.Module Development.Embed 
+[2.764s] -- Found ament_lint_auto: 0.17.3 (/opt/ros/jazzy/share/ament_lint_auto/cmake)
+[2.786s] -- Added test 'lint_cmake' to check CMake code style
+[2.791s] -- Added test 'xmllint' to check XML markup files
+[2.801s] -- Configuring done (2.6s)
+[3.002s] -- Generating done (0.2s)
+[3.088s] -- Build files have been written to: /workspaces/Dark_Circle/build/pipeline_interfaces
+[3.434s] [  2%] [34m[1mGenerating type hashes for ROS interfaces[0m
+[3.505s] [  2%] Built target ament_cmake_python_copy_pipeline_interfaces
+[3.859s] [  2%] Built target pipeline_interfaces__rosidl_generator_type_description
+[3.930s] running egg_info
+[3.942s] writing pipeline_interfaces.egg-info/PKG-INFO
+[3.944s] writing dependency_links to pipeline_interfaces.egg-info/dependency_links.txt
+[3.945s] writing top-level names to pipeline_interfaces.egg-info/top_level.txt
+[3.997s] [  4%] [34m[1mGenerating C code for ROS interfaces[0m
+[3.998s] reading manifest file 'pipeline_interfaces.egg-info/SOURCES.txt'
+[4.001s] writing manifest file 'pipeline_interfaces.egg-info/SOURCES.txt'
+[4.092s] [  4%] Built target ament_cmake_python_build_pipeline_interfaces_egg
+[4.100s] [  6%] [34m[1mGenerating C++ code for ROS interfaces[0m
+[4.653s] [  6%] Built target pipeline_interfaces__cpp
+[4.772s] [ 15%] [32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/raw_sensor_reading__description.c.o[0m
+[4.773s] [ 18%] [32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/raw_sensor_reading__functions.c.o[0m
+[4.774s] [ 18%] [32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/sensor_data_window__functions.c.o[0m
+[4.775s] [ 18%] [32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.c.o[0m
+[4.777s] [ 20%] [32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/sensor_data_window__description.c.o[0m
+[4.778s] [ 20%] [32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/sensor_data_window__type_support.c.o[0m
+[5.138s] [ 22%] [32m[1mLinking C shared library libpipeline_interfaces__rosidl_generator_c.so[0m
+[5.350s] [ 22%] Built target pipeline_interfaces__rosidl_generator_c
+[5.473s] [ 25%] [34m[1mGenerating C type support dispatch for ROS interfaces[0m
+[5.487s] [ 27%] [34m[1mGenerating C introspection for ROS interfaces[0m
+[5.492s] [ 34%] [34m[1mGenerating C++ type support for eProsima Fast-RTPS[0m
+[5.493s] [ 34%] [34m[1mGenerating C++ type support dispatch for ROS interfaces[0m
+[5.493s] [ 34%] [34m[1mGenerating C type support for eProsima Fast-RTPS[0m
+[5.495s] [ 36%] [34m[1mGenerating C++ introspection for ROS interfaces[0m
+[6.118s] [ 40%] [32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_c.dir/rosidl_typesupport_c/pipeline_interfaces/msg/raw_sensor_reading__type_support.cpp.o[0m
+[6.119s] [ 40%] [32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_c.dir/rosidl_typesupport_c/pipeline_interfaces/msg/sensor_data_window__type_support.cpp.o[0m
+[6.166s] [ 47%] [32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/pipeline_interfaces/msg/raw_sensor_reading__type_support.cpp.o[0m
+[6.170s] [ 47%] [32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/pipeline_interfaces/msg/detail/sensor_data_window__type_support.c.o[0m
+[6.174s] [ 47%] [32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.c.o[0m
+[6.176s] [ 50%] [32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/pipeline_interfaces/msg/sensor_data_window__type_support.cpp.o[0m
+[6.217s] [ 52%] [32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.cpp.o[0m
+[6.229s] [ 54%] [32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/pipeline_interfaces/msg/detail/sensor_data_window__type_support.cpp.o[0m
+[6.321s] [ 56%] [32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/pipeline_interfaces/msg/detail/dds_fastrtps/sensor_data_window__type_support.cpp.o[0m
+[6.331s] [ 59%] [32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/pipeline_interfaces/msg/detail/dds_fastrtps/raw_sensor_reading__type_support.cpp.o[0m
+[6.359s] [ 61%] [32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support_c.cpp.o[0m
+[6.381s] [ 63%] [32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/pipeline_interfaces/msg/detail/sensor_data_window__type_support_c.cpp.o[0m
+[6.556s] [ 65%] [32m[1mLinking CXX shared library libpipeline_interfaces__rosidl_typesupport_c.so[0m
+[6.638s] [ 68%] [32m[1mLinking C shared library libpipeline_interfaces__rosidl_typesupport_introspection_c.so[0m
+[6.889s] [ 68%] Built target pipeline_interfaces__rosidl_typesupport_c
+[6.983s] [ 68%] Built target pipeline_interfaces__rosidl_typesupport_introspection_c
+[7.089s] [ 70%] [32m[1mLinking CXX shared library libpipeline_interfaces__rosidl_typesupport_cpp.so[0m
+[7.219s] [ 72%] [32m[1mLinking CXX shared library libpipeline_interfaces__rosidl_typesupport_introspection_cpp.so[0m
+[7.338s] [ 72%] Built target pipeline_interfaces__rosidl_typesupport_cpp
+[7.461s] [ 75%] [32m[1mLinking CXX shared library libpipeline_interfaces__rosidl_typesupport_fastrtps_c.so[0m
+[7.483s] [ 75%] Built target pipeline_interfaces__rosidl_typesupport_introspection_cpp
+[7.504s] [ 77%] [32m[1mLinking CXX shared library libpipeline_interfaces__rosidl_typesupport_fastrtps_cpp.so[0m
+[7.724s] [ 77%] Built target pipeline_interfaces__rosidl_typesupport_fastrtps_c
+[7.747s] [ 77%] Built target pipeline_interfaces__rosidl_typesupport_fastrtps_cpp
+[7.966s] [ 77%] Built target pipeline_interfaces
+[8.165s] [ 79%] [34m[1mGenerating Python code for ROS interfaces[0m
+[8.738s] [ 79%] Built target pipeline_interfaces__py
+[8.995s] [ 84%] [32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_py.dir/rosidl_generator_py/pipeline_interfaces/msg/_raw_sensor_reading_s.c.o[0m
+[8.997s] [ 84%] [32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_py.dir/rosidl_generator_py/pipeline_interfaces/msg/_sensor_data_window_s.c.o[0m
+[9.500s] [ 86%] [32m[1mLinking C shared library libpipeline_interfaces__rosidl_generator_py.so[0m
+[9.721s] [ 86%] Built target pipeline_interfaces__rosidl_generator_py
+[10.006s] [ 90%] [32mBuilding C object CMakeFiles/pipeline_interfaces_s__rosidl_typesupport_c.dir/rosidl_generator_py/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_c.c.o[0m
+[10.008s] [ 93%] [32mBuilding C object CMakeFiles/pipeline_interfaces_s__rosidl_typesupport_fastrtps_c.dir/rosidl_generator_py/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_fastrtps_c.c.o[0m
+[10.010s] [ 93%] [32mBuilding C object CMakeFiles/pipeline_interfaces_s__rosidl_typesupport_introspection_c.dir/rosidl_generator_py/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_introspection_c.c.o[0m
+[10.460s] [ 95%] [32m[1mLinking C shared module rosidl_generator_py/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_c.so[0m
+[10.469s] [ 97%] [32m[1mLinking C shared module rosidl_generator_py/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_introspection_c.so[0m
+[10.472s] [100%] [32m[1mLinking C shared module rosidl_generator_py/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_fastrtps_c.so[0m
+[10.691s] [100%] Built target pipeline_interfaces_s__rosidl_typesupport_c
+[10.698s] [100%] Built target pipeline_interfaces_s__rosidl_typesupport_introspection_c
+[10.703s] [100%] Built target pipeline_interfaces_s__rosidl_typesupport_fastrtps_c
+[10.768s] Invoked command in '/workspaces/Dark_Circle/build/pipeline_interfaces' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --build /workspaces/Dark_Circle/build/pipeline_interfaces -- -j12 -l12
+[10.831s] Invoking command in '/workspaces/Dark_Circle/build/pipeline_interfaces': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --install /workspaces/Dark_Circle/build/pipeline_interfaces
+[10.895s] -- Install configuration: ""
+[10.896s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/ament_index/resource_index/rosidl_interfaces/pipeline_interfaces
+[10.897s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/RawSensorReading.json
+[10.900s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/SensorDataWindow.json
+[10.902s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces
+[10.903s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg
+[10.904s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/rosidl_generator_c__visibility_control.h
+[10.904s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail
+[10.904s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__struct.h
+[10.906s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__description.c
+[10.907s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__type_support.c
+[10.909s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__description.c
+[10.910s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.h
+[10.911s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__functions.c
+[10.913s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__functions.h
+[10.914s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__type_support.h
+[10.915s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__struct.h
+[10.916s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__functions.h
+[10.918s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.c
+[10.919s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__functions.c
+[10.921s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/raw_sensor_reading.h
+[10.923s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/sensor_data_window.h
+[10.925s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/library_path.sh
+[10.925s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/library_path.dsv
+[10.928s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_generator_c.so
+[10.932s] -- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_generator_c.so" to ""
+[10.932s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces
+[10.932s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg
+[10.933s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail
+[10.933s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__rosidl_typesupport_fastrtps_c.h
+[10.935s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__rosidl_typesupport_fastrtps_c.h
+[10.936s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/rosidl_typesupport_fastrtps_c__visibility_control.h
+[10.937s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_fastrtps_c.so
+[10.939s] -- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_fastrtps_c.so" to ""
+[10.939s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces
+[10.940s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg
+[10.940s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail
+[10.941s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__type_support.c
+[10.942s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__rosidl_typesupport_introspection_c.h
+[10.944s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__rosidl_typesupport_introspection_c.h
+[10.945s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.c
+[10.946s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/rosidl_typesupport_introspection_c__visibility_control.h
+[10.947s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_introspection_c.so
+[10.949s] -- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_introspection_c.so" to ""
+[10.949s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_c.so
+[10.951s] -- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_c.so" to ""
+[10.951s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces
+[10.952s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg
+[10.952s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/sensor_data_window.hpp
+[10.953s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail
+[10.954s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.hpp
+[10.955s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__struct.hpp
+[10.956s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__builder.hpp
+[10.958s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__struct.hpp
+[10.959s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__builder.hpp
+[10.960s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__traits.hpp
+[10.962s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__type_support.hpp
+[10.963s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__traits.hpp
+[10.965s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/rosidl_generator_cpp__visibility_control.hpp
+[10.966s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/raw_sensor_reading.hpp
+[10.968s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces
+[10.968s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg
+[10.968s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/rosidl_typesupport_fastrtps_cpp__visibility_control.h
+[10.969s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail
+[10.969s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__rosidl_typesupport_fastrtps_cpp.hpp
+[10.974s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__rosidl_typesupport_fastrtps_cpp.hpp
+[10.975s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/dds_fastrtps
+[10.978s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_fastrtps_cpp.so
+[10.982s] -- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_fastrtps_cpp.so" to ""
+[10.982s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces
+[10.983s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg
+[10.983s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail
+[10.984s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__type_support.cpp
+[10.987s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.cpp
+[10.988s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__rosidl_typesupport_introspection_cpp.hpp
+[10.990s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__rosidl_typesupport_introspection_cpp.hpp
+[10.992s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_introspection_cpp.so
+[10.994s] -- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_introspection_cpp.so" to ""
+[10.995s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_cpp.so
+[10.996s] -- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_cpp.so" to ""
+[10.996s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/pythonpath.sh
+[10.997s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/pythonpath.dsv
+[10.997s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces-0.0.0-py3.12.egg-info
+[10.998s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces-0.0.0-py3.12.egg-info/PKG-INFO
+[10.999s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces-0.0.0-py3.12.egg-info/SOURCES.txt
+[11.000s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces-0.0.0-py3.12.egg-info/top_level.txt
+[11.001s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces-0.0.0-py3.12.egg-info/dependency_links.txt
+[11.003s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces
+[11.004s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_c.so
+[11.007s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg
+[11.008s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_sensor_data_window_s.c
+[11.009s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/__init__.py
+[11.010s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_sensor_data_window.py
+[11.012s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_raw_sensor_reading_s.c
+[11.013s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_raw_sensor_reading.py
+[11.015s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_fastrtps_c.so
+[11.016s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/__init__.py
+[11.018s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_introspection_c.c
+[11.020s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_introspection_c.so
+[11.021s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_fastrtps_c.c
+[11.023s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_c.c
+[11.160s] Listing '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces'...
+[11.160s] Compiling '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/__init__.py'...
+[11.160s] Listing '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg'...
+[11.160s] Compiling '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/__init__.py'...
+[11.161s] Compiling '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_raw_sensor_reading.py'...
+[11.161s] Compiling '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_sensor_data_window.py'...
+[11.169s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_fastrtps_c.so
+[11.171s] -- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_fastrtps_c.so" to ""
+[11.172s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_introspection_c.so
+[11.173s] -- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_introspection_c.so" to ""
+[11.174s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_c.so
+[11.176s] -- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_c.so" to ""
+[11.176s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_generator_py.so
+[11.178s] -- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_generator_py.so" to ""
+[11.179s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/RawSensorReading.idl
+[11.180s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/SensorDataWindow.idl
+[11.180s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/RawSensorReading.msg
+[11.181s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/SensorDataWindow.msg
+[11.182s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/ament_index/resource_index/package_run_dependencies/pipeline_interfaces
+[11.182s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/ament_index/resource_index/parent_prefix_path/pipeline_interfaces
+[11.183s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/ament_prefix_path.sh
+[11.184s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/ament_prefix_path.dsv
+[11.184s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/path.sh
+[11.184s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/path.dsv
+[11.184s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/local_setup.bash
+[11.185s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/local_setup.sh
+[11.185s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/local_setup.zsh
+[11.186s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/local_setup.dsv
+[11.186s] -- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/package.dsv
+[11.188s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/ament_index/resource_index/packages/pipeline_interfaces
+[11.189s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_generator_cExport.cmake
+[11.190s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_generator_cExport-noconfig.cmake
+[11.190s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_typesupport_fastrtps_cExport.cmake
+[11.191s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_typesupport_fastrtps_cExport-noconfig.cmake
+[11.191s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_introspection_cExport.cmake
+[11.192s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_introspection_cExport-noconfig.cmake
+[11.192s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_cExport.cmake
+[11.192s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_cExport-noconfig.cmake
+[11.193s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_generator_cppExport.cmake
+[11.193s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_typesupport_fastrtps_cppExport.cmake
+[11.193s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_typesupport_fastrtps_cppExport-noconfig.cmake
+[11.194s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_introspection_cppExport.cmake
+[11.194s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_introspection_cppExport-noconfig.cmake
+[11.195s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_cppExport.cmake
+[11.195s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_cppExport-noconfig.cmake
+[11.196s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_generator_pyExport.cmake
+[11.196s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_generator_pyExport-noconfig.cmake
+[11.196s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/rosidl_cmake-extras.cmake
+[11.196s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/ament_cmake_export_dependencies-extras.cmake
+[11.197s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/ament_cmake_export_include_directories-extras.cmake
+[11.197s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/ament_cmake_export_libraries-extras.cmake
+[11.197s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/ament_cmake_export_targets-extras.cmake
+[11.198s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/rosidl_cmake_export_typesupport_targets-extras.cmake
+[11.198s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/rosidl_cmake_export_typesupport_libraries-extras.cmake
+[11.199s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfacesConfig.cmake
+[11.199s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfacesConfig-version.cmake
+[11.200s] -- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/package.xml
+[11.209s] Invoked command in '/workspaces/Dark_Circle/build/pipeline_interfaces' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --install /workspaces/Dark_Circle/build/pipeline_interfaces

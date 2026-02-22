@@ -1,0 +1,4 @@
+Invoking command in '/workspaces/Dark_Circle/build/pipeline_interfaces': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --build /workspaces/Dark_Circle/build/pipeline_interfaces -- -j12 -l12
+Invoked command in '/workspaces/Dark_Circle/build/pipeline_interfaces' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --build /workspaces/Dark_Circle/build/pipeline_interfaces -- -j12 -l12
+Invoking command in '/workspaces/Dark_Circle/build/pipeline_interfaces': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --install /workspaces/Dark_Circle/build/pipeline_interfaces
+Invoked command in '/workspaces/Dark_Circle/build/pipeline_interfaces' returned '0': CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}:/opt/ros/jazzy /usr/bin/cmake --install /workspaces/Dark_Circle/build/pipeline_interfaces

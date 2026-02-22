@@ -1,0 +1,478 @@
+[0.000000] (-) TimerEvent: {}
+[0.000969] (-) JobUnselected: {'identifier': 'acoustic_sensor_pkg'}
+[0.001252] (-) JobUnselected: {'identifier': 'classify_pkg'}
+[0.001499] (-) JobUnselected: {'identifier': 'detect_pkg'}
+[0.001685] (-) JobUnselected: {'identifier': 'ingestor_pkg'}
+[0.001800] (-) JobUnselected: {'identifier': 'log_pkg'}
+[0.001877] (-) JobUnselected: {'identifier': 'output_pkg'}
+[0.001922] (-) JobUnselected: {'identifier': 'process_pkg'}
+[0.002166] (pipeline_interfaces) JobQueued: {'identifier': 'pipeline_interfaces', 'dependencies': OrderedDict()}
+[0.002705] (pipeline_interfaces) JobStarted: {'identifier': 'pipeline_interfaces'}
+[0.042337] (pipeline_interfaces) JobProgress: {'identifier': 'pipeline_interfaces', 'progress': 'cmake'}
+[0.044186] (pipeline_interfaces) Command: {'cmd': ['/usr/bin/cmake', '/workspaces/Dark_Circle/ros2_ws/src/pipeline_interfaces', '-DCMAKE_INSTALL_PREFIX=/workspaces/Dark_Circle/install/pipeline_interfaces'], 'cwd': '/workspaces/Dark_Circle/build/pipeline_interfaces', 'env': OrderedDict({'PYTHON_BASIC_REPL': '1', 'GZ_SIM_RESOURCE_PATH': '/opt/ros/jazzy/share', 'GZ_CONFIG_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor/share/gz:/opt/ros/jazzy/opt/sdformat_vendor/share/gz:/opt/ros/jazzy/opt/gz_gui_vendor/share/gz:/opt/ros/jazzy/opt/gz_transport_vendor/share/gz:/opt/ros/jazzy/opt/gz_rendering_vendor/share/gz:/opt/ros/jazzy/opt/gz_plugin_vendor/share/gz:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/share/gz:/opt/ros/jazzy/opt/gz_msgs_vendor/share/gz:/opt/ros/jazzy/opt/gz_common_vendor/share/gz', 'HOSTNAME': '233671c8f466', 'GIT_ASKPASS': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/extensions/git/dist/askpass.sh', 'SHLVL': '2', 'LD_LIBRARY_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib', 'BROWSER': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/bin/helpers/browser.sh', 'HOME': '/home/ros', 'TERM_PROGRAM_VERSION': '1.109.5', 'VSCODE_IPC_HOOK_CLI': '/tmp/vscode-ipc-84db16f4-364b-4aa6-a6e4-ec8bc0060a35.sock', 'ROS_PYTHON_VERSION': '3', 'VSCODE_GIT_ASKPASS_MAIN': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/extensions/git/dist/askpass-main.js', 'VSCODE_GIT_ASKPASS_NODE': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/node', 'PYDEVD_DISABLE_FILE_VALIDATION': '1', 'BUNDLED_DEBUGPY_PATH': '/home/ros/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/bundled/libs/debugpy', 'VSCODE_PYTHON_AUTOACTIVATE_GUARD': '1', 'COLORTERM': 'truecolor', 'REMOTE_CONTAINERS': 'true', 'ROS_DISTRO': 'jazzy', 'REMOTE_CONTAINERS_IPC': '/tmp/vscode-remote-containers-ipc-4f0ba4d1-6e3f-40a2-84f1-b83cd277705d.sock', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm-256color', 'UV_USE_IO_URING': '0', 'PATH': '/home/ros/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/home/ros/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/bin/remote-cli:/opt/ros/jazzy/opt/gz_msgs_vendor/bin:/opt/ros/jazzy/opt/gz_tools_vendor/bin:/opt/ros/jazzy/opt/gz_ogre_next_vendor/bin:/opt/ros/jazzy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/ros/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/bundled/scripts/noConfigScripts', 'REMOTE_CONTAINERS_SOCKETS': '["/tmp/vscode-ssh-auth-4f0ba4d1-6e3f-40a2-84f1-b83cd277705d.sock"]', 'VSCODE_DEBUGPY_ADAPTER_ENDPOINTS': '/home/ros/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/.noConfigDebugAdapterEndpoints/endpoint-8ca1e30ca996550a.txt', 'LANG': 'C.UTF-8', 'PYTHONSTARTUP': '/home/ros/.vscode-server/data/User/workspaceStorage/09fc9fcab4eaa6e3e70188c6aeaf3198/ms-python.python/pythonrc.py', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'VSCODE_GIT_IPC_HANDLE': '/tmp/vscode-git-072c6163c0.sock', 'TERM_PROGRAM': 'vscode', 'SSH_AUTH_SOCK': '/tmp/vscode-ssh-auth-4f0ba4d1-6e3f-40a2-84f1-b83cd277705d.sock', 'AMENT_PREFIX_PATH': '/opt/ros/jazzy', 'SHELL': '/bin/bash', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'VSCODE_GIT_ASKPASS_EXTRA_ARGS': '', 'PWD': '/workspaces/Dark_Circle/build/pipeline_interfaces', 'LC_ALL': 'C.UTF-8', 'PYTHONPATH': '/opt/ros/jazzy/lib/python3.12/site-packages', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor:/opt/ros/jazzy/opt/gz_sensors_vendor:/opt/ros/jazzy/opt/gz_physics_vendor:/opt/ros/jazzy/opt/sdformat_vendor:/opt/ros/jazzy/opt/gz_gui_vendor:/opt/ros/jazzy/opt/gz_transport_vendor:/opt/ros/jazzy/opt/gz_rendering_vendor:/opt/ros/jazzy/opt/gz_plugin_vendor:/opt/ros/jazzy/opt/gz_fuel_tools_vendor:/opt/ros/jazzy/opt/gz_msgs_vendor:/opt/ros/jazzy/opt/gz_common_vendor:/opt/ros/jazzy/opt/gz_math_vendor:/opt/ros/jazzy/opt/gz_utils_vendor:/opt/ros/jazzy/opt/gz_tools_vendor:/opt/ros/jazzy/opt/gz_ogre_next_vendor:/opt/ros/jazzy/opt/gz_dartsim_vendor:/opt/ros/jazzy/opt/gz_cmake_vendor:/opt/ros/jazzy'}), 'shell': False}
+[0.098091] (-) TimerEvent: {}
+[0.199128] (-) TimerEvent: {}
+[0.303385] (-) TimerEvent: {}
+[0.404882] (-) TimerEvent: {}
+[0.506157] (-) TimerEvent: {}
+[0.512588] (pipeline_interfaces) StdoutLine: {'line': b'-- The C compiler identification is GNU 13.3.0\n'}
+[0.607123] (-) TimerEvent: {}
+[0.709575] (-) TimerEvent: {}
+[0.813330] (-) TimerEvent: {}
+[0.871015] (pipeline_interfaces) StdoutLine: {'line': b'-- The CXX compiler identification is GNU 13.3.0\n'}
+[0.914129] (-) TimerEvent: {}
+[0.981977] (pipeline_interfaces) StdoutLine: {'line': b'-- Detecting C compiler ABI info\n'}
+[1.015092] (-) TimerEvent: {}
+[1.118656] (-) TimerEvent: {}
+[1.219160] (-) TimerEvent: {}
+[1.320574] (-) TimerEvent: {}
+[1.423169] (-) TimerEvent: {}
+[1.525132] (-) TimerEvent: {}
+[1.626114] (-) TimerEvent: {}
+[1.698876] (pipeline_interfaces) StdoutLine: {'line': b'-- Detecting C compiler ABI info - done\n'}
+[1.717129] (pipeline_interfaces) StdoutLine: {'line': b'-- Check for working C compiler: /usr/bin/cc - skipped\n'}
+[1.717816] (pipeline_interfaces) StdoutLine: {'line': b'-- Detecting C compile features\n'}
+[1.718835] (pipeline_interfaces) StdoutLine: {'line': b'-- Detecting C compile features - done\n'}
+[1.727067] (-) TimerEvent: {}
+[1.783730] (pipeline_interfaces) StdoutLine: {'line': b'-- Detecting CXX compiler ABI info\n'}
+[1.828084] (-) TimerEvent: {}
+[1.931015] (-) TimerEvent: {}
+[2.037195] (-) TimerEvent: {}
+[2.138119] (-) TimerEvent: {}
+[2.241114] (-) TimerEvent: {}
+[2.342124] (-) TimerEvent: {}
+[2.442056] (pipeline_interfaces) StdoutLine: {'line': b'-- Detecting CXX compiler ABI info - done\n'}
+[2.442884] (-) TimerEvent: {}
+[2.459668] (pipeline_interfaces) StdoutLine: {'line': b'-- Check for working CXX compiler: /usr/bin/c++ - skipped\n'}
+[2.460983] (pipeline_interfaces) StdoutLine: {'line': b'-- Detecting CXX compile features\n'}
+[2.461551] (pipeline_interfaces) StdoutLine: {'line': b'-- Detecting CXX compile features - done\n'}
+[2.474640] (pipeline_interfaces) StdoutLine: {'line': b'-- Found ament_cmake: 2.5.4 (/opt/ros/jazzy/share/ament_cmake/cmake)\n'}
+[2.543112] (-) TimerEvent: {}
+[2.647128] (-) TimerEvent: {}
+[2.749122] (-) TimerEvent: {}
+[2.852136] (-) TimerEvent: {}
+[2.953131] (-) TimerEvent: {}
+[3.055131] (-) TimerEvent: {}
+[3.065608] (pipeline_interfaces) StdoutLine: {'line': b'-- Found Python3: /usr/bin/python3 (found version "3.12.3") found components: Interpreter \n'}
+[3.156115] (-) TimerEvent: {}
+[3.258876] (-) TimerEvent: {}
+[3.287668] (pipeline_interfaces) StdoutLine: {'line': b'-- Found rosidl_default_generators: 1.6.0 (/opt/ros/jazzy/share/rosidl_default_generators/cmake)\n'}
+[3.297280] (pipeline_interfaces) StdoutLine: {'line': b'-- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c\n'}
+[3.359252] (-) TimerEvent: {}
+[3.370547] (pipeline_interfaces) StdoutLine: {'line': b'-- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp\n'}
+[3.431874] (pipeline_interfaces) StdoutLine: {'line': b'-- Found rosidl_adapter: 4.6.6 (/opt/ros/jazzy/share/rosidl_adapter/cmake)\n'}
+[3.437206] (pipeline_interfaces) StdoutLine: {'line': b'-- Found builtin_interfaces: 2.0.3 (/opt/ros/jazzy/share/builtin_interfaces/cmake)\n'}
+[3.460098] (-) TimerEvent: {}
+[3.561233] (-) TimerEvent: {}
+[3.662126] (-) TimerEvent: {}
+[3.764161] (-) TimerEvent: {}
+[3.866542] (-) TimerEvent: {}
+[3.968115] (-) TimerEvent: {}
+[4.070128] (-) TimerEvent: {}
+[4.172351] (-) TimerEvent: {}
+[4.273122] (-) TimerEvent: {}
+[4.375378] (-) TimerEvent: {}
+[4.477137] (-) TimerEvent: {}
+[4.578123] (-) TimerEvent: {}
+[4.679130] (-) TimerEvent: {}
+[4.782126] (-) TimerEvent: {}
+[4.883134] (-) TimerEvent: {}
+[4.984147] (-) TimerEvent: {}
+[5.085190] (-) TimerEvent: {}
+[5.186108] (-) TimerEvent: {}
+[5.288886] (-) TimerEvent: {}
+[5.390874] (-) TimerEvent: {}
+[5.495869] (-) TimerEvent: {}
+[5.570867] (pipeline_interfaces) StdoutLine: {'line': b'-- Found ament_cmake_ros: 0.12.0 (/opt/ros/jazzy/share/ament_cmake_ros/cmake)\n'}
+[5.596193] (-) TimerEvent: {}
+[5.698135] (-) TimerEvent: {}
+[5.800109] (-) TimerEvent: {}
+[5.902118] (-) TimerEvent: {}
+[6.005129] (-) TimerEvent: {}
+[6.106134] (-) TimerEvent: {}
+[6.210142] (-) TimerEvent: {}
+[6.311119] (-) TimerEvent: {}
+[6.413131] (-) TimerEvent: {}
+[6.515128] (-) TimerEvent: {}
+[6.616135] (-) TimerEvent: {}
+[6.718117] (-) TimerEvent: {}
+[6.820129] (-) TimerEvent: {}
+[6.921124] (-) TimerEvent: {}
+[7.024142] (-) TimerEvent: {}
+[7.126130] (-) TimerEvent: {}
+[7.229115] (-) TimerEvent: {}
+[7.327907] (pipeline_interfaces) StdoutLine: {'line': b'-- Using all available rosidl_typesupport_c: rosidl_typesupport_fastrtps_c;rosidl_typesupport_introspection_c\n'}
+[7.330089] (-) TimerEvent: {}
+[7.431156] (-) TimerEvent: {}
+[7.533133] (-) TimerEvent: {}
+[7.634124] (-) TimerEvent: {}
+[7.736642] (-) TimerEvent: {}
+[7.838130] (-) TimerEvent: {}
+[7.939111] (-) TimerEvent: {}
+[8.040115] (-) TimerEvent: {}
+[8.147385] (-) TimerEvent: {}
+[8.251145] (-) TimerEvent: {}
+[8.354124] (-) TimerEvent: {}
+[8.456101] (-) TimerEvent: {}
+[8.558101] (-) TimerEvent: {}
+[8.659109] (-) TimerEvent: {}
+[8.761165] (-) TimerEvent: {}
+[8.865120] (-) TimerEvent: {}
+[8.966122] (-) TimerEvent: {}
+[9.070126] (-) TimerEvent: {}
+[9.172123] (-) TimerEvent: {}
+[9.273127] (-) TimerEvent: {}
+[9.376115] (-) TimerEvent: {}
+[9.478128] (-) TimerEvent: {}
+[9.580127] (-) TimerEvent: {}
+[9.682120] (-) TimerEvent: {}
+[9.711364] (pipeline_interfaces) StdoutLine: {'line': b'-- Using all available rosidl_typesupport_cpp: rosidl_typesupport_fastrtps_cpp;rosidl_typesupport_introspection_cpp\n'}
+[9.716569] (pipeline_interfaces) StdoutLine: {'line': b'-- Found python_cmake_module: 0.11.1 (/opt/ros/jazzy/share/python_cmake_module/cmake)\n'}
+[9.783117] (-) TimerEvent: {}
+[9.890193] (-) TimerEvent: {}
+[9.992699] (-) TimerEvent: {}
+[10.096864] (-) TimerEvent: {}
+[10.198326] (-) TimerEvent: {}
+[10.300145] (-) TimerEvent: {}
+[10.317671] (pipeline_interfaces) StdoutLine: {'line': b'-- Found PythonExtra: /usr/bin/python3  \n'}
+[10.401186] (-) TimerEvent: {}
+[10.503466] (-) TimerEvent: {}
+[10.604151] (-) TimerEvent: {}
+[10.706325] (-) TimerEvent: {}
+[10.810638] (-) TimerEvent: {}
+[10.914131] (-) TimerEvent: {}
+[11.015155] (-) TimerEvent: {}
+[11.118105] (-) TimerEvent: {}
+[11.219120] (-) TimerEvent: {}
+[11.321117] (-) TimerEvent: {}
+[11.428137] (-) TimerEvent: {}
+[11.530634] (-) TimerEvent: {}
+[11.632111] (-) TimerEvent: {}
+[11.733138] (-) TimerEvent: {}
+[11.779503] (pipeline_interfaces) StdoutLine: {'line': b'-- Found Python3: /usr/bin/python3 (found version "3.12.3") found components: Interpreter Development NumPy Development.Module Development.Embed \n'}
+[11.834133] (-) TimerEvent: {}
+[11.900959] (pipeline_interfaces) StdoutLine: {'line': b'-- Found ament_lint_auto: 0.17.3 (/opt/ros/jazzy/share/ament_lint_auto/cmake)\n'}
+[11.935112] (-) TimerEvent: {}
+[11.968329] (pipeline_interfaces) StdoutLine: {'line': b"-- Added test 'lint_cmake' to check CMake code style\n"}
+[11.977972] (pipeline_interfaces) StdoutLine: {'line': b"-- Added test 'xmllint' to check XML markup files\n"}
+[12.003501] (pipeline_interfaces) StdoutLine: {'line': b'-- Configuring done (11.9s)\n'}
+[12.036108] (-) TimerEvent: {}
+[12.137240] (-) TimerEvent: {}
+[12.221417] (pipeline_interfaces) StdoutLine: {'line': b'-- Generating done (0.2s)\n'}
+[12.238128] (-) TimerEvent: {}
+[12.271145] (pipeline_interfaces) StdoutLine: {'line': b'-- Build files have been written to: /workspaces/Dark_Circle/build/pipeline_interfaces\n'}
+[12.282300] (pipeline_interfaces) CommandEnded: {'returncode': 0}
+[12.282938] (pipeline_interfaces) JobProgress: {'identifier': 'pipeline_interfaces', 'progress': 'build'}
+[12.283819] (pipeline_interfaces) Command: {'cmd': ['/usr/bin/cmake', '--build', '/workspaces/Dark_Circle/build/pipeline_interfaces', '--', '-j12', '-l12'], 'cwd': '/workspaces/Dark_Circle/build/pipeline_interfaces', 'env': OrderedDict({'PYTHON_BASIC_REPL': '1', 'GZ_SIM_RESOURCE_PATH': '/opt/ros/jazzy/share', 'GZ_CONFIG_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor/share/gz:/opt/ros/jazzy/opt/sdformat_vendor/share/gz:/opt/ros/jazzy/opt/gz_gui_vendor/share/gz:/opt/ros/jazzy/opt/gz_transport_vendor/share/gz:/opt/ros/jazzy/opt/gz_rendering_vendor/share/gz:/opt/ros/jazzy/opt/gz_plugin_vendor/share/gz:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/share/gz:/opt/ros/jazzy/opt/gz_msgs_vendor/share/gz:/opt/ros/jazzy/opt/gz_common_vendor/share/gz', 'HOSTNAME': '233671c8f466', 'GIT_ASKPASS': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/extensions/git/dist/askpass.sh', 'SHLVL': '2', 'LD_LIBRARY_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib', 'BROWSER': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/bin/helpers/browser.sh', 'HOME': '/home/ros', 'TERM_PROGRAM_VERSION': '1.109.5', 'VSCODE_IPC_HOOK_CLI': '/tmp/vscode-ipc-84db16f4-364b-4aa6-a6e4-ec8bc0060a35.sock', 'ROS_PYTHON_VERSION': '3', 'VSCODE_GIT_ASKPASS_MAIN': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/extensions/git/dist/askpass-main.js', 'VSCODE_GIT_ASKPASS_NODE': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/node', 'PYDEVD_DISABLE_FILE_VALIDATION': '1', 'BUNDLED_DEBUGPY_PATH': '/home/ros/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/bundled/libs/debugpy', 'VSCODE_PYTHON_AUTOACTIVATE_GUARD': '1', 'COLORTERM': 'truecolor', 'REMOTE_CONTAINERS': 'true', 'ROS_DISTRO': 'jazzy', 'REMOTE_CONTAINERS_IPC': '/tmp/vscode-remote-containers-ipc-4f0ba4d1-6e3f-40a2-84f1-b83cd277705d.sock', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm-256color', 'UV_USE_IO_URING': '0', 'PATH': '/home/ros/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/home/ros/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/bin/remote-cli:/opt/ros/jazzy/opt/gz_msgs_vendor/bin:/opt/ros/jazzy/opt/gz_tools_vendor/bin:/opt/ros/jazzy/opt/gz_ogre_next_vendor/bin:/opt/ros/jazzy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/ros/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/bundled/scripts/noConfigScripts', 'REMOTE_CONTAINERS_SOCKETS': '["/tmp/vscode-ssh-auth-4f0ba4d1-6e3f-40a2-84f1-b83cd277705d.sock"]', 'VSCODE_DEBUGPY_ADAPTER_ENDPOINTS': '/home/ros/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/.noConfigDebugAdapterEndpoints/endpoint-8ca1e30ca996550a.txt', 'LANG': 'C.UTF-8', 'PYTHONSTARTUP': '/home/ros/.vscode-server/data/User/workspaceStorage/09fc9fcab4eaa6e3e70188c6aeaf3198/ms-python.python/pythonrc.py', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'VSCODE_GIT_IPC_HANDLE': '/tmp/vscode-git-072c6163c0.sock', 'TERM_PROGRAM': 'vscode', 'SSH_AUTH_SOCK': '/tmp/vscode-ssh-auth-4f0ba4d1-6e3f-40a2-84f1-b83cd277705d.sock', 'AMENT_PREFIX_PATH': '/opt/ros/jazzy', 'SHELL': '/bin/bash', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'VSCODE_GIT_ASKPASS_EXTRA_ARGS': '', 'PWD': '/workspaces/Dark_Circle/build/pipeline_interfaces', 'LC_ALL': 'C.UTF-8', 'PYTHONPATH': '/opt/ros/jazzy/lib/python3.12/site-packages', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor:/opt/ros/jazzy/opt/gz_sensors_vendor:/opt/ros/jazzy/opt/gz_physics_vendor:/opt/ros/jazzy/opt/sdformat_vendor:/opt/ros/jazzy/opt/gz_gui_vendor:/opt/ros/jazzy/opt/gz_transport_vendor:/opt/ros/jazzy/opt/gz_rendering_vendor:/opt/ros/jazzy/opt/gz_plugin_vendor:/opt/ros/jazzy/opt/gz_fuel_tools_vendor:/opt/ros/jazzy/opt/gz_msgs_vendor:/opt/ros/jazzy/opt/gz_common_vendor:/opt/ros/jazzy/opt/gz_math_vendor:/opt/ros/jazzy/opt/gz_utils_vendor:/opt/ros/jazzy/opt/gz_tools_vendor:/opt/ros/jazzy/opt/gz_ogre_next_vendor:/opt/ros/jazzy/opt/gz_dartsim_vendor:/opt/ros/jazzy/opt/gz_cmake_vendor:/opt/ros/jazzy'}), 'shell': False}
+[12.339084] (-) TimerEvent: {}
+[12.440134] (-) TimerEvent: {}
+[12.541144] (-) TimerEvent: {}
+[12.642124] (-) TimerEvent: {}
+[12.743325] (-) TimerEvent: {}
+[12.747837] (pipeline_interfaces) StdoutLine: {'line': b'[  2%] \x1b[34m\x1b[1mGenerating type hashes for ROS interfaces\x1b[0m\n'}
+[12.793750] (pipeline_interfaces) StdoutLine: {'line': b'[  2%] Built target ament_cmake_python_copy_pipeline_interfaces\n'}
+[12.844121] (-) TimerEvent: {}
+[12.945118] (-) TimerEvent: {}
+[13.047153] (-) TimerEvent: {}
+[13.148116] (-) TimerEvent: {}
+[13.159584] (pipeline_interfaces) StdoutLine: {'line': b'[  2%] Built target pipeline_interfaces__rosidl_generator_type_description\n'}
+[13.199141] (pipeline_interfaces) StdoutLine: {'line': b'running egg_info\n'}
+[13.199996] (pipeline_interfaces) StdoutLine: {'line': b'creating pipeline_interfaces.egg-info\n'}
+[13.211769] (pipeline_interfaces) StdoutLine: {'line': b'writing pipeline_interfaces.egg-info/PKG-INFO\n'}
+[13.213180] (pipeline_interfaces) StdoutLine: {'line': b'writing dependency_links to pipeline_interfaces.egg-info/dependency_links.txt\n'}
+[13.214505] (pipeline_interfaces) StdoutLine: {'line': b'writing top-level names to pipeline_interfaces.egg-info/top_level.txt\n'}
+[13.215473] (pipeline_interfaces) StdoutLine: {'line': b"writing manifest file 'pipeline_interfaces.egg-info/SOURCES.txt'\n"}
+[13.249090] (-) TimerEvent: {}
+[13.250215] (pipeline_interfaces) StdoutLine: {'line': b"reading manifest file 'pipeline_interfaces.egg-info/SOURCES.txt'\n"}
+[13.254697] (pipeline_interfaces) StdoutLine: {'line': b"writing manifest file 'pipeline_interfaces.egg-info/SOURCES.txt'\n"}
+[13.263110] (pipeline_interfaces) StdoutLine: {'line': b'[  4%] \x1b[34m\x1b[1mGenerating C code for ROS interfaces\x1b[0m\n'}
+[13.335486] (pipeline_interfaces) StdoutLine: {'line': b'[  4%] Built target ament_cmake_python_build_pipeline_interfaces_egg\n'}
+[13.350098] (-) TimerEvent: {}
+[13.381077] (pipeline_interfaces) StdoutLine: {'line': b'[  6%] \x1b[34m\x1b[1mGenerating C++ code for ROS interfaces\x1b[0m\n'}
+[13.451127] (-) TimerEvent: {}
+[13.552128] (-) TimerEvent: {}
+[13.653434] (-) TimerEvent: {}
+[13.754219] (-) TimerEvent: {}
+[13.856222] (-) TimerEvent: {}
+[13.919199] (pipeline_interfaces) StdoutLine: {'line': b'[  6%] Built target pipeline_interfaces__cpp\n'}
+[13.957102] (-) TimerEvent: {}
+[13.960858] (pipeline_interfaces) StdoutLine: {'line': b'[ 11%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/raw_sensor_reading__functions.c.o\x1b[0m\n'}
+[13.961418] (pipeline_interfaces) StdoutLine: {'line': b'[ 11%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/sensor_data_window__description.c.o\x1b[0m\n'}
+[13.964264] (pipeline_interfaces) StdoutLine: {'line': b'[ 13%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/sensor_data_window__type_support.c.o\x1b[0m\n'}
+[13.966549] (pipeline_interfaces) StdoutLine: {'line': b'[ 18%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.c.o\x1b[0m\n'}
+[13.968167] (pipeline_interfaces) StdoutLine: {'line': b'[ 18%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/raw_sensor_reading__description.c.o\x1b[0m\n'}
+[13.973031] (pipeline_interfaces) StdoutLine: {'line': b'[ 20%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_c.dir/rosidl_generator_c/pipeline_interfaces/msg/detail/sensor_data_window__functions.c.o\x1b[0m\n'}
+[14.058119] (-) TimerEvent: {}
+[14.159122] (-) TimerEvent: {}
+[14.261128] (-) TimerEvent: {}
+[14.337232] (pipeline_interfaces) StdoutLine: {'line': b'[ 22%] \x1b[32m\x1b[1mLinking C shared library libpipeline_interfaces__rosidl_generator_c.so\x1b[0m\n'}
+[14.362079] (-) TimerEvent: {}
+[14.463122] (-) TimerEvent: {}
+[14.552313] (pipeline_interfaces) StdoutLine: {'line': b'[ 22%] Built target pipeline_interfaces__rosidl_generator_c\n'}
+[14.564074] (-) TimerEvent: {}
+[14.656927] (pipeline_interfaces) StdoutLine: {'line': b'[ 29%] \x1b[34m\x1b[1mGenerating C introspection for ROS interfaces\x1b[0m\n'}
+[14.658025] (pipeline_interfaces) StdoutLine: {'line': b'[ 29%] \x1b[34m\x1b[1mGenerating C type support for eProsima Fast-RTPS\x1b[0m\n'}
+[14.659792] (pipeline_interfaces) StdoutLine: {'line': b'[ 29%] \x1b[34m\x1b[1mGenerating C++ type support dispatch for ROS interfaces\x1b[0m\n'}
+[14.662158] (pipeline_interfaces) StdoutLine: {'line': b'[ 31%] \x1b[34m\x1b[1mGenerating C++ type support for eProsima Fast-RTPS\x1b[0m\n'}
+[14.665106] (-) TimerEvent: {}
+[14.666262] (pipeline_interfaces) StdoutLine: {'line': b'[ 34%] \x1b[34m\x1b[1mGenerating C type support dispatch for ROS interfaces\x1b[0m\n'}
+[14.668293] (pipeline_interfaces) StdoutLine: {'line': b'[ 36%] \x1b[34m\x1b[1mGenerating C++ introspection for ROS interfaces\x1b[0m\n'}
+[14.766115] (-) TimerEvent: {}
+[14.867114] (-) TimerEvent: {}
+[14.970120] (-) TimerEvent: {}
+[15.073212] (-) TimerEvent: {}
+[15.174127] (-) TimerEvent: {}
+[15.251280] (pipeline_interfaces) StdoutLine: {'line': b'[ 38%] \x1b[32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_c.dir/rosidl_typesupport_c/pipeline_interfaces/msg/raw_sensor_reading__type_support.cpp.o\x1b[0m\n'}
+[15.257211] (pipeline_interfaces) StdoutLine: {'line': b'[ 40%] \x1b[32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_c.dir/rosidl_typesupport_c/pipeline_interfaces/msg/sensor_data_window__type_support.cpp.o\x1b[0m\n'}
+[15.262191] (pipeline_interfaces) StdoutLine: {'line': b'[ 43%] \x1b[32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/pipeline_interfaces/msg/raw_sensor_reading__type_support.cpp.o\x1b[0m\n'}
+[15.268442] (pipeline_interfaces) StdoutLine: {'line': b'[ 45%] \x1b[32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_cpp.dir/rosidl_typesupport_cpp/pipeline_interfaces/msg/sensor_data_window__type_support.cpp.o\x1b[0m\n'}
+[15.274402] (-) TimerEvent: {}
+[15.288255] (pipeline_interfaces) StdoutLine: {'line': b'[ 50%] \x1b[32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/pipeline_interfaces/msg/detail/sensor_data_window__type_support.cpp.o\x1b[0m\n'}
+[15.292630] (pipeline_interfaces) StdoutLine: {'line': b'[ 54%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/pipeline_interfaces/msg/detail/sensor_data_window__type_support.c.o\x1b[0m\n'}
+[15.297550] (pipeline_interfaces) StdoutLine: {'line': b'[ 54%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_typesupport_introspection_c.dir/rosidl_typesupport_introspection_c/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.c.o\x1b[0m\n'}
+[15.298866] (pipeline_interfaces) StdoutLine: {'line': b'[ 54%] \x1b[32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_introspection_cpp.dir/rosidl_typesupport_introspection_cpp/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.cpp.o\x1b[0m\n'}
+[15.328444] (pipeline_interfaces) StdoutLine: {'line': b'[ 59%] \x1b[32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support_c.cpp.o\x1b[0m\n'}
+[15.333208] (pipeline_interfaces) StdoutLine: {'line': b'[ 59%] \x1b[32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_fastrtps_c.dir/rosidl_typesupport_fastrtps_c/pipeline_interfaces/msg/detail/sensor_data_window__type_support_c.cpp.o\x1b[0m\n'}
+[15.363472] (pipeline_interfaces) StdoutLine: {'line': b'[ 61%] \x1b[32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/pipeline_interfaces/msg/detail/dds_fastrtps/sensor_data_window__type_support.cpp.o\x1b[0m\n'}
+[15.375802] (-) TimerEvent: {}
+[15.380152] (pipeline_interfaces) StdoutLine: {'line': b'[ 63%] \x1b[32mBuilding CXX object CMakeFiles/pipeline_interfaces__rosidl_typesupport_fastrtps_cpp.dir/rosidl_typesupport_fastrtps_cpp/pipeline_interfaces/msg/detail/dds_fastrtps/raw_sensor_reading__type_support.cpp.o\x1b[0m\n'}
+[15.476180] (-) TimerEvent: {}
+[15.579111] (-) TimerEvent: {}
+[15.680406] (-) TimerEvent: {}
+[15.782136] (-) TimerEvent: {}
+[15.798100] (pipeline_interfaces) StdoutLine: {'line': b'[ 65%] \x1b[32m\x1b[1mLinking CXX shared library libpipeline_interfaces__rosidl_typesupport_c.so\x1b[0m\n'}
+[15.856227] (pipeline_interfaces) StdoutLine: {'line': b'[ 68%] \x1b[32m\x1b[1mLinking C shared library libpipeline_interfaces__rosidl_typesupport_introspection_c.so\x1b[0m\n'}
+[15.883141] (-) TimerEvent: {}
+[15.984208] (-) TimerEvent: {}
+[16.086828] (-) TimerEvent: {}
+[16.185122] (pipeline_interfaces) StdoutLine: {'line': b'[ 68%] Built target pipeline_interfaces__rosidl_typesupport_c\n'}
+[16.187258] (-) TimerEvent: {}
+[16.209985] (pipeline_interfaces) StdoutLine: {'line': b'[ 68%] Built target pipeline_interfaces__rosidl_typesupport_introspection_c\n'}
+[16.288115] (pipeline_interfaces) StdoutLine: {'line': b'[ 70%] \x1b[32m\x1b[1mLinking CXX shared library libpipeline_interfaces__rosidl_typesupport_cpp.so\x1b[0m\n'}
+[16.288991] (-) TimerEvent: {}
+[16.390140] (-) TimerEvent: {}
+[16.428868] (pipeline_interfaces) StdoutLine: {'line': b'[ 72%] \x1b[32m\x1b[1mLinking CXX shared library libpipeline_interfaces__rosidl_typesupport_introspection_cpp.so\x1b[0m\n'}
+[16.491145] (-) TimerEvent: {}
+[16.494127] (pipeline_interfaces) StdoutLine: {'line': b'[ 75%] \x1b[32m\x1b[1mLinking CXX shared library libpipeline_interfaces__rosidl_typesupport_fastrtps_c.so\x1b[0m\n'}
+[16.547783] (pipeline_interfaces) StdoutLine: {'line': b'[ 75%] Built target pipeline_interfaces__rosidl_typesupport_cpp\n'}
+[16.592120] (-) TimerEvent: {}
+[16.600879] (pipeline_interfaces) StdoutLine: {'line': b'[ 77%] \x1b[32m\x1b[1mLinking CXX shared library libpipeline_interfaces__rosidl_typesupport_fastrtps_cpp.so\x1b[0m\n'}
+[16.693131] (-) TimerEvent: {}
+[16.695341] (pipeline_interfaces) StdoutLine: {'line': b'[ 77%] Built target pipeline_interfaces__rosidl_typesupport_introspection_cpp\n'}
+[16.745024] (pipeline_interfaces) StdoutLine: {'line': b'[ 77%] Built target pipeline_interfaces__rosidl_typesupport_fastrtps_c\n'}
+[16.794111] (-) TimerEvent: {}
+[16.847398] (pipeline_interfaces) StdoutLine: {'line': b'[ 77%] Built target pipeline_interfaces__rosidl_typesupport_fastrtps_cpp\n'}
+[16.895097] (-) TimerEvent: {}
+[16.997137] (-) TimerEvent: {}
+[17.052845] (pipeline_interfaces) StdoutLine: {'line': b'[ 77%] Built target pipeline_interfaces\n'}
+[17.098095] (-) TimerEvent: {}
+[17.200117] (-) TimerEvent: {}
+[17.255615] (pipeline_interfaces) StdoutLine: {'line': b'[ 79%] \x1b[34m\x1b[1mGenerating Python code for ROS interfaces\x1b[0m\n'}
+[17.301120] (-) TimerEvent: {}
+[17.402156] (-) TimerEvent: {}
+[17.503130] (-) TimerEvent: {}
+[17.604120] (-) TimerEvent: {}
+[17.708411] (-) TimerEvent: {}
+[17.802648] (pipeline_interfaces) StdoutLine: {'line': b'[ 79%] Built target pipeline_interfaces__py\n'}
+[17.809105] (-) TimerEvent: {}
+[17.910217] (-) TimerEvent: {}
+[18.011124] (-) TimerEvent: {}
+[18.025937] (pipeline_interfaces) StdoutLine: {'line': b'[ 84%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_py.dir/rosidl_generator_py/pipeline_interfaces/msg/_raw_sensor_reading_s.c.o\x1b[0m\n'}
+[18.027718] (pipeline_interfaces) StdoutLine: {'line': b'[ 84%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces__rosidl_generator_py.dir/rosidl_generator_py/pipeline_interfaces/msg/_sensor_data_window_s.c.o\x1b[0m\n'}
+[18.112175] (-) TimerEvent: {}
+[18.213133] (-) TimerEvent: {}
+[18.314150] (-) TimerEvent: {}
+[18.415112] (-) TimerEvent: {}
+[18.517158] (-) TimerEvent: {}
+[18.552708] (pipeline_interfaces) StdoutLine: {'line': b'[ 86%] \x1b[32m\x1b[1mLinking C shared library libpipeline_interfaces__rosidl_generator_py.so\x1b[0m\n'}
+[18.618121] (-) TimerEvent: {}
+[18.719439] (-) TimerEvent: {}
+[18.773027] (pipeline_interfaces) StdoutLine: {'line': b'[ 86%] Built target pipeline_interfaces__rosidl_generator_py\n'}
+[18.820104] (-) TimerEvent: {}
+[18.921320] (-) TimerEvent: {}
+[18.988468] (pipeline_interfaces) StdoutLine: {'line': b'[ 90%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces_s__rosidl_typesupport_fastrtps_c.dir/rosidl_generator_py/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_fastrtps_c.c.o\x1b[0m\n'}
+[18.989918] (pipeline_interfaces) StdoutLine: {'line': b'[ 90%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces_s__rosidl_typesupport_c.dir/rosidl_generator_py/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_c.c.o\x1b[0m\n'}
+[18.997093] (pipeline_interfaces) StdoutLine: {'line': b'[ 93%] \x1b[32mBuilding C object CMakeFiles/pipeline_interfaces_s__rosidl_typesupport_introspection_c.dir/rosidl_generator_py/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_introspection_c.c.o\x1b[0m\n'}
+[19.022075] (-) TimerEvent: {}
+[19.124194] (-) TimerEvent: {}
+[19.225315] (-) TimerEvent: {}
+[19.326122] (-) TimerEvent: {}
+[19.430127] (-) TimerEvent: {}
+[19.461090] (pipeline_interfaces) StdoutLine: {'line': b'[ 95%] \x1b[32m\x1b[1mLinking C shared module rosidl_generator_py/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_c.so\x1b[0m\n'}
+[19.464351] (pipeline_interfaces) StdoutLine: {'line': b'[100%] \x1b[32m\x1b[1mLinking C shared module rosidl_generator_py/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_introspection_c.so\x1b[0m\n'}
+[19.465714] (pipeline_interfaces) StdoutLine: {'line': b'[100%] \x1b[32m\x1b[1mLinking C shared module rosidl_generator_py/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_fastrtps_c.so\x1b[0m\n'}
+[19.531111] (-) TimerEvent: {}
+[19.632133] (-) TimerEvent: {}
+[19.680949] (pipeline_interfaces) StdoutLine: {'line': b'[100%] Built target pipeline_interfaces_s__rosidl_typesupport_c\n'}
+[19.688299] (pipeline_interfaces) StdoutLine: {'line': b'[100%] Built target pipeline_interfaces_s__rosidl_typesupport_fastrtps_c\n'}
+[19.690767] (pipeline_interfaces) StdoutLine: {'line': b'[100%] Built target pipeline_interfaces_s__rosidl_typesupport_introspection_c\n'}
+[19.733142] (-) TimerEvent: {}
+[19.756007] (pipeline_interfaces) CommandEnded: {'returncode': 0}
+[19.760461] (pipeline_interfaces) JobProgress: {'identifier': 'pipeline_interfaces', 'progress': 'install'}
+[19.818244] (pipeline_interfaces) Command: {'cmd': ['/usr/bin/cmake', '--install', '/workspaces/Dark_Circle/build/pipeline_interfaces'], 'cwd': '/workspaces/Dark_Circle/build/pipeline_interfaces', 'env': OrderedDict({'PYTHON_BASIC_REPL': '1', 'GZ_SIM_RESOURCE_PATH': '/opt/ros/jazzy/share', 'GZ_CONFIG_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor/share/gz:/opt/ros/jazzy/opt/sdformat_vendor/share/gz:/opt/ros/jazzy/opt/gz_gui_vendor/share/gz:/opt/ros/jazzy/opt/gz_transport_vendor/share/gz:/opt/ros/jazzy/opt/gz_rendering_vendor/share/gz:/opt/ros/jazzy/opt/gz_plugin_vendor/share/gz:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/share/gz:/opt/ros/jazzy/opt/gz_msgs_vendor/share/gz:/opt/ros/jazzy/opt/gz_common_vendor/share/gz', 'HOSTNAME': '233671c8f466', 'GIT_ASKPASS': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/extensions/git/dist/askpass.sh', 'SHLVL': '2', 'LD_LIBRARY_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib', 'BROWSER': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/bin/helpers/browser.sh', 'HOME': '/home/ros', 'TERM_PROGRAM_VERSION': '1.109.5', 'VSCODE_IPC_HOOK_CLI': '/tmp/vscode-ipc-84db16f4-364b-4aa6-a6e4-ec8bc0060a35.sock', 'ROS_PYTHON_VERSION': '3', 'VSCODE_GIT_ASKPASS_MAIN': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/extensions/git/dist/askpass-main.js', 'VSCODE_GIT_ASKPASS_NODE': '/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/node', 'PYDEVD_DISABLE_FILE_VALIDATION': '1', 'BUNDLED_DEBUGPY_PATH': '/home/ros/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/bundled/libs/debugpy', 'VSCODE_PYTHON_AUTOACTIVATE_GUARD': '1', 'COLORTERM': 'truecolor', 'REMOTE_CONTAINERS': 'true', 'ROS_DISTRO': 'jazzy', 'REMOTE_CONTAINERS_IPC': '/tmp/vscode-remote-containers-ipc-4f0ba4d1-6e3f-40a2-84f1-b83cd277705d.sock', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm-256color', 'UV_USE_IO_URING': '0', 'PATH': '/home/ros/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/home/ros/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/vscode/vscode-server/bin/linux-x64/072586267e68ece9a47aa43f8c108e0dcbf44622/bin/remote-cli:/opt/ros/jazzy/opt/gz_msgs_vendor/bin:/opt/ros/jazzy/opt/gz_tools_vendor/bin:/opt/ros/jazzy/opt/gz_ogre_next_vendor/bin:/opt/ros/jazzy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/ros/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/bundled/scripts/noConfigScripts', 'REMOTE_CONTAINERS_SOCKETS': '["/tmp/vscode-ssh-auth-4f0ba4d1-6e3f-40a2-84f1-b83cd277705d.sock"]', 'VSCODE_DEBUGPY_ADAPTER_ENDPOINTS': '/home/ros/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/.noConfigDebugAdapterEndpoints/endpoint-8ca1e30ca996550a.txt', 'LANG': 'C.UTF-8', 'PYTHONSTARTUP': '/home/ros/.vscode-server/data/User/workspaceStorage/09fc9fcab4eaa6e3e70188c6aeaf3198/ms-python.python/pythonrc.py', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'VSCODE_GIT_IPC_HANDLE': '/tmp/vscode-git-072c6163c0.sock', 'TERM_PROGRAM': 'vscode', 'SSH_AUTH_SOCK': '/tmp/vscode-ssh-auth-4f0ba4d1-6e3f-40a2-84f1-b83cd277705d.sock', 'AMENT_PREFIX_PATH': '/opt/ros/jazzy', 'SHELL': '/bin/bash', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'VSCODE_GIT_ASKPASS_EXTRA_ARGS': '', 'PWD': '/workspaces/Dark_Circle/build/pipeline_interfaces', 'LC_ALL': 'C.UTF-8', 'PYTHONPATH': '/opt/ros/jazzy/lib/python3.12/site-packages', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor:/opt/ros/jazzy/opt/gz_sensors_vendor:/opt/ros/jazzy/opt/gz_physics_vendor:/opt/ros/jazzy/opt/sdformat_vendor:/opt/ros/jazzy/opt/gz_gui_vendor:/opt/ros/jazzy/opt/gz_transport_vendor:/opt/ros/jazzy/opt/gz_rendering_vendor:/opt/ros/jazzy/opt/gz_plugin_vendor:/opt/ros/jazzy/opt/gz_fuel_tools_vendor:/opt/ros/jazzy/opt/gz_msgs_vendor:/opt/ros/jazzy/opt/gz_common_vendor:/opt/ros/jazzy/opt/gz_math_vendor:/opt/ros/jazzy/opt/gz_utils_vendor:/opt/ros/jazzy/opt/gz_tools_vendor:/opt/ros/jazzy/opt/gz_ogre_next_vendor:/opt/ros/jazzy/opt/gz_dartsim_vendor:/opt/ros/jazzy/opt/gz_cmake_vendor:/opt/ros/jazzy'}), 'shell': False}
+[19.834085] (-) TimerEvent: {}
+[19.880050] (pipeline_interfaces) StdoutLine: {'line': b'-- Install configuration: ""\n'}
+[19.883375] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/ament_index/resource_index/rosidl_interfaces/pipeline_interfaces\n'}
+[19.886619] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/RawSensorReading.json\n'}
+[19.888667] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/SensorDataWindow.json\n'}
+[19.890177] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces\n'}
+[19.891388] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg\n'}
+[19.891941] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/rosidl_generator_c__visibility_control.h\n'}
+[19.892970] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail\n'}
+[19.893603] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__struct.h\n'}
+[19.901185] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__description.c\n'}
+[19.908661] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__type_support.c\n'}
+[19.911575] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__description.c\n'}
+[19.913268] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.h\n'}
+[19.915067] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__functions.c\n'}
+[19.917377] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__functions.h\n'}
+[19.918860] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__type_support.h\n'}
+[19.922366] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__struct.h\n'}
+[19.924444] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__functions.h\n'}
+[19.925954] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.c\n'}
+[19.927445] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__functions.c\n'}
+[19.928694] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/raw_sensor_reading.h\n'}
+[19.930011] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/sensor_data_window.h\n'}
+[19.931558] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/library_path.sh\n'}
+[19.932656] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/library_path.dsv\n'}
+[19.934640] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_generator_c.so\n'}
+[19.934955] (-) TimerEvent: {}
+[19.939405] (pipeline_interfaces) StdoutLine: {'line': b'-- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_generator_c.so" to ""\n'}
+[19.939697] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces\n'}
+[19.939996] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg\n'}
+[19.940387] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail\n'}
+[19.940764] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__rosidl_typesupport_fastrtps_c.h\n'}
+[19.942053] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__rosidl_typesupport_fastrtps_c.h\n'}
+[19.943737] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/rosidl_typesupport_fastrtps_c__visibility_control.h\n'}
+[19.945012] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_fastrtps_c.so\n'}
+[19.947124] (pipeline_interfaces) StdoutLine: {'line': b'-- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_fastrtps_c.so" to ""\n'}
+[19.947400] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces\n'}
+[19.948096] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg\n'}
+[19.948436] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail\n'}
+[19.948825] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__type_support.c\n'}
+[19.950369] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__rosidl_typesupport_introspection_c.h\n'}
+[19.951708] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__rosidl_typesupport_introspection_c.h\n'}
+[19.952897] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.c\n'}
+[19.954003] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/rosidl_typesupport_introspection_c__visibility_control.h\n'}
+[19.955521] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_introspection_c.so\n'}
+[19.957359] (pipeline_interfaces) StdoutLine: {'line': b'-- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_introspection_c.so" to ""\n'}
+[19.957872] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_c.so\n'}
+[19.959584] (pipeline_interfaces) StdoutLine: {'line': b'-- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_c.so" to ""\n'}
+[19.960208] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces\n'}
+[19.960489] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg\n'}
+[19.961150] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/sensor_data_window.hpp\n'}
+[19.962242] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail\n'}
+[19.962681] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.hpp\n'}
+[19.964047] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__struct.hpp\n'}
+[19.965631] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__builder.hpp\n'}
+[19.967091] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__struct.hpp\n'}
+[19.968385] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__builder.hpp\n'}
+[19.969843] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__traits.hpp\n'}
+[19.971395] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__type_support.hpp\n'}
+[19.972602] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__traits.hpp\n'}
+[19.973772] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/rosidl_generator_cpp__visibility_control.hpp\n'}
+[19.975169] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/raw_sensor_reading.hpp\n'}
+[19.976479] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces\n'}
+[19.976847] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg\n'}
+[19.977253] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/rosidl_typesupport_fastrtps_cpp__visibility_control.h\n'}
+[19.978230] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail\n'}
+[19.978811] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__rosidl_typesupport_fastrtps_cpp.hpp\n'}
+[19.980001] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__rosidl_typesupport_fastrtps_cpp.hpp\n'}
+[19.981431] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/dds_fastrtps\n'}
+[19.982318] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_fastrtps_cpp.so\n'}
+[19.984202] (pipeline_interfaces) StdoutLine: {'line': b'-- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_fastrtps_cpp.so" to ""\n'}
+[19.984468] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces\n'}
+[19.984681] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg\n'}
+[19.985278] (pipeline_interfaces) StdoutLine: {'line': b'-- Up-to-date: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail\n'}
+[19.985851] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__type_support.cpp\n'}
+[19.987378] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__type_support.cpp\n'}
+[19.988712] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/sensor_data_window__rosidl_typesupport_introspection_cpp.hpp\n'}
+[19.990084] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/include/pipeline_interfaces/pipeline_interfaces/msg/detail/raw_sensor_reading__rosidl_typesupport_introspection_cpp.hpp\n'}
+[19.991574] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_introspection_cpp.so\n'}
+[19.993559] (pipeline_interfaces) StdoutLine: {'line': b'-- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_introspection_cpp.so" to ""\n'}
+[19.993961] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_cpp.so\n'}
+[19.995605] (pipeline_interfaces) StdoutLine: {'line': b'-- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_typesupport_cpp.so" to ""\n'}
+[19.995898] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/pythonpath.sh\n'}
+[19.997348] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/pythonpath.dsv\n'}
+[19.998465] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces-0.0.0-py3.12.egg-info\n'}
+[19.999662] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces-0.0.0-py3.12.egg-info/PKG-INFO\n'}
+[20.000738] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces-0.0.0-py3.12.egg-info/SOURCES.txt\n'}
+[20.002137] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces-0.0.0-py3.12.egg-info/top_level.txt\n'}
+[20.003327] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces-0.0.0-py3.12.egg-info/dependency_links.txt\n'}
+[20.004978] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces\n'}
+[20.005876] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_c.so\n'}
+[20.007234] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg\n'}
+[20.008160] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_sensor_data_window_s.c\n'}
+[20.009452] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/__init__.py\n'}
+[20.010967] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_sensor_data_window.py\n'}
+[20.012083] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_raw_sensor_reading_s.c\n'}
+[20.013605] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_raw_sensor_reading.py\n'}
+[20.015214] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_fastrtps_c.so\n'}
+[20.016626] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/__init__.py\n'}
+[20.017647] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_introspection_c.c\n'}
+[20.019084] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_introspection_c.so\n'}
+[20.020473] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_fastrtps_c.c\n'}
+[20.021798] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/_pipeline_interfaces_s.ep.rosidl_typesupport_c.c\n'}
+[20.035060] (-) TimerEvent: {}
+[20.138832] (-) TimerEvent: {}
+[20.147576] (pipeline_interfaces) StdoutLine: {'line': b"Listing '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces'...\n"}
+[20.149120] (pipeline_interfaces) StdoutLine: {'line': b"Compiling '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/__init__.py'...\n"}
+[20.150190] (pipeline_interfaces) StdoutLine: {'line': b"Listing '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg'...\n"}
+[20.152260] (pipeline_interfaces) StdoutLine: {'line': b"Compiling '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/__init__.py'...\n"}
+[20.153209] (pipeline_interfaces) StdoutLine: {'line': b"Compiling '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_raw_sensor_reading.py'...\n"}
+[20.153372] (pipeline_interfaces) StdoutLine: {'line': b"Compiling '/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/msg/_sensor_data_window.py'...\n"}
+[20.158470] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_fastrtps_c.so\n'}
+[20.160688] (pipeline_interfaces) StdoutLine: {'line': b'-- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_fastrtps_c.so" to ""\n'}
+[20.162214] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_introspection_c.so\n'}
+[20.164367] (pipeline_interfaces) StdoutLine: {'line': b'-- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_introspection_c.so" to ""\n'}
+[20.164882] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_c.so\n'}
+[20.166430] (pipeline_interfaces) StdoutLine: {'line': b'-- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages/pipeline_interfaces/pipeline_interfaces_s__rosidl_typesupport_c.so" to ""\n'}
+[20.166990] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_generator_py.so\n'}
+[20.168761] (pipeline_interfaces) StdoutLine: {'line': b'-- Set non-toolchain portion of runtime path of "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/libpipeline_interfaces__rosidl_generator_py.so" to ""\n'}
+[20.169096] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/RawSensorReading.idl\n'}
+[20.171113] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/SensorDataWindow.idl\n'}
+[20.172361] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/RawSensorReading.msg\n'}
+[20.174216] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/msg/SensorDataWindow.msg\n'}
+[20.176023] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/ament_index/resource_index/package_run_dependencies/pipeline_interfaces\n'}
+[20.177672] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/ament_index/resource_index/parent_prefix_path/pipeline_interfaces\n'}
+[20.179083] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/ament_prefix_path.sh\n'}
+[20.180061] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/ament_prefix_path.dsv\n'}
+[20.182015] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/path.sh\n'}
+[20.182958] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/environment/path.dsv\n'}
+[20.184533] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/local_setup.bash\n'}
+[20.185613] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/local_setup.sh\n'}
+[20.187210] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/local_setup.zsh\n'}
+[20.188450] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/local_setup.dsv\n'}
+[20.189764] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/package.dsv\n'}
+[20.191464] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/ament_index/resource_index/packages/pipeline_interfaces\n'}
+[20.193218] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_generator_cExport.cmake\n'}
+[20.194609] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_generator_cExport-noconfig.cmake\n'}
+[20.196239] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_typesupport_fastrtps_cExport.cmake\n'}
+[20.198181] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_typesupport_fastrtps_cExport-noconfig.cmake\n'}
+[20.201552] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_introspection_cExport.cmake\n'}
+[20.203540] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_introspection_cExport-noconfig.cmake\n'}
+[20.207151] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_cExport.cmake\n'}
+[20.210681] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_cExport-noconfig.cmake\n'}
+[20.212204] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_generator_cppExport.cmake\n'}
+[20.213323] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_typesupport_fastrtps_cppExport.cmake\n'}
+[20.215174] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_typesupport_fastrtps_cppExport-noconfig.cmake\n'}
+[20.217134] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_introspection_cppExport.cmake\n'}
+[20.218908] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_introspection_cppExport-noconfig.cmake\n'}
+[20.220264] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_cppExport.cmake\n'}
+[20.221869] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfaces__rosidl_typesupport_cppExport-noconfig.cmake\n'}
+[20.223140] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_generator_pyExport.cmake\n'}
+[20.224728] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/export_pipeline_interfaces__rosidl_generator_pyExport-noconfig.cmake\n'}
+[20.226218] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/rosidl_cmake-extras.cmake\n'}
+[20.227614] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/ament_cmake_export_dependencies-extras.cmake\n'}
+[20.228878] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/ament_cmake_export_include_directories-extras.cmake\n'}
+[20.230262] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/ament_cmake_export_libraries-extras.cmake\n'}
+[20.231980] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/ament_cmake_export_targets-extras.cmake\n'}
+[20.233075] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/rosidl_cmake_export_typesupport_targets-extras.cmake\n'}
+[20.234584] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/rosidl_cmake_export_typesupport_libraries-extras.cmake\n'}
+[20.235737] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfacesConfig.cmake\n'}
+[20.237193] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/cmake/pipeline_interfacesConfig-version.cmake\n'}
+[20.238672] (pipeline_interfaces) StdoutLine: {'line': b'-- Installing: /workspaces/Dark_Circle/install/pipeline_interfaces/share/pipeline_interfaces/package.xml\n'}
+[20.239058] (-) TimerEvent: {}
+[20.247425] (pipeline_interfaces) CommandEnded: {'returncode': 0}
+[20.287649] (pipeline_interfaces) JobEnded: {'identifier': 'pipeline_interfaces', 'rc': 0}
+[20.288965] (-) EventReactorShutdown: {}

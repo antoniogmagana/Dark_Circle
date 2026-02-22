@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'ingestor_pkg'
+package_name = 'sc_sensor_pkg'
 
 setup(
     name=package_name,
@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'ingestor_node = ingestor_pkg.ingestor_node:main'
+            'sc_sensor_node = sc_sensor_pkg.sc_sensor_node:main'
         ],
     },
 )

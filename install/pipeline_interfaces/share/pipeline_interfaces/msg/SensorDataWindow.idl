@@ -1,0 +1,15 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from pipeline_interfaces/msg/SensorDataWindow.msg
+// generated code does not contain a copyright notice
+
+#include "pipeline_interfaces/msg/RawSensorReading.idl"
+
+module pipeline_interfaces {
+  module msg {
+    @verbatim (language="comment", text=
+      "an array of sensor data readings collected by the ingestor node")
+    struct SensorDataWindow {
+      sequence<pipeline_interfaces::msg::RawSensorReading> readings;
+    };
+  };
+};
