@@ -1,0 +1,17 @@
+[0.854s] Invoking command in '/workspaces/Dark_Circle/build/sc_sensor_pkg': PYTHONPATH=/workspaces/Dark_Circle/build/sc_sensor_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspaces/Dark_Circle/install/sc_sensor_pkg/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /workspaces/Dark_Circle/build/sc_sensor_pkg/build --no-deps symlink_data
+[1.173s] running develop
+[1.279s] running egg_info
+[1.287s] writing sc_sensor_pkg.egg-info/PKG-INFO
+[1.288s] writing dependency_links to sc_sensor_pkg.egg-info/dependency_links.txt
+[1.289s] writing entry points to sc_sensor_pkg.egg-info/entry_points.txt
+[1.290s] writing requirements to sc_sensor_pkg.egg-info/requires.txt
+[1.290s] writing top-level names to sc_sensor_pkg.egg-info/top_level.txt
+[1.315s] reading manifest file 'sc_sensor_pkg.egg-info/SOURCES.txt'
+[1.317s] writing manifest file 'sc_sensor_pkg.egg-info/SOURCES.txt'
+[1.329s] running build_ext
+[1.329s] Creating /workspaces/Dark_Circle/install/sc_sensor_pkg/lib/python3.12/site-packages/sc-sensor-pkg.egg-link (link to .)
+[1.331s] Installing sc_sensor_node script to /workspaces/Dark_Circle/install/sc_sensor_pkg/lib/sc_sensor_pkg
+[1.332s] 
+[1.332s] Installed /workspaces/Dark_Circle/build/sc_sensor_pkg
+[1.334s] running symlink_data
+[1.359s] Invoked command in '/workspaces/Dark_Circle/build/sc_sensor_pkg' returned '0': PYTHONPATH=/workspaces/Dark_Circle/build/sc_sensor_pkg/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/workspaces/Dark_Circle/install/sc_sensor_pkg/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /workspaces/Dark_Circle/build/sc_sensor_pkg/build --no-deps symlink_data

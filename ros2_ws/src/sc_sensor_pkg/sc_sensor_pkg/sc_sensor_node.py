@@ -1,27 +1,23 @@
 import rclpy
 from rclpy.node import Node
 import psycopg2
-from psycopg2 import sql # Crucial for dynamic table names
+from psycopg2 import sql
 from pipeline_interfaces.msg import RawSensorReading
 
 class PostgresSensorNode(Node):
     def __init__(self):
         super().__init__('postgres_sensor_node')
 
-        # 1. DB Connection Parameters
+        # 1. Parameters (Removed publish_rate_hz)
         self.declare_parameter('db_host', 'localhost')
         self.declare_parameter('db_port', 5432)
         self.declare_parameter('db_name', 'postgres')
         self.declare_parameter('db_user', 'postgres')
         self.declare_parameter('db_password', '')
         
-        # 2. Query Filtering Parameters
         self.declare_parameter('target_table', 'sensor_data_1')
         self.declare_parameter('vehicle_id', 1)
         self.declare_parameter('sensor_id', 1)
-        self.declare_parameter('publish_rate_hz', 10.0)
-
-        # 3. Sensor Location Parameters
         self.declare_parameter('sensor_lat', 0.0)
         self.declare_parameter('sensor_lon', 0.0)
 
@@ -37,22 +33,20 @@ class PostgresSensorNode(Node):
         self.sensor_id = self.get_parameter('sensor_id').value
         self.sensor_lat = self.get_parameter('sensor_lat').value
         self.sensor_lon = self.get_parameter('sensor_lon').value
-        publish_rate = self.get_parameter('publish_rate_hz').value
 
-        # Connect to PostgreSQL
+        # 2. Connect to PostgreSQL
         try:
             self.conn = psycopg2.connect(
                 host=db_host, port=db_port, dbname=db_name, 
                 user=db_user, password=db_password
             )
             self.cursor = self.conn.cursor()
-            self.get_logger().info(f"Connected to DB. Querying vehicle {self.vehicle_id}, sensor {self.sensor_id} from {table_name}.")
+            self.get_logger().info(f"Connected to DB. Querying {table_name}...")
         except Exception as e:
             self.get_logger().error(f"Failed to connect: {e}")
             raise
 
-        # 4. Safely construct and execute the SQL query
-        # We select time_stamp and amplitude. We use psycopg2.sql for the table identifier.
+        # 3. Safely execute the SQL query
         query = sql.SQL(
             "SELECT time_stamp, amplitude FROM {table} "
             "WHERE vehicle_id = %s AND sensor_id = %s "
@@ -61,25 +55,31 @@ class PostgresSensorNode(Node):
 
         self.cursor.execute(query, (self.vehicle_id, self.sensor_id))
 
-        # Set up Publisher and Timer
+        # 4. Initialize Publisher and state tracking
         self.publisher_ = self.create_publisher(RawSensorReading, 'raw_sensor_stream', 10)
-        timer_period = 1.0 / publish_rate
-        self.timer = self.create_timer(timer_period, self.timer_callback)
-
-    def timer_callback(self):
-        row = self.cursor.fetchone()
         
-        if row is None:
+        # Pre-fetch the very first row to kick off the cycle
+        self.next_row = self.cursor.fetchone()
+        
+        if self.next_row:
+            # Trigger the first callback immediately (0.0001 seconds)
+            self.timer = self.create_timer(0.0001, self.dynamic_timer_callback)
+        else:
+            self.get_logger().info("No data found for the specified parameters.")
+
+    def dynamic_timer_callback(self):
+        # 1. Cancel the timer that just woke us up
+        self.timer.cancel()
+        
+        if self.next_row is None:
             self.get_logger().info('End of database records.')
-            self.timer.cancel()
             return
 
-        db_time_stamp, amplitude = row
+        # 2. Extract current row data
+        current_db_timestamp, amplitude = self.next_row
 
-        # Create and populate the message
+        # 3. Create and publish the message
         msg = RawSensorReading()
-        
-        # Acting as a live sensor, we stamp it with the current ROS time
         msg.timestamp = self.get_clock().now().to_msg() 
         msg.sensor_label = f"v{self.vehicle_id}_s{self.sensor_id}"
         msg.reading = float(amplitude)
@@ -87,7 +87,26 @@ class PostgresSensorNode(Node):
         msg.longitude = float(self.sensor_lon)
 
         self.publisher_.publish(msg)
-        self.get_logger().debug(f'Published: {msg.reading} at {msg.latitude}, {msg.longitude}')
+        self.get_logger().debug(f'Published {msg.sensor_label} : {msg.reading}')
+
+        # 4. Fetch the NEXT row to calculate the delay
+        self.next_row = self.cursor.fetchone()
+        
+        if self.next_row:
+            next_db_timestamp = self.next_row[0]
+            
+            # Calculate the time gap in seconds
+            wait_time_seconds = float(next_db_timestamp - current_db_timestamp)
+            
+            # Failsafe: If timestamps are identical or negative due to bad data, 
+            # force a tiny delay so the node doesn't freeze or throw a timer error.
+            wait_time_seconds = max(0.0001, wait_time_seconds)
+            
+            # 5. Schedule the next publish exactly 'wait_time_seconds' from now
+            self.timer = self.create_timer(wait_time_seconds, self.dynamic_timer_callback)
+        else:
+            self.get_logger().info('Final record published. Shutting down stream.')
+
 
 def main(args=None):
     rclpy.init(args=args)

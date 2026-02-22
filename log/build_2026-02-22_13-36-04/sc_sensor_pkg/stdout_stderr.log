@@ -1,0 +1,22 @@
+running develop
+running egg_info
+creating sc_sensor_pkg.egg-info
+writing sc_sensor_pkg.egg-info/PKG-INFO
+writing dependency_links to sc_sensor_pkg.egg-info/dependency_links.txt
+writing entry points to sc_sensor_pkg.egg-info/entry_points.txt
+writing requirements to sc_sensor_pkg.egg-info/requires.txt
+writing top-level names to sc_sensor_pkg.egg-info/top_level.txt
+writing manifest file 'sc_sensor_pkg.egg-info/SOURCES.txt'
+reading manifest file 'sc_sensor_pkg.egg-info/SOURCES.txt'
+writing manifest file 'sc_sensor_pkg.egg-info/SOURCES.txt'
+running build_ext
+Creating /workspaces/Dark_Circle/install/sc_sensor_pkg/lib/python3.12/site-packages/sc-sensor-pkg.egg-link (link to .)
+Installing sc_sensor_node script to /workspaces/Dark_Circle/install/sc_sensor_pkg/lib/sc_sensor_pkg
+
+Installed /workspaces/Dark_Circle/build/sc_sensor_pkg
+running symlink_data
+creating /workspaces/Dark_Circle/install/sc_sensor_pkg/share/ament_index
+creating /workspaces/Dark_Circle/install/sc_sensor_pkg/share/ament_index/resource_index
+creating /workspaces/Dark_Circle/install/sc_sensor_pkg/share/ament_index/resource_index/packages
+symbolically linking /workspaces/Dark_Circle/build/sc_sensor_pkg/resource/sc_sensor_pkg -> /workspaces/Dark_Circle/install/sc_sensor_pkg/share/ament_index/resource_index/packages
+symbolically linking /workspaces/Dark_Circle/build/sc_sensor_pkg/package.xml -> /workspaces/Dark_Circle/install/sc_sensor_pkg/share/sc_sensor_pkg
