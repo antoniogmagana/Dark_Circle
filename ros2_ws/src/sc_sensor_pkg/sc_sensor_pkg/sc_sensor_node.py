@@ -8,16 +8,16 @@ class PostgresSensorNode(Node):
     def __init__(self):
         super().__init__('postgres_sensor_node')
 
-        # 1. Parameters (Removed publish_rate_hz)
+        # 1. Parameters
+        # DB Connection
         self.declare_parameter('db_host', 'localhost')
         self.declare_parameter('db_port', 5432)
         self.declare_parameter('db_name', 'postgres')
         self.declare_parameter('db_user', 'postgres')
         self.declare_parameter('db_password', '')
         
-        self.declare_parameter('target_table', 'sensor_data_1')
-        self.declare_parameter('vehicle_id', 1)
-        self.declare_parameter('sensor_id', 1)
+        # Table variables
+        self.declare_parameter('target_table', 'vehicle_type_rsx')
         self.declare_parameter('sensor_lat', 0.0)
         self.declare_parameter('sensor_lon', 0.0)
 
@@ -29,8 +29,7 @@ class PostgresSensorNode(Node):
         db_password = self.get_parameter('db_password').value
         
         table_name = self.get_parameter('target_table').value
-        self.vehicle_id = self.get_parameter('vehicle_id').value
-        self.sensor_id = self.get_parameter('sensor_id').value
+        self.sensor_id = table_name.split("_")[-1]
         self.sensor_lat = self.get_parameter('sensor_lat').value
         self.sensor_lon = self.get_parameter('sensor_lon').value
 
@@ -49,7 +48,6 @@ class PostgresSensorNode(Node):
         # 3. Safely execute the SQL query
         query = sql.SQL(
             "SELECT time_stamp, amplitude FROM {table} "
-            "WHERE vehicle_id = %s AND sensor_id = %s "
             "ORDER BY time_stamp ASC"
         ).format(table=sql.Identifier(table_name))
 
@@ -81,7 +79,7 @@ class PostgresSensorNode(Node):
         # 3. Create and publish the message
         msg = RawSensorReading()
         msg.timestamp = self.get_clock().now().to_msg() 
-        msg.sensor_label = f"v{self.vehicle_id}_s{self.sensor_id}"
+        msg.sensor_label = str(self.sensor_id)
         msg.reading = float(amplitude)
         msg.latitude = float(self.sensor_lat)
         msg.longitude = float(self.sensor_lon)
