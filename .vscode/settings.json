@@ -1,3 +1,16 @@
 {
-    "cmake.sourceDirectory": "/workspaces/Dark_Circle/ros2_ws/src/ingestor_pkg"
+    "cmake.sourceDirectory": "/workspaces/Dark_Circle/ros2_ws/src/ingestor_pkg",
+    "ROS2.distro": "jazzy",
+    "python.autoComplete.extraPaths": [
+        "/workspaces/Dark_Circle/build/sc_sensor_pkg",
+        "/workspaces/Dark_Circle/install/sc_sensor_pkg/lib/python3.12/site-packages",
+        "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages",
+        "/opt/ros/jazzy/lib/python3.12/site-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/workspaces/Dark_Circle/build/sc_sensor_pkg",
+        "/workspaces/Dark_Circle/install/sc_sensor_pkg/lib/python3.12/site-packages",
+        "/workspaces/Dark_Circle/install/pipeline_interfaces/lib/python3.12/site-packages",
+        "/opt/ros/jazzy/lib/python3.12/site-packages"
+    ]
 }
