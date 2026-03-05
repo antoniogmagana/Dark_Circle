@@ -3,7 +3,7 @@ syntax = "proto3";
 package inference;
 
 // import google timestamp protobuf structure
-import google/protobuf/timestamp.proto;
+import "google/protobuf/timestamp.proto";
 
 // generic tensor structure
 message Tensor {
@@ -15,7 +15,7 @@ message Tensor {
 message SensorData {
     string sensor_id = 1;
     repeated string channels = 2;
-    google/protobuf/Timestamp time_stamp = 3;
+    google.protobuf.Timestamp time_stamp = 3;
     optional Tensor acoustic_data = 4;
     optional Tensor seismic_data = 5;
     optional Tensor accel_data = 6;
@@ -23,7 +23,7 @@ message SensorData {
 
 // Sent from Detector to Classifier (if vehicle == true)
 message DetectionResult {
-    SensorData = 1;
+    SensorData sensor_data = 1;
     bool vehicle_detected = 2;
     float confidence = 3;
 }
@@ -31,7 +31,7 @@ message DetectionResult {
 // Sent from Classifier and Detector to Egress node
 message EgressPayload {
     string sensor_id = 1;
-    google/protobuf/Timestamp timestamp = 2;
+    google.protobuf.Timestamp time_stamp = 2;
     bool vehicle_detected = 3;
     string vehicle_class = 4;
     float detection_confidence = 5;
@@ -43,16 +43,3 @@ message Ack {
     bool success = 1;
     string message = 2;
 }
-
-// gRPC services
-service InferencePipeline {
-    // Ingestor call to Detector
-    rpc RunDetection(SensorData) returns (Ack);
-
-    // Detector call to Classifier
-    rpc RunClassification(DetectionResult) returns (Ack);
-
-    // Detector or Classifier call to Egress node
-    rpc SendToEgress(EgressPayload) returns (Ack);
-}
-

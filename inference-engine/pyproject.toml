@@ -1,0 +1,20 @@
+[project]
+name = "inference-engine"
+version = "0.1.0"
+description = "developer dependency files"
+authors = [
+    {name = "Brandon Taylor",email = "btaylor9273@gmail.com"}
+]
+requires-python = ">=3.12, <3.15"
+dependencies = [
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "grpcio-tools (>=1.78.0,<2.0.0)"
+]

@@ -1,0 +1,16 @@
+[project]
+name = "infer-detect"
+version = "0.1.0"
+description = "Detector Node"
+authors = [
+    {name = "Brandon Taylor",email = "btaylor9273@gmail.com"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "protobuf (>=6.0.0,<7.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
