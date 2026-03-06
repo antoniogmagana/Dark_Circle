@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -18,6 +19,7 @@ from models import ClassificationCNN
 # =====================================================================
 # 1. SETUP & INITIALIZATION
 # =====================================================================
+os.makedirs("../models", exist_ok=True)
 print(f"Initializing Training Pipeline on: {DEVICE}")
 
 # Connect to PostgreSQL
