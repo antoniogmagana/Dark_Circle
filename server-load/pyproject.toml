@@ -3,6 +3,7 @@ name = "server-load"
 version = "0.1.0"
 description = ""
 authors = ["Brandon Taylor <btaylor9273@gmail.com>"]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.13"
