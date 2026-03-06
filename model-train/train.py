@@ -1,105 +1,251 @@
-import db_utils
-import variables
-import psycopg2
-import numpy as np
-import io
-import os
-import smote
 import torch
-from sktime.transformations.panel.rocket import (
-    MiniRocket,
-    MiniRocketMultivariate
-    )
+import torch.nn as nn
+import torch.optim as optim
+import random
+import numpy as np
+import copy
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix, classification_report
 
+# Import our custom modular pipeline
+from config import DEVICE, BATCH_SIZE, ACOUSTIC_SR, SEISMIC_SR
+from db_utils import db_connect, db_close, fetch_sensor_batch, sanitize_name
+from data_generator import upsample_seismic_fft, generate_no_vehicle_sample
+from preprocess import extract_mel_spectrogram_batch_gpu
+from models import ClassificationCNN
 
-def generate_noise(num_samples=5400, sample_rate=16000, window_seconds=1.0, encoding=0, alpha_mu=1.0):
+# =====================================================================
+# 1. SETUP & INITIALIZATION
+# =====================================================================
+print(f"Initializing Training Pipeline on: {DEVICE}")
+
+# Connect to PostgreSQL
+conn, cursor = db_connect()
+
+# 2 channels: Acoustic (1) + Seismic (1) Early Fusion
+classifier_model = ClassificationCNN(in_channels=2, num_classes=3).to(DEVICE)
+optimizer = optim.Adam(classifier_model.parameters(), lr=0.001)
+criterion = nn.CrossEntropyLoss()
+
+# Dataset map (Vehicle Class -> specific sensor node names)
+VEHICLE_MAP = {
+    0: {"name": "background", "mic": "mic_01", "geo": "geo_01"},
+    1: {"name": "tank", "mic": "mic_01", "geo": "geo_01"},
+    2: {"name": "truck", "mic": "mic_01", "geo": "geo_01"}
+}
+
+# =====================================================================
+# 2. CACHE TABLE SIZES (TIME-BASED)
+# =====================================================================
+table_max_seconds = {}
+
+def cache_table_durations(cursor, vehicle_map):
+    """Finds the maximum safe starting second 'T' for every vehicle."""
+    print("Caching table durations for time-aligned sampling...")
+    for class_id, v in vehicle_map.items():
+        if class_id == 0: 
+            continue # Skip caching for background since it's dynamically generated
+            
+        v_clean = sanitize_name(v["name"])
+        mic_clean = sanitize_name(v["mic"])
+        table_name = f"audio_16k_{v_clean}_{mic_clean}" 
+        
+        try:
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
+            total_rows = cursor.fetchone()[0]
+            # Convert total rows to total seconds, subtract 1 for the final window buffer
+            total_seconds = (total_rows // ACOUSTIC_SR) - 1 
+            table_max_seconds[class_id] = total_seconds
+            print(f" - {v['name']}: {total_seconds} seconds available.")
+        except Exception as e:
+            print(f"Warning: Could not count rows for {table_name}: {e}")
+            table_max_seconds[class_id] = 0
+
+cache_table_durations(cursor, VEHICLE_MAP)
+
+# =====================================================================
+# 3. THE TIME-ALIGNED BATCH GENERATOR WITH SPLITS
+# =====================================================================
+def build_random_batch(cursor, vehicle_map, batch_size=BATCH_SIZE, split='train'):
     """
-    Generates a matrix of synthetic pink/red noise samples using vectorized RFFT.
-    Returns: (num_samples, N + 2) array [ID, Encoding, Data...]
+    Pulls a synchronized 1-second window, applies Train/Val/Test splits,
+    injects synthetic data for Class 0, and fuses into a Tensor.
     """
-    N = int(sample_rate * window_seconds)
-    # Metadata + Data columns
-    aud_blank = np.zeros((num_samples, N + 2), dtype=np.float32)
-    aud_blank[:, 0] = np.arange(num_samples)
-    aud_blank[:, 1] = encoding
+    batch_features = []
+    batch_labels = []
+    available_classes = list(vehicle_map.keys())
     
-    # Frequency mapping
-    freqs = np.fft.rfftfreq(N, d=1/sample_rate)
-    safe_freqs = np.where(freqs == 0, 1e-6, freqs).reshape(1, -1)
+    while len(batch_features) < batch_size:
+        class_id = random.choice(available_classes)
+        v_info = vehicle_map[class_id]
+        
+        # --- SYNTHETIC NO-VEHICLE INJECTION ---
+        if class_id == 0:
+            np_acoustic = generate_no_vehicle_sample(window_length=ACOUSTIC_SR, noise_profile="environmental", amplitude=0.05)
+            np_seismic = generate_no_vehicle_sample(window_length=ACOUSTIC_SR, noise_profile="sensor_hiss", amplitude=0.01)
+            
+            t_acoustic = torch.from_numpy(np_acoustic)
+            t_seismic = torch.from_numpy(np_seismic)
+            fused_window = torch.stack((t_acoustic, t_seismic), dim=0)
+            
+            batch_features.append(fused_window)
+            batch_labels.append(class_id)
+            continue
+            
+        # --- REAL VEHICLE DATA FETCH ---
+        max_sec = table_max_seconds.get(class_id, 0)
+        if max_sec <= 0:
+            continue
+            
+        # Temporal Split Boundaries (70% Train, 15% Val, 15% Test)
+        train_bound = int(max_sec * 0.70)
+        val_bound = int(max_sec * 0.85)
+        
+        if split == 'train':
+            start_time_sec = random.randint(0, train_bound)
+        elif split == 'val':
+            start_time_sec = random.randint(train_bound, val_bound)
+        elif split == 'test':
+            start_time_sec = random.randint(val_bound, max_sec)
+            
+        acoustic_offset = start_time_sec * ACOUSTIC_SR
+        seismic_offset = start_time_sec * SEISMIC_SR
+        
+        raw_acoustic = fetch_sensor_batch(cursor, "audio_16k", v_info["name"], v_info["mic"], offset=acoustic_offset, limit=ACOUSTIC_SR)
+        raw_seismic = fetch_sensor_batch(cursor, "seismic", v_info["name"], v_info["geo"], offset=seismic_offset, limit=SEISMIC_SR)
+        
+        if not raw_acoustic or not raw_seismic or len(raw_acoustic) < ACOUSTIC_SR or len(raw_seismic) < SEISMIC_SR:
+            continue
+            
+        np_acoustic = np.array([row[0] for row in raw_acoustic], dtype=np.float32)
+        np_seismic = np.array([row[0] for row in raw_seismic], dtype=np.float32)
+        
+        # Upsample seismic to match acoustic dimensions
+        np_seismic_upsampled = upsample_seismic_fft(np_seismic, original_sr=SEISMIC_SR, target_sr=ACOUSTIC_SR)
+        
+        t_acoustic = torch.from_numpy(np_acoustic)
+        t_seismic = torch.from_numpy(np_seismic_upsampled)
+        fused_window = torch.stack((t_acoustic, t_seismic), dim=0) # Shape: (2, 16000)
+        
+        batch_features.append(fused_window)
+        batch_labels.append(class_id)
+        
+    batch_tensor = torch.stack(batch_features).to(DEVICE)
+    label_tensor = torch.tensor(batch_labels, dtype=torch.long).to(DEVICE)
     
-    # Unique alpha per sample for texture randomization
-    alphas = np.random.normal(alpha_mu, 0.1, size=(num_samples, 1))
+    return batch_tensor, label_tensor
+
+# =====================================================================
+# 4. THE TRAINING & VALIDATION LOOP
+# =====================================================================
+EPOCHS = 10
+TRAIN_BATCHES = 50 
+VAL_BATCHES = 15
+
+best_val_loss = float('inf')
+best_model_weights = copy.deepcopy(classifier_model.state_dict())
+
+train_losses, val_losses = [], []
+train_accs, val_accs = [], []
+
+print("\nStarting Training Loop...")
+
+for epoch in range(EPOCHS):
+    # --- TRAINING PHASE ---
+    classifier_model.train()
+    running_train_loss, correct_train, total_train = 0.0, 0, 0
     
-    # Generate White Noise and transform
-    white_noise = np.random.randn(num_samples, N).astype(np.float32)
-    f_space = np.fft.rfft(white_noise, axis=-1)
+    for _ in range(TRAIN_BATCHES):
+        batch_features, batch_labels = build_random_batch(cursor, VEHICLE_MAP, split='train')
+        mel_features = extract_mel_spectrogram_batch_gpu(batch_features, DEVICE)
+        
+        optimizer.zero_grad()
+        outputs = classifier_model(mel_features)
+        loss = criterion(outputs, batch_labels)
+        loss.backward()
+        optimizer.step()
+        
+        running_train_loss += loss.item()
+        _, predicted = torch.max(outputs.data, 1)
+        total_train += batch_labels.size(0)
+        correct_train += (predicted == batch_labels).sum().item()
+
+    avg_train_loss = running_train_loss / TRAIN_BATCHES
+    train_acc = (correct_train / total_train) * 100
+    train_losses.append(avg_train_loss)
+    train_accs.append(train_acc)
+
+    # --- VALIDATION PHASE ---
+    classifier_model.eval()
+    running_val_loss, correct_val, total_val = 0.0, 0, 0
     
-    # Apply 1/f^(alpha/2) filter
-    filter_matrix = 1.0 / (safe_freqs ** (alphas / 2.0))
-    filter_matrix[:, 0] = 0  # Remove DC offset
+    with torch.no_grad(): 
+        for _ in range(VAL_BATCHES):
+            batch_features, batch_labels = build_random_batch(cursor, VEHICLE_MAP, split='val')
+            mel_features = extract_mel_spectrogram_batch_gpu(batch_features, DEVICE)
+            
+            outputs = classifier_model(mel_features)
+            loss = criterion(outputs, batch_labels)
+            
+            running_val_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total_val += batch_labels.size(0)
+            correct_val += (predicted == batch_labels).sum().item()
+
+    avg_val_loss = running_val_loss / VAL_BATCHES
+    val_acc = (correct_val / total_val) * 100
+    val_losses.append(avg_val_loss)
+    val_accs.append(val_acc)
     
-    # Inverse transform
-    audio_data = np.fft.irfft(f_space * filter_matrix, n=N, axis=-1)
-    aud_blank[:, 2:] = audio_data.astype(np.float32)
+    print(f"Epoch [{epoch+1}/{EPOCHS}] | Train Loss: {avg_train_loss:.4f}, Acc: {train_acc:.1f}% | Val Loss: {avg_val_loss:.4f}, Acc: {val_acc:.1f}%")
+
+    if avg_val_loss < best_val_loss:
+        best_val_loss = avg_val_loss
+        best_model_weights = copy.deepcopy(classifier_model.state_dict())
+
+classifier_model.load_state_dict(best_model_weights)
+print("\nTraining Complete. Best validation weights loaded.")
+
+# Save the optimal weights to disk for future use
+torch.save(best_model_weights, "best_multimodal_classifier.pth")
+
+# =====================================================================
+# 5. TESTING & VISUALIZATION
+# =====================================================================
+def evaluate_and_visualize(model, cursor, vehicle_map, test_batches=20):
+    model.eval()
+    all_preds = []
+    all_labels = []
     
-    return aud_blank
-
-
-def upsample_seismic_fft(data_matrix, target_rate=16000, original_rate=100):
-    """
-    Upsamples 100Hz data to 16kHz using Spectral Interpolation (Zero-Padding).
-    Input: (num_samples, 100) matrix (raw data only, no metadata columns)
-    Output: (num_samples, 16000) matrix
-    """
-    num_samples, N_old = data_matrix.shape
-    N_new = int(N_old * (target_rate / original_rate))
+    print("Starting Final Test Evaluation on Unseen Data...")
+    with torch.no_grad():
+        for _ in range(test_batches):
+            batch_features, batch_labels = build_random_batch(cursor, vehicle_map, split='test')
+            mel_features = extract_mel_spectrogram_batch_gpu(batch_features, DEVICE)
+            
+            outputs = model(mel_features)
+            _, predicted = torch.max(outputs.data, 1)
+            
+            all_preds.extend(predicted.cpu().numpy())
+            all_labels.extend(batch_labels.cpu().numpy())
+            
+    # Print numerical report
+    target_names = [vehicle_map[i]["name"] for i in sorted(vehicle_map.keys())]
+    print("\nClassification Report:")
+    print(classification_report(all_labels, all_preds, target_names=target_names))
     
-    # 1. Transform 100Hz data to Frequency Domain
-    f_space = np.fft.rfft(data_matrix, axis=-1)
-    
-    # 2. Calculate padding to reach 16kHz (8001 bins)
-    # Original bins: (100/2)+1 = 51. Target bins: (16000/2)+1 = 8001.
-    target_bins = (target_rate // 2) + 1
-    current_bins = f_space.shape[1]
-    pad_width = target_bins - current_bins
-    
-    # Pad the end of the frequency array with zeros (High Frequencies)
-    f_padded = np.pad(f_space, ((0, 0), (0, pad_width)), mode='constant')
-    
-    # 3. Inverse RFFT and scale amplitude by the upsampling ratio
-    upsampled = np.fft.irfft(f_padded, n=N_new, axis=-1) * (N_new / N_old)
-    
-    return upsampled.astype(np.float32)
+    # Plot Confusion Matrix
+    cm = confusion_matrix(all_labels, all_preds)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=target_names, yticklabels=target_names)
+    plt.xlabel('Predicted Class')
+    plt.ylabel('Actual Class')
+    plt.title('Vehicle Classification Confusion Matrix')
+    plt.show()
 
+# Run the final evaluation block
+evaluate_and_visualize(classifier_model, cursor, VEHICLE_MAP)
 
-
-
-# ### Phase 1: Data Generation & Alignment (Completed Concepts)
-
-# * [ ] **Generate Acoustic Noise:** Create 1-second windows of 16 kHz Pink Noise ($1/f$) using the vectorized generator.
-# * [ ] **Generate Seismic Noise:** Create 1-second windows of 100 Hz Brownian/Red Noise ($1/f^2$) using the same generator.
-# * [ ] **Spectral Upsampling:** Run both your *synthetic* 100 Hz noise and your *real* 100 Hz vehicle recordings through the `upsample_seismic_fft` function to sync everything to 16 kHz.
-# * [ ] **SNR Injection:** Scale your synthetic noise amplitude to be a randomized fraction (e.g., 5% to 25%) of the standard deviation of your real vehicle signals to simulate realistic background environments.
-
-# ### Phase 2: Signal Normalization (Completed Concepts)
-
-# * [ ] **Zero-Centering (Window Level):** Subtract the local mean of each individual 1-second window to eliminate sensor drift and DC offset.
-# * [ ] **Standardization (Global Level):** Divide by the global standard deviation for each specific sensor channel so the microphone, geophone, and accelerometer are on a mathematically level playing field.
-
-# ### Phase 3: Feature Engineering (Next Steps)
-
-# * [ ] **Acoustic Features:** Convert the normalized 1D acoustic arrays into 2D Mel-Spectrograms.
-# * [ ] **Accelerometer Features:** Calculate the Signal Magnitude Vector (SMV) for the X, Y, and Z axes to make the reading rotation-invariant.
-# * [ ] **Formatting:** Shape the inputs for the specific architectures (2D for CNN, sequential 1D for LSTM, multi-channel 1D for miniROCKET).
-
-# ### Phase 4: Model Training & Evaluation
-
-# * [ ] **Train the 3x3 Matrix:** Train the CNN, LSTM, and miniROCKET independently on each sensor type.
-# * [ ] **Evaluate:** Score every model combination strictly using **Precision** (to avoid false alarms on your synthetic noise) and **Recall** (to ensure you don't miss heavy vehicles).
-
-# ### Phase 5: The Polling Engine (Late Fusion)
-
-# * [ ] **Detection Gate:** Average the probabilities from the models to make a binary decision (Vehicle Present vs. Background Noise).
-# * [ ] **Classification Vote:** If a vehicle is detected, use a weighted vote from your top-performing models to determine the final weight class.
-
-
+# Clean up the PostgreSQL connection
+db_close(conn, cursor)

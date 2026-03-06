@@ -31,14 +31,13 @@ def db_close(conn, cursor):
     cursor.close()
     conn.close()
 
-def fetch_sensor_batch(cursor, base_name, vehicle, sensor, offset=0):
+def fetch_sensor_batch(cursor, base_name, vehicle, sensor, offset=0, limit=16000):
     """
-    Fetches exactly one DB_CHUNK_SIZE of data.
+    Fetches a precise window of data.
     Automatically handles single-axis (amplitude) or tri-axial (x, y, z) schemas.
     """
     table_name = f"{base_name}_{sanitize_name(vehicle)}_{sanitize_name(sensor)}"
     
-    # Route the columns based on your load_db.py schema definitions
     if base_name == "accel":
         target_cols = "accel_x_ew, accel_y_ns, accel_z_ud"
     else:
@@ -47,17 +46,14 @@ def fetch_sensor_batch(cursor, base_name, vehicle, sensor, offset=0):
     query = sql.SQL(
         "SELECT {columns} FROM {table} ORDER BY time_stamp ASC LIMIT {limit} OFFSET {offset}"
     ).format(
-        columns=sql.SQL(target_cols), # sql.SQL allows raw comma-separated column strings
+        columns=sql.SQL(target_cols),
         table=sql.Identifier(table_name),
-        limit=sql.Literal(DB_CHUNK_SIZE),
+        limit=sql.Literal(limit), # <--- CHANGED THIS LINE
         offset=sql.Literal(offset)
     )
     
     try:
         cursor.execute(query)
-        # Returns a list of tuples. 
-        # For audio: [(0.12,), (0.15,)]
-        # For accel: [(0.1, 0.2, 0.9), (0.1, 0.3, 0.8)]
         return cursor.fetchall() 
         
     except (Exception, psycopg2.Error) as e:
