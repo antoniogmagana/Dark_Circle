@@ -10,7 +10,6 @@ import copy
 import config
 import models
 import preprocess
-import data_generator
 from db_utils import db_connect, fetch_sensor_batch, get_time_bounds
 
 
@@ -30,13 +29,6 @@ class VehicleStreamer(IterableDataset):
             ds = random.choices(config.TRAIN_DATASETS, k=1)[0]
             class_id = random.choice(list(config.CLASS_MAP.keys()))
 
-            if class_id == 0:
-                sig = data_generator.generate_no_vehicle_sample(config.ACOUSTIC_SR)
-                # Removed the .cpu() call because data_generator now handles it
-                sample = torch.stack([sig] * config.IN_CHANNELS)
-                yield sample, class_id
-                continue
-
             try:
                 v_base = random.choice(config.DATASET_VEHICLE_MAP[ds][class_id])
                 matching_tables = [
@@ -55,12 +47,17 @@ class VehicleStreamer(IterableDataset):
                 if not audio_table:
                     continue
 
-                min_t, max_t = get_time_bounds(cursor, audio_table)
+                target_run_id = None
+                if ds == "m3nvc" and class_id == 0:
+                    target_run_id = random.choice([8, 9])
+
+                min_t, max_t = get_time_bounds(
+                    cursor, audio_table, run_id=target_run_id
+                )
                 duration = max_t - min_t
                 if duration <= 1.0:
                     continue
 
-                # Abstracted Split Logic
                 train_bound = min_t + (duration * config.SPLIT_TRAIN)
                 val_bound = train_bound + (duration * config.SPLIT_VAL)
 
@@ -84,9 +81,21 @@ class VehicleStreamer(IterableDataset):
                     if not t_name:
                         break
 
-                    sr = config.ACOUSTIC_SR if "audio" in t_name else config.SEISMIC_SR
+                    # --- CRITICAL FIX: Dynamic Native Sample Rate Lookup ---
+                    sensor_type = (
+                        "audio"
+                        if "audio" in t_name
+                        else ("seismic" if "seismic" in t_name else "accel")
+                    )
+                    sr = config.NATIVE_SR[ds][sensor_type]
+
+                    # Fetches exactly 1 second based on the specific dataset and sensor's native rate
                     raw = fetch_sensor_batch(
-                        cursor, t_name, sr, start_time=window_start
+                        cursor,
+                        t_name,
+                        sr,
+                        start_time=window_start,
+                        run_id=target_run_id,
                     )
 
                     if not raw or len(raw) < sr:
@@ -104,20 +113,22 @@ class VehicleStreamer(IterableDataset):
                             [r[0] for r in raw], dtype=torch.float32
                         )
 
+                    # --- GPU UPSAMPLING ---
+                    # Upsamples the 1600 Hz or 200 Hz tensors up to the target 16000 length
                     if chan_tensor.shape[-1] != config.ACOUSTIC_SR:
                         chan_tensor = chan_tensor.unsqueeze(0).unsqueeze(0)
                         chan_tensor = preprocess.align_and_upsample(
-                            chan_tensor
+                            chan_tensor, config.ACOUSTIC_SR
                         ).squeeze()
 
                     current_channels.append(chan_tensor)
 
                 if len(current_channels) != config.IN_CHANNELS:
                     continue
+                yield torch.stack(current_channels), class_id
 
-                # Yield explicitly on CPU to guarantee safe collation
-                yield torch.stack(current_channels).cpu(), class_id
-
+            except KeyError:
+                continue
             except Exception as e:
                 continue
 
@@ -133,7 +144,6 @@ def run_training(model_class):
     else:
         lr = models.BASE_LR
 
-    # Using global batch configuration
     train_loader = DataLoader(
         VehicleStreamer("train"),
         batch_size=config.BATCH_SIZE,
@@ -158,7 +168,6 @@ def run_training(model_class):
         model.train()
         total_train_loss = 0
         for i, (features, labels) in enumerate(train_loader):
-            # Move the collated, pinned batch to the GPU seamlessly
             features, labels = features.to(config.DEVICE, non_blocking=True), labels.to(
                 config.DEVICE, non_blocking=True
             )
@@ -226,5 +235,4 @@ def run_training(model_class):
 
 
 if __name__ == "__main__":
-    # The 'spawn' workaround is removed. We default back to Linux's high-speed 'fork'.
     run_training(models.ClassificationCNN)

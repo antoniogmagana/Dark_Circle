@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import precision_score, recall_score, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -49,17 +49,14 @@ def run_evaluation():
 
     precision = precision_score(all_labels, all_preds, average=None, zero_division=0)
     recall = recall_score(all_labels, all_preds, average=None, zero_division=0)
-    f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
 
-    print("\n" + "=" * 60)
-    print(f"{'Class':<15} | {'Precision':<10} | {'Recall':<10} | {'F1 Score':<10}")
-    print("-" * 60)
+    print("\n" + "=" * 50)
+    print(f"{'Class':<15} | {'Precision':<10} | {'Recall':<10}")
+    print("-" * 50)
 
     target_names = [config.CLASS_MAP[i] for i in range(len(precision))]
     for i, name in enumerate(target_names):
-        print(
-            f"{name:<15} | {precision[i]:<10.4f} | {recall[i]:<10.4f} | {f1[i]:<10.4f}"
-        )
+        print(f"{name:<15} | {precision[i]:<10.4f} | {recall[i]:<10.4f}")
 
     cm = confusion_matrix(all_labels, all_preds)
     plt.figure(figsize=(10, 8))
