@@ -2,74 +2,62 @@ import os
 import torch
 
 # =====================================================================
-# 1. HARDWARE CONFIGURATION
+# 1. HARDWARE & DEVICE
 # =====================================================================
-if torch.backends.mps.is_available():
-    DEVICE = torch.device("mps")
-elif torch.cuda.is_available():
+if torch.cuda.is_available():
     DEVICE = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
 else:
     DEVICE = torch.device("cpu")
 
 # =====================================================================
-# 2. DATABASE CONFIGURATION
+# 2. DATABASE PARAMETERS
 # =====================================================================
 DB_CONN_PARAMS = {
     "dbname": "lvc_db",
     "user": "lvc_toolkit",
-    "password": os.environ.get("DB_PASSWORD", "default_password_if_any"),
+    "password": os.environ.get("DB_PASSWORD", "default_password"),
     "host": "localhost",
     "port": 5432,
 }
 
-# Fetch size: Exactly 64 windows at 16kHz
-DB_CHUNK_SIZE = 1024000
-
 # =====================================================================
-# 3. TRAINING SCOPE & TOGGLES
+# 3. DATASET, SENSOR & CLASS CONSTANTS
 # =====================================================================
-# Options: ["iobt"], ["focal"], or ["iobt", "focal"]
 TRAIN_DATASETS = ["iobt", "focal"]
-
-# Options: ["audio"], ["seismic"], ["accel"]
-TRAIN_SENSORS = ["audio", "seismic", "accel"]
-
-# Automatically calculates required input channels for the CNN
+TRAIN_SENSORS = ["audio", "seismic"]
 IN_CHANNELS = len(TRAIN_SENSORS)
 
-# Dataset sampling weights to balance Focal (smaller) with IoBT (larger)
-DATASET_WEIGHTS = {"iobt": 0.4, "focal": 0.6}
-
-# 20% chance to drop an entire sensor modality to train robustness
-SENSOR_DROPOUT_PROB = 0.2
-
-# Weight serialization path
-MODEL_NAME = f"model_{'_'.join(TRAIN_DATASETS)}_{'_'.join(TRAIN_SENSORS)}.pth"
-MODEL_SAVE_PATH = os.path.join("../models", MODEL_NAME)
-
-# =====================================================================
-# 4. CATEGORICAL & DATASET MAPPING
-# =====================================================================
-BATCH_SIZE = 64
 ACOUSTIC_SR = 16000
 SEISMIC_SR = 100
 
-# Global Class Mapping
-CLASS_MAP = {0: "background", 1: "light", 2: "heavy"}
+CLASS_MAP = {0: "background", 1: "vehicle"}
+DATASET_WEIGHTS = {"iobt": 0.5, "focal": 0.5}
 
-# String identifiers found in the PostgreSQL table names
 DATASET_VEHICLE_MAP = {
-    "focal": {
-        1: ["bicycle", "bicycle2", "walk", "walk2"],
-        2: [
-            "forester",
-            "forester2",
-            "mustang2",
-            "tesla",
-            "mustang0528",
-            "motor",
-            "motor2",
-        ],
-    },
-    "iobt": {1: ["polaris"], 2: ["silverado", "warhog"]},
+    "iobt": {1: ["polaris0150pm"], 2: ["silverado0255pm"]},
+    "focal": {1: ["bicycle", "bicycle2"]},
 }
+
+# =====================================================================
+# 4. REPEATED SETTINGS & ORCHESTRATION CONTROLS
+# =====================================================================
+MODEL_SAVE_PATH = "saved_models/best_vehicle_model.pth"
+
+# Training Loop Limits
+BATCH_SIZE = 128
+TRAIN_STEPS_PER_EPOCH = 50
+VAL_STEPS_PER_EPOCH = 16
+EVAL_STEPS = 50
+
+# Temporal Split Logic
+SPLIT_TRAIN = 0.70
+SPLIT_VAL = 0.15
+SPLIT_TEST = 0.15
+
+# Signal Processing & Preprocessing Controls
+MEL_BINS = 64
+MEL_HOP_LENGTH = 512
+MEL_TOP_DB = 80
+NOISE_KERNEL_SIZE = 51

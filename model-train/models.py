@@ -4,104 +4,172 @@ import torch.nn.functional as F
 import numpy as np
 from sktime.transformations.panel.rocket import MiniRocket
 from sklearn.linear_model import RidgeClassifierCV
+import config
 
 # =====================================================================
-# 1. 2D CONVOLUTIONAL NETWORKS (For Mel-Spectrograms)
+# 1. GLOBAL LEARNING DEFAULTS
 # =====================================================================
+BASE_LR = 1e-3
+BASE_DROPOUT = 0.3
+NUM_EPOCHS = 25
+
+# =====================================================================
+# 2. ARCHITECTURAL KNOBS (No Hardcoding Below)
+# =====================================================================
+
+# --- Detection CNN (2D Mel-Spectrogram) ---
+DET_CNN_LR = BASE_LR
+DET_CNN_CHANNELS = [16, 32]
+DET_CNN_KERNELS = [5, 3]
+DET_CNN_STRIDES = [2, 1]
+DET_CNN_PADS = [2, 1]
+DET_CNN_HIDDEN = 64
+
+# --- Classification CNN (2D Mel-Spectrogram) ---
+CLASS_CNN_LR = 5e-4
+CLASS_CNN_CHANNELS = [32, 64, 128, 256]
+CLASS_CNN_KERNEL = 3
+CLASS_CNN_PAD = 1
+CLASS_CNN_HIDDEN = 512
+CLASS_CNN_DROPOUT = 0.4
+
+# --- Waveform 1D CNN (Raw 16000 Samples) ---
+WAVE_CNN_LR = BASE_LR
+WAVE_CNN_CHANNELS = [32, 64, 128]
+WAVE_CNN_KERNELS = [64, 32, 16]
+WAVE_CNN_STRIDES = [8, 4, 2]
+WAVE_CNN_HIDDEN = 256
+
+# --- LSTM Networks (Raw 16000 Samples) ---
+LSTM_LR = 1e-3
+LSTM_CNN_CHANNELS = [16, 32]
+LSTM_CNN_KERNELS = [32, 16]
+LSTM_CNN_STRIDES = [8, 4]
+LSTM_CNN_POOLS = [4, 2]
+LSTM_HIDDEN = 128
+LSTM_LAYERS = 3
+LSTM_FC_DIM = 64
+LSTM_DROPOUT = BASE_DROPOUT
+
+# --- miniROCKET ---
+ROCKET_NUM_KERNELS = 10000
+ROCKET_ALPHAS = np.logspace(-3, 3, 10)
+
+# =====================================================================
+# 3. 2D CONVOLUTIONAL NETWORKS
+# =====================================================================
+
 
 class DetectionCNN(nn.Module):
-    """
-    SHALLOW 2D CNN: Fast Binary Gate (Vehicle vs. No Vehicle).
-    Expects input shape: (Batch, in_channels, Mel_Bins, Time_Steps)
-    """
-    def __init__(self, in_channels=1):
+    def __init__(
+        self, in_channels=config.IN_CHANNELS, num_classes=len(config.CLASS_MAP)
+    ):
         super(DetectionCNN, self).__init__()
-        # Shallow and wide for maximum inference speed
-        self.conv1 = nn.Conv2d(in_channels, 16, kernel_size=5, stride=2, padding=2)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
+        self.conv1 = nn.Conv2d(
+            in_channels,
+            DET_CNN_CHANNELS[0],
+            kernel_size=DET_CNN_KERNELS[0],
+            stride=DET_CNN_STRIDES[0],
+            padding=DET_CNN_PADS[0],
+        )
+        self.conv2 = nn.Conv2d(
+            DET_CNN_CHANNELS[0],
+            DET_CNN_CHANNELS[1],
+            kernel_size=DET_CNN_KERNELS[1],
+            stride=DET_CNN_STRIDES[1],
+            padding=DET_CNN_PADS[1],
+        )
         self.pool = nn.MaxPool2d(2, 2)
-        
-        # LazyLinear automatically calculates the flattened dimension
-        self.fc1 = nn.LazyLinear(64)
-        self.fc2 = nn.Linear(64, 1) # Hardcoded to 1 for Binary classification
+
+        self.fc1 = nn.LazyLinear(DET_CNN_HIDDEN)
+        self.fc2 = nn.Linear(DET_CNN_HIDDEN, num_classes)
 
     def forward(self, x):
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
-        # Sigmoid squashes output to a probability between 0.0 and 1.0
-        return torch.sigmoid(self.fc2(x))
+        return self.fc2(x)
 
 
 class ClassificationCNN(nn.Module):
-    """
-    DEEP 2D CNN: Multi-class Vehicle Identifier.
-    Expects input shape: (Batch, in_channels, Mel_Bins, Time_Steps)
-    """
-    def __init__(self, in_channels=1, num_classes=5):
+    def __init__(
+        self, in_channels=config.IN_CHANNELS, num_classes=len(config.CLASS_MAP)
+    ):
         super(ClassificationCNN, self).__init__()
-        # Deeper architecture to extract complex phase differences between channels
-        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv2d(
+            in_channels,
+            CLASS_CNN_CHANNELS[0],
+            kernel_size=CLASS_CNN_KERNEL,
+            padding=CLASS_CNN_PAD,
+        )
+        self.conv2 = nn.Conv2d(
+            CLASS_CNN_CHANNELS[0],
+            CLASS_CNN_CHANNELS[1],
+            kernel_size=CLASS_CNN_KERNEL,
+            padding=CLASS_CNN_PAD,
+        )
+        self.conv3 = nn.Conv2d(
+            CLASS_CNN_CHANNELS[1],
+            CLASS_CNN_CHANNELS[2],
+            kernel_size=CLASS_CNN_KERNEL,
+            padding=CLASS_CNN_PAD,
+        )
+        self.conv4 = nn.Conv2d(
+            CLASS_CNN_CHANNELS[2],
+            CLASS_CNN_CHANNELS[3],
+            kernel_size=CLASS_CNN_KERNEL,
+            padding=CLASS_CNN_PAD,
+        )
         self.pool = nn.MaxPool2d(2, 2)
-        
-        self.fc1 = nn.LazyLinear(512)
-        self.fc2 = nn.Linear(512, num_classes)
-        self.dropout = nn.Dropout(0.4)
+
+        self.fc1 = nn.LazyLinear(CLASS_CNN_HIDDEN)
+        self.fc2 = nn.Linear(CLASS_CNN_HIDDEN, num_classes)
+        self.dropout = nn.Dropout(CLASS_CNN_DROPOUT)
 
     def forward(self, x):
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
         x = self.pool(F.relu(self.conv3(x)))
         x = self.pool(F.relu(self.conv4(x)))
-        
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
-        # Returns raw logits for CrossEntropyLoss
-        return self.fc2(x) 
+        return self.fc2(x)
 
 
 # =====================================================================
-# 2. 1D CONVOLUTIONAL NETWORKS (For Raw Waveforms/SMV)
+# 4. 1D CONVOLUTIONAL NETWORKS
 # =====================================================================
-
-class WaveformDetectionCNN(nn.Module):
-    """
-    SHALLOW 1D CNN: Runs directly on voltage arrays for ultra-fast detection.
-    Expects input shape: (Batch, in_channels, Time_Steps)
-    """
-    def __init__(self, in_channels=1):
-        super(WaveformDetectionCNN, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels, 16, kernel_size=64, stride=16)
-        self.conv2 = nn.Conv1d(16, 32, kernel_size=16, stride=4)
-        self.fc1 = nn.LazyLinear(64)
-        self.fc2 = nn.Linear(64, 1)
-
-    def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = torch.flatten(x, 1)
-        x = F.relu(self.fc1(x))
-        return torch.sigmoid(self.fc2(x))
 
 
 class WaveformClassificationCNN(nn.Module):
-    """
-    DEEP 1D CNN: Multi-class Identifier running directly on raw arrays.
-    Expects input shape: (Batch, in_channels, Time_Steps)
-    """
-    def __init__(self, in_channels=1, num_classes=5):
+    def __init__(
+        self, in_channels=config.IN_CHANNELS, num_classes=len(config.CLASS_MAP)
+    ):
         super(WaveformClassificationCNN, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels, 32, kernel_size=64, stride=8)
-        self.conv2 = nn.Conv1d(32, 64, kernel_size=32, stride=4)
-        self.conv3 = nn.Conv1d(64, 128, kernel_size=16, stride=2)
-        self.fc1 = nn.LazyLinear(256)
-        self.fc2 = nn.Linear(256, num_classes)
-        self.dropout = nn.Dropout(0.3)
+        self.conv1 = nn.Conv1d(
+            in_channels,
+            WAVE_CNN_CHANNELS[0],
+            kernel_size=WAVE_CNN_KERNELS[0],
+            stride=WAVE_CNN_STRIDES[0],
+        )
+        self.conv2 = nn.Conv1d(
+            WAVE_CNN_CHANNELS[0],
+            WAVE_CNN_CHANNELS[1],
+            kernel_size=WAVE_CNN_KERNELS[1],
+            stride=WAVE_CNN_STRIDES[1],
+        )
+        self.conv3 = nn.Conv1d(
+            WAVE_CNN_CHANNELS[1],
+            WAVE_CNN_CHANNELS[2],
+            kernel_size=WAVE_CNN_KERNELS[2],
+            stride=WAVE_CNN_STRIDES[2],
+        )
+
+        self.fc1 = nn.LazyLinear(WAVE_CNN_HIDDEN)
+        self.fc2 = nn.Linear(WAVE_CNN_HIDDEN, num_classes)
+        self.dropout = nn.Dropout(BASE_DROPOUT)
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
@@ -114,79 +182,62 @@ class WaveformClassificationCNN(nn.Module):
 
 
 # =====================================================================
-# 3. LONG SHORT-TERM MEMORY NETWORKS (Temporal Sequences)
+# 5. LONG SHORT-TERM MEMORY NETWORKS
 # =====================================================================
-
-class DetectionLSTM(nn.Module):
-    """
-    LIGHTWEIGHT LSTM: Binary Gate looking for temporal wave patterns.
-    Expects input shape: (Batch, Time_Steps, input_size) 
-    """
-    def __init__(self, input_size=1):
-        super(DetectionLSTM, self).__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size=32, num_layers=1, batch_first=True)
-        self.fc = nn.Linear(32, 1)
-
-    def forward(self, x):
-        _, (hn, _) = self.lstm(x)
-        # Pass the final memory state through a Sigmoid
-        return torch.sigmoid(self.fc(hn[-1]))
 
 
 class ClassificationLSTM(nn.Module):
-    """
-    HEAVY LSTM: Multi-class Identifier analyzing complex rhythmic sequences.
-    Expects input shape: (Batch, Time_Steps, input_size)
-    """
-    def __init__(self, input_size=1, num_classes=5):
+    def __init__(
+        self, in_channels=config.IN_CHANNELS, num_classes=len(config.CLASS_MAP)
+    ):
         super(ClassificationLSTM, self).__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size=128, num_layers=3, batch_first=True, dropout=0.3)
-        self.fc1 = nn.Linear(128, 64)
-        self.fc2 = nn.Linear(64, num_classes)
+
+        self.cnn_frontend = nn.Sequential(
+            nn.Conv1d(
+                in_channels,
+                LSTM_CNN_CHANNELS[0],
+                kernel_size=LSTM_CNN_KERNELS[0],
+                stride=LSTM_CNN_STRIDES[0],
+            ),
+            nn.ReLU(),
+            nn.MaxPool1d(LSTM_CNN_POOLS[0]),
+            nn.Conv1d(
+                LSTM_CNN_CHANNELS[0],
+                LSTM_CNN_CHANNELS[1],
+                kernel_size=LSTM_CNN_KERNELS[1],
+                stride=LSTM_CNN_STRIDES[1],
+            ),
+            nn.ReLU(),
+            nn.MaxPool1d(LSTM_CNN_POOLS[1]),
+        )
+
+        self.lstm = nn.LSTM(
+            input_size=LSTM_CNN_CHANNELS[1],
+            hidden_size=LSTM_HIDDEN,
+            num_layers=LSTM_LAYERS,
+            batch_first=True,
+            dropout=LSTM_DROPOUT,
+        )
+        self.fc1 = nn.Linear(LSTM_HIDDEN, LSTM_FC_DIM)
+        self.fc2 = nn.Linear(LSTM_FC_DIM, num_classes)
 
     def forward(self, x):
+        x = self.cnn_frontend(x)
+        x = x.transpose(1, 2)
         _, (hn, _) = self.lstm(x)
         x = F.relu(self.fc1(hn[-1]))
-        return self.fc2(x) 
+        return self.fc2(x)
 
 
 # =====================================================================
-# 4. miniROCKET (High-Speed CPU / Linear Kernels)
+# 6. miniROCKET
 # =====================================================================
-
-class DetectionMiniRocket:
-    """
-    BINARY miniROCKET: Ultra-fast CPU Gate using Ridge Classification.
-    Expects input shape: (Batch, in_channels, Time_Steps)
-    """
-    def __init__(self):
-        # sktime's MiniRocket naturally scales to handle multi-channel inputs
-        self.transformer = MiniRocket()
-        # Ridge Classifier automatically handles binary labels (0 or 1)
-        self.classifier = RidgeClassifierCV(alphas=np.logspace(-3, 3, 10))
-        self.is_fitted = False
-
-    def fit(self, X_train, y_train):
-        X_feat = self.transformer.fit_transform(X_train)
-        self.classifier.fit(X_feat, y_train)
-        self.is_fitted = True
-
-    def predict(self, X_test):
-        if not self.is_fitted:
-            raise RuntimeError("Model must be fitted before prediction.")
-        X_feat = self.transformer.transform(X_test)
-        return self.classifier.predict(X_feat)
 
 
 class ClassificationMiniRocket:
-    """
-    MULTI-CLASS miniROCKET: Extremely fast identifier without deep learning.
-    Expects input shape: (Batch, in_channels, Time_Steps)
-    """
     def __init__(self):
-        self.transformer = MiniRocket()
-        # RidgeClassifierCV is natively multi-class capable
-        self.classifier = RidgeClassifierCV(alphas=np.logspace(-3, 3, 10))
+        self.transformer = MiniRocket(num_kernels=ROCKET_NUM_KERNELS)
+        self.classifier = RidgeClassifierCV(alphas=ROCKET_ALPHAS)
         self.is_fitted = False
 
     def fit(self, X_train, y_train):
