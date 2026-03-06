@@ -4,9 +4,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, IterableDataset
 from torch.amp import GradScaler, autocast
-
-import torch.multiprocessing as mp
-
 import random
 import copy
 
@@ -35,7 +32,8 @@ class VehicleStreamer(IterableDataset):
 
             if class_id == 0:
                 sig = data_generator.generate_no_vehicle_sample()
-                sample = torch.stack([sig] * config.IN_CHANNELS)
+                # CRITICAL FIX: Force the synthetic sample to CPU for DataLoader collation
+                sample = torch.stack([sig] * config.IN_CHANNELS).cpu()
                 yield sample, class_id
                 continue
 
@@ -116,7 +114,9 @@ class VehicleStreamer(IterableDataset):
 
                 if len(current_channels) != config.IN_CHANNELS:
                     continue
-                yield torch.stack(current_channels), class_id
+
+                # Yield explicitly on CPU to guarantee safe collation
+                yield torch.stack(current_channels).cpu(), class_id
 
             except Exception as e:
                 continue
@@ -158,6 +158,7 @@ def run_training(model_class):
         model.train()
         total_train_loss = 0
         for i, (features, labels) in enumerate(train_loader):
+            # Move the collated, pinned batch to the GPU seamlessly
             features, labels = features.to(config.DEVICE, non_blocking=True), labels.to(
                 config.DEVICE, non_blocking=True
             )
@@ -188,14 +189,16 @@ def run_training(model_class):
         with torch.no_grad():
             for i, (v_features, v_labels) in enumerate(val_loader):
                 v_features = preprocess.align_and_upsample(
-                    preprocess.zero_center_window(v_features.to(config.DEVICE))
+                    preprocess.zero_center_window(
+                        v_features.to(config.DEVICE, non_blocking=True)
+                    )
                 )
                 if isinstance(model, (models.ClassificationCNN, models.DetectionCNN)):
                     v_features = preprocess.extract_mel_spectrogram(v_features)
 
                 v_outputs = model(v_features)
                 total_val_loss += criterion(
-                    v_outputs, v_labels.to(config.DEVICE)
+                    v_outputs, v_labels.to(config.DEVICE, non_blocking=True)
                 ).item()
                 if i >= config.VAL_STEPS_PER_EPOCH - 1:
                     break
@@ -223,9 +226,12 @@ def run_training(model_class):
 
 
 if __name__ == "__main__":
+    import torch.multiprocessing as mp
 
-    # Force PyTorch to spawn fresh workers instead of forking
-    mp.set_start_method("spawn", force=True)
+    # CRITICAL FIX: Safe CUDA context initialization for background workers
+    try:
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
 
-    # Start the orchestrator
     run_training(models.ClassificationCNN)
