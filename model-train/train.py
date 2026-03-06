@@ -4,6 +4,9 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, IterableDataset
 from torch.amp import GradScaler, autocast
+
+import torch.multiprocessing as mp
+
 import random
 import copy
 
@@ -220,4 +223,9 @@ def run_training(model_class):
 
 
 if __name__ == "__main__":
+
+    # Force PyTorch to spawn fresh workers instead of forking
+    mp.set_start_method("spawn", force=True)
+
+    # Start the orchestrator
     run_training(models.ClassificationCNN)
