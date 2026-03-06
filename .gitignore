@@ -25,3 +25,4 @@ env/
 ENV/
 .vscode
 .devcontainer
+poetry.lock
