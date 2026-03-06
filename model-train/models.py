@@ -11,7 +11,7 @@ import config
 # =====================================================================
 BASE_LR = 1e-3
 BASE_DROPOUT = 0.3
-NUM_EPOCHS = 25
+NUM_EPOCHS = 5
 
 # =====================================================================
 # 2. ARCHITECTURAL KNOBS (No Hardcoding Below)

@@ -36,7 +36,7 @@ CLASS_MAP = {0: "background", 1: "vehicle"}
 DATASET_WEIGHTS = {"iobt": 0.5, "focal": 0.5}
 
 DATASET_VEHICLE_MAP = {
-    "iobt": {1: ["polaris0150pm"], 2: ["silverado0255pm"]},
+    "iobt": {1: ["polaris0150pm", "silverado0255pm"]},
     "focal": {1: ["bicycle", "bicycle2"]},
 }
 
