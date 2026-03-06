@@ -11,6 +11,7 @@ import variables
 # Database Helper Functions
 # ==========================================
 
+
 def db_connect():
     try:
         conn = psycopg2.connect(**variables.conn_params)
@@ -22,55 +23,83 @@ def db_connect():
         raise e
     return conn, cursor
 
+
 def db_close(conn, cursor):
     cursor.close()
     conn.close()
 
+
 def sanitize_name(name, max_length=25):
     """Refines a string to be a safe, clean PostgreSQL identifier."""
     clean_name = str(name).lower()
-    clean_name = re.sub(r'[^a-z0-9_]', '_', clean_name)
-    clean_name = re.sub(r'_+', '_', clean_name)
-    clean_name = clean_name.strip('_')
-    
+    clean_name = re.sub(r"[^a-z0-9_]", "_", clean_name)
+    clean_name = re.sub(r"_+", "_", clean_name)
+    clean_name = clean_name.strip("_")
+
     if clean_name and clean_name[0].isdigit():
         clean_name = f"v_{clean_name}"
-        
+
     clean_name = clean_name[:max_length]
-    
+
     if not clean_name:
         clean_name = "unknown_entity"
-        
+
     return clean_name
 
-def create_dynamic_table(conn, cursor, base_name, vehicle, sensor, schema_type):
+
+def determine_dataset(sensor_dir):
     """
-    Creates a unique table for a specific vehicle and sensor.
+    Looks inside the sensor directory to determine the origin dataset.
+    IoBT contains 'aud16000.csv' (or 'aud160000.csv'). Focal contains 'aud.csv'.
+    """
+    if (sensor_dir / "aud16000.csv").exists() or (
+        sensor_dir / "aud160000.csv"
+    ).exists():
+        return "iobt"
+    elif (sensor_dir / "aud.csv").exists():
+        return "focal"
+    return None
+
+
+def create_dynamic_table(conn, cursor, dataset, signal, vehicle, sensor, schema_type):
+    """
+    Creates a unique table enforcing the naming convention:
+    <dataset>_<signal>_<vehicle>_<sensor_id>
     schema_type: 'standard', 'triaxial', 'm3nvc_audio', or 'm3nvc_seismic'
     """
+    dataset = dataset.lower()
+    signal = signal.lower()
+
+    if dataset not in ["iobt", "focal", "m3nvc"]:
+        print(f"Warning: Unexpected dataset name '{dataset}'")
+    if signal not in ["audio", "seismic", "accel"]:
+        print(f"Warning: Unexpected signal type '{signal}'")
+
     v_clean = sanitize_name(vehicle)
     s_clean = sanitize_name(sensor)
-    table_name = f"{base_name}_{v_clean}_{s_clean}"
-    
+
+    # Construct strictly formatted table name
+    table_name = f"{dataset}_{signal}_{v_clean}_{s_clean}"
+
     schemas = {
         "standard": [
             "sample_id BIGSERIAL PRIMARY KEY",
             "time_stamp REAL NOT NULL",
-            "amplitude REAL NOT NULL"
+            "amplitude REAL NOT NULL",
         ],
         "triaxial": [
             "sample_id BIGSERIAL PRIMARY KEY",
             "time_stamp REAL NOT NULL",
             "accel_x_ew REAL",
             "accel_y_ns REAL",
-            "accel_z_ud REAL"
+            "accel_z_ud REAL",
         ],
         "m3nvc_audio": [
             "sample_id BIGSERIAL PRIMARY KEY",
             "scene_id INTEGER",
             "run_id INTEGER",
             "time_stamp REAL NOT NULL",
-            "amplitude REAL"
+            "amplitude REAL",
         ],
         "m3nvc_seismic": [
             "sample_id BIGSERIAL PRIMARY KEY",
@@ -78,23 +107,24 @@ def create_dynamic_table(conn, cursor, base_name, vehicle, sensor, schema_type):
             "run_id INTEGER",
             "time_stamp REAL NOT NULL",
             "channel VARCHAR(10)",
-            "amplitude REAL"
-        ]
+            "amplitude REAL",
+        ],
     }
-    
+
     cols = schemas.get(schema_type)
     if not cols:
         print(f"Unknown schema type: {schema_type}")
         return None
-        
+
     command = f"CREATE TABLE IF NOT EXISTS {table_name} (\n\t{',\n'.join(cols)});"
-    
+
     try:
         cursor.execute(command)
         return table_name
     except Exception as e:
         print(f"Failed to create dynamic table {table_name}: {e}")
         return None
+
 
 def get_scene_id(conn, cursor, scene_name):
     """Maintains a small registry table for M3N-VC scenes to save space in data tables."""
@@ -109,9 +139,12 @@ def get_scene_id(conn, cursor, scene_name):
     if result:
         return result[0]
     else:
-        sql_insert_query = "INSERT INTO scene_ids (scene) VALUES (%s) RETURNING scene_id"
+        sql_insert_query = (
+            "INSERT INTO scene_ids (scene) VALUES (%s) RETURNING scene_id"
+        )
         cursor.execute(sql_insert_query, (scene_name,))
         return cursor.fetchone()[0]
+
 
 def copy_to_postgres(conn, cursor, df, table_name, db_columns):
     buffer = io.StringIO()
@@ -121,67 +154,123 @@ def copy_to_postgres(conn, cursor, df, table_name, db_columns):
         cursor.copy_from(buffer, table_name, sep=",", columns=db_columns)
     except Exception as e:
         print(f"Error copying to {table_name}: {e}")
-        # Rollback is critical here so a failed copy doesn't break subsequent inserts
-        conn.rollback() 
+        conn.rollback()
 
 
 # ==========================================
-# Original Loaders (MOD_vehicle / CSV)
+# IOBT & FOCAL Loaders (CSV)
 # ==========================================
 
-def load_data(conn, cursor, data_set, root_dir, base_table_name, file_name, sep, data_cols, data_col_idx, sample_period):
+
+def load_data(
+    conn,
+    cursor,
+    path_marker,
+    root_dir,
+    signal_type,
+    file_name,
+    sep,
+    data_cols,
+    data_col_idx,
+    sample_period,
+):
     files = list(root_dir.rglob(file_name))
-    print(f"Found {len(files)} files for {base_table_name}. Starting COPY process...")
+    if not files:
+        return
+
+    print(
+        f"Found {len(files)} files for {signal_type} ({file_name}). Starting COPY process..."
+    )
 
     for file_path in files:
         parts = file_path.parts
         try:
-            MOD_idx = parts.index(data_set)
-            vehicle = parts[MOD_idx + 1]
-            sensor = parts[MOD_idx + 2]
+            # Find the path_marker ('MOD_vehicle') in the hierarchy
+            ds_idx = parts.index(path_marker)
+            # Path convention: MOD_vehicle / <vehicle> / <sensor> / <file>
+            vehicle = parts[ds_idx + 1]
+            sensor = parts[ds_idx + 2]
         except (ValueError, IndexError):
             continue
 
-        table_name = create_dynamic_table(conn, cursor, base_table_name, vehicle, sensor, "standard")
+        # Dynamically determine if this sensor folder belongs to IoBT or Focal
+        dataset_name = determine_dataset(file_path.parent)
+        if not dataset_name:
+            print(
+                f"Skipping {file_path}: Could not determine if dataset is IOBT or FOCAL (no audio file found in folder)."
+            )
+            continue
+
+        table_name = create_dynamic_table(
+            conn, cursor, dataset_name, signal_type, vehicle, sensor, "standard"
+        )
         if not table_name:
             continue
-            
-        print(f"Streaming {vehicle} sensor {sensor} into {table_name}...")
+
+        print(
+            f"Streaming {dataset_name.upper()} {vehicle} sensor {sensor} into {table_name}..."
+        )
         samples_processed = 0
 
         for chunk in pd.read_csv(
-            file_path, sep=sep, header=None, names=list(data_cols.keys()),
-            usecols=data_col_idx, dtype=data_cols, chunksize=variables.CHUNK_SIZE
+            file_path,
+            sep=sep,
+            header=None,
+            names=list(data_cols.keys()),
+            usecols=data_col_idx,
+            dtype=data_cols,
+            chunksize=variables.CHUNK_SIZE,
         ):
-            chunk["time_stamp"] = (pd.Series(range(len(chunk))) + samples_processed) * sample_period
-            
+            chunk["time_stamp"] = (
+                pd.Series(range(len(chunk))) + samples_processed
+            ) * sample_period
+
+            # Ensure we only try to insert time_stamp and amplitude into the db
             final_chunk = chunk[["time_stamp", "amplitude"]]
-            copy_to_postgres(conn, cursor, final_chunk, table_name, ("time_stamp", "amplitude"))
-            
+            copy_to_postgres(
+                conn, cursor, final_chunk, table_name, ("time_stamp", "amplitude")
+            )
+
             samples_processed += len(chunk)
 
 
-def load_tri_axial_data(conn, cursor, data_set, root_dir, base_table_name, file_map, sample_period):
+def load_tri_axial_data(
+    conn, cursor, path_marker, root_dir, signal_type, file_map, sample_period
+):
     primary_col = list(file_map.keys())[0]
     primary_file = file_map[primary_col]
 
     files = list(root_dir.rglob(primary_file))
-    print(f"Found {len(files)} potential tri-axial sets for {base_table_name}. Processing...")
+    if not files:
+        return
+
+    print(
+        f"Found {len(files)} potential tri-axial sets for {signal_type}. Processing..."
+    )
 
     for file_path in files:
         parent_dir = file_path.parent
         parts = file_path.parts
-        
+
         try:
-            MOD_idx = parts.index(data_set)
-            vehicle = parts[MOD_idx + 1]
-            sensor = parts[MOD_idx + 2]
+            # Path convention: MOD_vehicle / <vehicle> / <sensor> / <file>
+            ds_idx = parts.index(path_marker)
+            vehicle = parts[ds_idx + 1]
+            sensor = parts[ds_idx + 2]
         except (ValueError, IndexError):
+            continue
+
+        # Dynamically determine dataset based on the audio file present in the sensor folder
+        dataset_name = determine_dataset(parent_dir)
+        if not dataset_name:
+            print(
+                f"Skipping {parent_dir}: Could not determine if dataset is IOBT or FOCAL (no audio file found)."
+            )
             continue
 
         dfs = []
         valid_set = True
-        
+
         for db_col, fname in file_map.items():
             target_file = parent_dir / fname
             if not target_file.exists():
@@ -192,13 +281,15 @@ def load_tri_axial_data(conn, cursor, data_set, root_dir, base_table_name, file_
         if not valid_set:
             continue
 
-        table_name = create_dynamic_table(conn, cursor, base_table_name, vehicle, sensor, "triaxial")
+        table_name = create_dynamic_table(
+            conn, cursor, dataset_name, signal_type, vehicle, sensor, "triaxial"
+        )
         if not table_name:
             continue
 
         combined_df = pd.concat(dfs, axis=1)
         combined_df["time_stamp"] = np.arange(len(combined_df)) * sample_period
-        
+
         db_cols = ["time_stamp"] + list(file_map.keys())
         final_df = combined_df[db_cols]
 
@@ -207,8 +298,9 @@ def load_tri_axial_data(conn, cursor, data_set, root_dir, base_table_name, file_
 
 
 # ==========================================
-# New Loader (M3N-VC / Parquet)
+# M3N-VC Loader (Parquet)
 # ==========================================
+
 
 def load_m3nvc_dataset(conn, cursor, root_path):
     root = Path(root_path).expanduser()
@@ -216,13 +308,13 @@ def load_m3nvc_dataset(conn, cursor, root_path):
         print(f"Path {root} does not exist. Skipping M3N-VC.")
         return
 
+    dataset_name = "m3nvc"
     scenes = [d for d in root.iterdir() if d.is_dir()]
     print(f"Found {len(scenes)} scenes in {root_path}")
 
     for scene in scenes:
-        print(f"Processing Scene: {scene.name}")
         sc_id = get_scene_id(conn, cursor, scene.name)
-        
+
         meta_path = scene / "run_ids.parquet"
         run_map = {}
 
@@ -248,7 +340,11 @@ def load_m3nvc_dataset(conn, cursor, root_path):
         for p_file in scene.glob("*.parquet"):
             fname = p_file.name
 
-            if fname in ["run_ids.parquet", "sensor_location.parquet"] or "gps" in fname or "dis" in fname:
+            if (
+                fname in ["run_ids.parquet", "sensor_location.parquet"]
+                or "gps" in fname
+                or "dis" in fname
+            ):
                 continue
 
             match = re.match(r"run(\d+)_rs(\d+)_([a-z]{3})\.parquet", fname)
@@ -260,12 +356,12 @@ def load_m3nvc_dataset(conn, cursor, root_path):
             modality = match.group(3)
 
             if modality == "mic":
-                base_table_name = "m3nvc_audio"
+                signal_type = "audio"
                 schema_type = "m3nvc_audio"
                 sample_period = variables.ACOUSTIC_PR2
                 db_cols = ("scene_id", "run_id", "time_stamp", "amplitude")
             elif modality == "geo":
-                base_table_name = "m3nvc_seismic"
+                signal_type = "seismic"
                 schema_type = "m3nvc_seismic"
                 sample_period = variables.SEISMIC_PR2
                 db_cols = ("scene_id", "run_id", "time_stamp", "channel", "amplitude")
@@ -279,7 +375,15 @@ def load_m3nvc_dataset(conn, cursor, root_path):
             if not vehicle_label:
                 continue
 
-            table_name = create_dynamic_table(conn, cursor, base_table_name, vehicle_label, sensor_node, schema_type)
+            table_name = create_dynamic_table(
+                conn,
+                cursor,
+                dataset_name,
+                signal_type,
+                vehicle_label,
+                sensor_node,
+                schema_type,
+            )
             if not table_name:
                 continue
 
@@ -300,13 +404,15 @@ def load_m3nvc_dataset(conn, cursor, root_path):
                 else:
                     if "channel" not in df.columns:
                         df["channel"] = "UD"
-                    final_df = df[["scene_id", "run_id", "time_stamp", "channel", "amplitude"]]
+                    final_df = df[
+                        ["scene_id", "run_id", "time_stamp", "channel", "amplitude"]
+                    ]
 
                 copy_to_postgres(conn, cursor, final_df, table_name, db_cols)
 
             except Exception as e:
                 print(f"  - Error processing {fname}: {e}")
-                
+
     print("Finished loading M3N-VC dataset.")
 
 
@@ -318,38 +424,76 @@ if __name__ == "__main__":
 
     conn, cursor = db_connect()
 
-    # 1. Generate Metadata Tables (Only scene_ids is needed now)
+    # 1. Generate Metadata Tables
     try:
-        cursor.execute("CREATE TABLE IF NOT EXISTS scene_ids (scene_id SERIAL PRIMARY KEY, scene VARCHAR(50));")
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS scene_ids (scene_id SERIAL PRIMARY KEY, scene VARCHAR(50));"
+        )
         print("scene_ids registry table confirmed.")
     except Exception as e:
         print(f"Failed to create scene_ids table: {e}")
 
-    # 2. Load Original Dataset
+    # 2. Process MOD_vehicle directory (Contains both IOBT & FOCAL)
+    print("\n--- Processing IOBT & FOCAL Datasets ---")
+    root_path = Path(variables.MOD_path).expanduser()
+
+    # Load Audio (IoBT relies on aud16000.csv or aud160000.csv)
+    for audio_file in ["aud16000.csv", "aud160000.csv"]:
+        load_data(
+            conn,
+            cursor,
+            "MOD_vehicle",
+            root_path,
+            "audio",
+            audio_file,
+            ",",
+            {"amplitude": "float32"},
+            [0],
+            variables.ACOUSTIC_PR,
+        )
+
+    # Load Audio (Focal relies on aud.csv)
     load_data(
-        conn, cursor, "MOD_vehicle", Path(variables.MOD_path).expanduser(),
-        "audio_16k", "aud16000.csv", ",", {"amplitude": "float32"}, [0], variables.ACOUSTIC_PR
+        conn,
+        cursor,
+        "MOD_vehicle",
+        root_path,
+        "audio",
+        "aud.csv",
+        ",",
+        {"amplitude": "float32", "raw": "float32"},
+        [0],
+        variables.ACOUSTIC_PR,
     )
 
+    # Load Seismic (Based on ehz.csv)
     load_data(
-        conn, cursor, "MOD_vehicle", Path(variables.MOD_path).expanduser(),
-        "audio_raw", "aud.csv", ",", {"amplitude": "float32", "raw": "float32"}, [0], variables.ACOUSTIC_PR
+        conn,
+        cursor,
+        "MOD_vehicle",
+        root_path,
+        "seismic",
+        "ehz.csv",
+        " ",
+        {"amplitude": "float32"},
+        [0],
+        variables.SEISMIC_PR,
     )
 
-    load_data(
-        conn, cursor, "MOD_vehicle", Path(variables.MOD_path).expanduser(),
-        "seismic", "ehz.csv", " ", {"amplitude": "float32"}, [0], variables.SEISMIC_PR
-    )
-
+    # Load Tri-Axial Accel (Based on en*.csv)
     accel_mapping = {
         "accel_x_ew": "ene.csv",
         "accel_y_ns": "enn.csv",
         "accel_z_ud": "enz.csv",
     }
-    
     load_tri_axial_data(
-        conn, cursor, "MOD_vehicle", Path(variables.MOD_path).expanduser(),
-        "accel", accel_mapping, variables.SEISMIC_PR
+        conn,
+        cursor,
+        "MOD_vehicle",
+        root_path,
+        "accel",
+        accel_mapping,
+        variables.SEISMIC_PR,
     )
 
     # 3. Load M3N-VC Dataset
