@@ -1,5 +1,13 @@
 import os
 import torch
+
+# =====================================================================
+# CRITICAL CPU FIX 1: Prevent "Thread Explosion"
+# Forces each worker to use only 1 thread for math, preventing
+# 120-core CPUs from spawning thousands of fighting threads.
+# =====================================================================
+torch.set_num_threads(1)
+
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, IterableDataset
@@ -24,6 +32,13 @@ class VehicleStreamer(IterableDataset):
             "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
         )
         all_tables = [r[0] for r in cursor.fetchall()]
+
+        # =====================================================================
+        # CRITICAL CPU FIX 2: Boundary Caching
+        # Memorizes the MIN/MAX time of a table so we don't hammer Postgres
+        # with 6,400 full-table scans every single epoch.
+        # =====================================================================
+        bounds_cache = {}
 
         while True:
             ds = random.choices(config.TRAIN_DATASETS, k=1)[0]
@@ -51,9 +66,17 @@ class VehicleStreamer(IterableDataset):
                 if ds == "m3nvc" and class_id == 0:
                     target_run_id = random.choice([8, 9])
 
-                min_t, max_t = get_time_bounds(
-                    cursor, audio_table, run_id=target_run_id
-                )
+                # --- CACHE LOOKUP LOGIC ---
+                cache_key = f"{audio_table}_{target_run_id}"
+                if cache_key not in bounds_cache:
+                    min_t, max_t = get_time_bounds(
+                        cursor, audio_table, run_id=target_run_id
+                    )
+                    bounds_cache[cache_key] = (min_t, max_t)
+                else:
+                    min_t, max_t = bounds_cache[cache_key]
+                # --------------------------
+
                 duration = max_t - min_t
                 if duration <= 1.0:
                     continue
@@ -81,7 +104,6 @@ class VehicleStreamer(IterableDataset):
                     if not t_name:
                         break
 
-                    # --- CRITICAL FIX: Dynamic Native Sample Rate Lookup ---
                     sensor_type = (
                         "audio"
                         if "audio" in t_name
@@ -89,7 +111,6 @@ class VehicleStreamer(IterableDataset):
                     )
                     sr = config.NATIVE_SR[ds][sensor_type]
 
-                    # Fetches exactly 1 second based on the specific dataset and sensor's native rate
                     raw = fetch_sensor_batch(
                         cursor,
                         t_name,
@@ -113,8 +134,6 @@ class VehicleStreamer(IterableDataset):
                             [r[0] for r in raw], dtype=torch.float32
                         )
 
-                    # --- GPU UPSAMPLING ---
-                    # Upsamples the 1600 Hz or 200 Hz tensors up to the target 16000 length
                     if chan_tensor.shape[-1] != config.ACOUSTIC_SR:
                         chan_tensor = chan_tensor.unsqueeze(0).unsqueeze(0)
                         chan_tensor = preprocess.align_and_upsample(
@@ -144,17 +163,24 @@ def run_training(model_class):
     else:
         lr = models.BASE_LR
 
+    # =====================================================================
+    # CRITICAL CPU FIX 3: Unleash the Hardware
+    # Now that the CPU isn't thrashing, we can spin up 24 safe workers
+    # to blast your 1 TB of RAM with prefetched data.
+    # =====================================================================
     train_loader = DataLoader(
         VehicleStreamer("train"),
         batch_size=config.BATCH_SIZE,
-        num_workers=4,
+        num_workers=24,
         pin_memory=True,
+        prefetch_factor=4,
     )
     val_loader = DataLoader(
         VehicleStreamer("val"),
         batch_size=config.BATCH_SIZE,
-        num_workers=2,
+        num_workers=8,
         pin_memory=True,
+        prefetch_factor=4,
     )
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
