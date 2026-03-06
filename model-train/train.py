@@ -7,247 +7,272 @@ import numpy as np
 import copy
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.metrics import precision_score, recall_score, confusion_matrix
 
-# Import our custom modular pipeline
-from config import DEVICE, BATCH_SIZE, ACOUSTIC_SR, SEISMIC_SR
-from db_utils import db_connect, db_close, fetch_sensor_batch, sanitize_name
+from config import (
+    DEVICE,
+    BATCH_SIZE,
+    ACOUSTIC_SR,
+    SEISMIC_SR,
+    TRAIN_DATASETS,
+    TRAIN_SENSORS,
+    IN_CHANNELS,
+    DATASET_WEIGHTS,
+    SENSOR_DROPOUT_PROB,
+    CLASS_MAP,
+    DATASET_VEHICLE_MAP,
+    MODEL_SAVE_PATH,
+)
+from db_utils import db_connect, db_close, fetch_sensor_batch
 from data_generator import upsample_seismic_fft, generate_no_vehicle_sample
-from preprocess import extract_mel_spectrogram_batch_gpu
+from preprocess import extract_mel_spectrogram_batch_gpu, calculate_smv
 from models import ClassificationCNN
 
 # =====================================================================
-# 1. SETUP & INITIALIZATION
+# 1. SETUP & CACHING
 # =====================================================================
 os.makedirs("../models", exist_ok=True)
 print(f"Initializing Training Pipeline on: {DEVICE}")
 
-# Connect to PostgreSQL
 conn, cursor = db_connect()
 
-# 2 channels: Acoustic (1) + Seismic (1) Early Fusion
-classifier_model = ClassificationCNN(in_channels=2, num_classes=3).to(DEVICE)
-optimizer = optim.Adam(classifier_model.parameters(), lr=0.001)
+model = ClassificationCNN(in_channels=IN_CHANNELS, num_classes=3).to(DEVICE)
+optimizer = optim.Adam(model.parameters(), lr=0.001)
 criterion = nn.CrossEntropyLoss()
 
-# Dataset map (Vehicle Class -> specific sensor node names)
-VEHICLE_MAP = {
-    0: {"name": "background", "mic": "mic_01", "geo": "geo_01"},
-    1: {"name": "tank", "mic": "mic_01", "geo": "geo_01"},
-    2: {"name": "truck", "mic": "mic_01", "geo": "geo_01"}
-}
+# Cache table lengths to ensure safe random sampling offsets
+TABLE_MAX_SECONDS = {}
+print("Caching table durations...")
+cursor.execute(
+    "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
+)
+all_tables = [r[0] for r in cursor.fetchall()]
+
+for t in all_tables:
+    if any(t.startswith(ds) for ds in TRAIN_DATASETS):
+        cursor.execute(f"SELECT COUNT(*) FROM {t}")
+        count = cursor.fetchone()[0]
+        sr = ACOUSTIC_SR if "_audio_" in t else SEISMIC_SR
+        TABLE_MAX_SECONDS[t] = max(0, (count // sr) - 1)
+
 
 # =====================================================================
-# 2. CACHE TABLE SIZES (TIME-BASED)
+# 2. PARAMETERIZED BATCH GENERATOR
 # =====================================================================
-table_max_seconds = {}
-
-def cache_table_durations(cursor, vehicle_map):
-    """Finds the maximum safe starting second 'T' for every vehicle."""
-    print("Caching table durations for time-aligned sampling...")
-    for class_id, v in vehicle_map.items():
-        if class_id == 0: 
-            continue # Skip caching for background since it's dynamically generated
-            
-        v_clean = sanitize_name(v["name"])
-        mic_clean = sanitize_name(v["mic"])
-        table_name = f"audio_16k_{v_clean}_{mic_clean}" 
-        
-        try:
-            cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
-            total_rows = cursor.fetchone()[0]
-            # Convert total rows to total seconds, subtract 1 for the final window buffer
-            total_seconds = (total_rows // ACOUSTIC_SR) - 1 
-            table_max_seconds[class_id] = total_seconds
-            print(f" - {v['name']}: {total_seconds} seconds available.")
-        except Exception as e:
-            print(f"Warning: Could not count rows for {table_name}: {e}")
-            table_max_seconds[class_id] = 0
-
-cache_table_durations(cursor, VEHICLE_MAP)
-
-# =====================================================================
-# 3. THE TIME-ALIGNED BATCH GENERATOR WITH SPLITS
-# =====================================================================
-def build_random_batch(cursor, vehicle_map, batch_size=BATCH_SIZE, split='train'):
-    """
-    Pulls a synchronized 1-second window, applies Train/Val/Test splits,
-    injects synthetic data for Class 0, and fuses into a Tensor.
-    """
+def build_parameterized_batch(cursor, batch_size=BATCH_SIZE, split="train"):
     batch_features = []
     batch_labels = []
-    available_classes = list(vehicle_map.keys())
-    
+
+    ds_choices = [ds for ds in TRAIN_DATASETS if ds in DATASET_WEIGHTS]
+    ds_weights = [DATASET_WEIGHTS[ds] for ds in ds_choices]
+
     while len(batch_features) < batch_size:
-        class_id = random.choice(available_classes)
-        v_info = vehicle_map[class_id]
-        
-        # --- SYNTHETIC NO-VEHICLE INJECTION ---
+        ds = random.choices(ds_choices, weights=ds_weights, k=1)[0]
+        class_id = random.choice([0, 1, 2])
+
+        # --- SYNTHETIC BACKGROUND ---
         if class_id == 0:
-            np_acoustic = generate_no_vehicle_sample(window_length=ACOUSTIC_SR, noise_profile="environmental", amplitude=0.05)
-            np_seismic = generate_no_vehicle_sample(window_length=ACOUSTIC_SR, noise_profile="sensor_hiss", amplitude=0.01)
-            
-            t_acoustic = torch.from_numpy(np_acoustic)
-            t_seismic = torch.from_numpy(np_seismic)
-            fused_window = torch.stack((t_acoustic, t_seismic), dim=0)
-            
-            batch_features.append(fused_window)
+            syn_channels = []
+            if "audio" in TRAIN_SENSORS:
+                np_a = generate_no_vehicle_sample(ACOUSTIC_SR, "environmental", 0.05)
+                syn_channels.append(torch.from_numpy(np_a))
+            if "seismic" in TRAIN_SENSORS or "accel" in TRAIN_SENSORS:
+                np_s = generate_no_vehicle_sample(ACOUSTIC_SR, "sensor_hiss", 0.01)
+                if "seismic" in TRAIN_SENSORS:
+                    syn_channels.append(torch.from_numpy(np_s))
+                if "accel" in TRAIN_SENSORS:
+                    syn_channels.append(torch.from_numpy(np_s))
+
+            batch_features.append(torch.stack(syn_channels, dim=0))
             batch_labels.append(class_id)
             continue
-            
-        # --- REAL VEHICLE DATA FETCH ---
-        max_sec = table_max_seconds.get(class_id, 0)
+
+        # --- REAL VEHICLE DATA ---
+        v_base = random.choice(DATASET_VEHICLE_MAP[ds][class_id])
+        matching_tables = [t for t in all_tables if f"{ds}_" in t and f"_{v_base}" in t]
+
+        if not matching_tables:
+            continue
+
+        # Group by rs node
+        nodes = list(set([t.split("_")[-1] for t in matching_tables]))
+        rs = random.choice(nodes)
+
+        node_tables = [t for t in matching_tables if t.endswith(rs)]
+        audio_t = next((t for t in node_tables if "_audio_" in t), None)
+        seis_t = next((t for t in node_tables if "_seismic_" in t), None)
+        accel_t = next((t for t in node_tables if "_accel_" in t), None)
+
+        # Verify required tables exist for the requested sensors
+        valid = True
+        if "audio" in TRAIN_SENSORS and not audio_t:
+            valid = False
+        if "seismic" in TRAIN_SENSORS and not seis_t:
+            valid = False
+        if "accel" in TRAIN_SENSORS and not accel_t:
+            valid = False
+        if not valid:
+            continue
+
+        # Temporal Split logic (70/15/15)
+        ref_table = audio_t if audio_t else (seis_t if seis_t else accel_t)
+        max_sec = TABLE_MAX_SECONDS.get(ref_table, 0)
         if max_sec <= 0:
             continue
-            
-        # Temporal Split Boundaries (70% Train, 15% Val, 15% Test)
+
         train_bound = int(max_sec * 0.70)
         val_bound = int(max_sec * 0.85)
-        
-        if split == 'train':
+
+        if split == "train":
             start_time_sec = random.randint(0, train_bound)
-        elif split == 'val':
+        elif split == "val":
             start_time_sec = random.randint(train_bound, val_bound)
-        elif split == 'test':
+        else:
             start_time_sec = random.randint(val_bound, max_sec)
-            
-        acoustic_offset = start_time_sec * ACOUSTIC_SR
-        seismic_offset = start_time_sec * SEISMIC_SR
-        
-        raw_acoustic = fetch_sensor_batch(cursor, "audio_16k", v_info["name"], v_info["mic"], offset=acoustic_offset, limit=ACOUSTIC_SR)
-        raw_seismic = fetch_sensor_batch(cursor, "seismic", v_info["name"], v_info["geo"], offset=seismic_offset, limit=SEISMIC_SR)
-        
-        if not raw_acoustic or not raw_seismic or len(raw_acoustic) < ACOUSTIC_SR or len(raw_seismic) < SEISMIC_SR:
+
+        current_channels = []
+
+        if "audio" in TRAIN_SENSORS:
+            raw_a = fetch_sensor_batch(
+                cursor, audio_t, ACOUSTIC_SR, start_time_sec * ACOUSTIC_SR
+            )
+            current_channels.append(
+                torch.from_numpy(np.array([r[0] for r in raw_a], dtype=np.float32))
+            )
+
+        if "seismic" in TRAIN_SENSORS:
+            raw_s = fetch_sensor_batch(
+                cursor, seis_t, SEISMIC_SR, start_time_sec * SEISMIC_SR
+            )
+            np_s = np.array([r[0] for r in raw_s], dtype=np.float32)
+            current_channels.append(
+                torch.from_numpy(upsample_seismic_fft(np_s, SEISMIC_SR, ACOUSTIC_SR))
+            )
+
+        if "accel" in TRAIN_SENSORS:
+            raw_acc = fetch_sensor_batch(
+                cursor, accel_t, SEISMIC_SR, start_time_sec * SEISMIC_SR
+            )
+            if len(raw_acc) == SEISMIC_SR:
+                ax, ay, az = zip(*raw_acc)
+                smv = calculate_smv(np.array(ax), np.array(ay), np.array(az))
+                current_channels.append(
+                    torch.from_numpy(upsample_seismic_fft(smv, SEISMIC_SR, ACOUSTIC_SR))
+                )
+            else:
+                # Fallback zero-pad if accel data is corrupted or short
+                current_channels.append(torch.zeros(ACOUSTIC_SR, dtype=torch.float32))
+
+        # Sensor Dropout (Only for multi-sensor training in train split)
+        if (
+            len(TRAIN_SENSORS) > 1
+            and split == "train"
+            and random.random() < SENSOR_DROPOUT_PROB
+        ):
+            drop_idx = random.randint(0, len(current_channels) - 1)
+            current_channels[drop_idx] = torch.zeros_like(current_channels[drop_idx])
+
+        # Ensure all channels successfully pulled data
+        if any(c.shape[0] < ACOUSTIC_SR for c in current_channels):
             continue
-            
-        np_acoustic = np.array([row[0] for row in raw_acoustic], dtype=np.float32)
-        np_seismic = np.array([row[0] for row in raw_seismic], dtype=np.float32)
-        
-        # Upsample seismic to match acoustic dimensions
-        np_seismic_upsampled = upsample_seismic_fft(np_seismic, original_sr=SEISMIC_SR, target_sr=ACOUSTIC_SR)
-        
-        t_acoustic = torch.from_numpy(np_acoustic)
-        t_seismic = torch.from_numpy(np_seismic_upsampled)
-        fused_window = torch.stack((t_acoustic, t_seismic), dim=0) # Shape: (2, 16000)
-        
-        batch_features.append(fused_window)
+
+        batch_features.append(torch.stack(current_channels))
         batch_labels.append(class_id)
-        
-    batch_tensor = torch.stack(batch_features).to(DEVICE)
-    label_tensor = torch.tensor(batch_labels, dtype=torch.long).to(DEVICE)
-    
-    return batch_tensor, label_tensor
+
+    return torch.stack(batch_features).to(DEVICE), torch.tensor(
+        batch_labels, dtype=torch.long
+    ).to(DEVICE)
+
 
 # =====================================================================
-# 4. THE TRAINING & VALIDATION LOOP
+# 3. TRAINING LOOP
 # =====================================================================
 EPOCHS = 10
-TRAIN_BATCHES = 50 
+TRAIN_BATCHES = 50
 VAL_BATCHES = 15
 
-best_val_loss = float('inf')
-best_model_weights = copy.deepcopy(classifier_model.state_dict())
-
-train_losses, val_losses = [], []
-train_accs, val_accs = [], []
+best_val_loss = float("inf")
+best_model_weights = copy.deepcopy(model.state_dict())
 
 print("\nStarting Training Loop...")
 
 for epoch in range(EPOCHS):
-    # --- TRAINING PHASE ---
-    classifier_model.train()
-    running_train_loss, correct_train, total_train = 0.0, 0, 0
-    
+    model.train()
+    running_train_loss = 0.0
+
     for _ in range(TRAIN_BATCHES):
-        batch_features, batch_labels = build_random_batch(cursor, VEHICLE_MAP, split='train')
+        batch_features, batch_labels = build_parameterized_batch(cursor, split="train")
         mel_features = extract_mel_spectrogram_batch_gpu(batch_features, DEVICE)
-        
+
         optimizer.zero_grad()
-        outputs = classifier_model(mel_features)
+        outputs = model(mel_features)
         loss = criterion(outputs, batch_labels)
         loss.backward()
         optimizer.step()
-        
         running_train_loss += loss.item()
-        _, predicted = torch.max(outputs.data, 1)
-        total_train += batch_labels.size(0)
-        correct_train += (predicted == batch_labels).sum().item()
 
-    avg_train_loss = running_train_loss / TRAIN_BATCHES
-    train_acc = (correct_train / total_train) * 100
-    train_losses.append(avg_train_loss)
-    train_accs.append(train_acc)
-
-    # --- VALIDATION PHASE ---
-    classifier_model.eval()
-    running_val_loss, correct_val, total_val = 0.0, 0, 0
-    
-    with torch.no_grad(): 
-        for _ in range(VAL_BATCHES):
-            batch_features, batch_labels = build_random_batch(cursor, VEHICLE_MAP, split='val')
-            mel_features = extract_mel_spectrogram_batch_gpu(batch_features, DEVICE)
-            
-            outputs = classifier_model(mel_features)
-            loss = criterion(outputs, batch_labels)
-            
-            running_val_loss += loss.item()
-            _, predicted = torch.max(outputs.data, 1)
-            total_val += batch_labels.size(0)
-            correct_val += (predicted == batch_labels).sum().item()
-
-    avg_val_loss = running_val_loss / VAL_BATCHES
-    val_acc = (correct_val / total_val) * 100
-    val_losses.append(avg_val_loss)
-    val_accs.append(val_acc)
-    
-    print(f"Epoch [{epoch+1}/{EPOCHS}] | Train Loss: {avg_train_loss:.4f}, Acc: {train_acc:.1f}% | Val Loss: {avg_val_loss:.4f}, Acc: {val_acc:.1f}%")
-
-    if avg_val_loss < best_val_loss:
-        best_val_loss = avg_val_loss
-        best_model_weights = copy.deepcopy(classifier_model.state_dict())
-
-classifier_model.load_state_dict(best_model_weights)
-print("\nTraining Complete. Best validation weights loaded.")
-
-# Save the optimal weights to disk for future use
-torch.save(best_model_weights, "../models/best_multimodal_classifier.pth")
-
-# =====================================================================
-# 5. TESTING & VISUALIZATION
-# =====================================================================
-def evaluate_and_visualize(model, cursor, vehicle_map, test_batches=20):
     model.eval()
-    all_preds = []
-    all_labels = []
-    
-    print("Starting Final Test Evaluation on Unseen Data...")
+    running_val_loss = 0.0
     with torch.no_grad():
-        for _ in range(test_batches):
-            batch_features, batch_labels = build_random_batch(cursor, vehicle_map, split='test')
+        for _ in range(VAL_BATCHES):
+            batch_features, batch_labels = build_parameterized_batch(
+                cursor, split="val"
+            )
             mel_features = extract_mel_spectrogram_batch_gpu(batch_features, DEVICE)
-            
             outputs = model(mel_features)
-            _, predicted = torch.max(outputs.data, 1)
-            
-            all_preds.extend(predicted.cpu().numpy())
-            all_labels.extend(batch_labels.cpu().numpy())
-            
-    # Print numerical report
-    target_names = [vehicle_map[i]["name"] for i in sorted(vehicle_map.keys())]
-    print("\nClassification Report:")
-    print(classification_report(all_labels, all_preds, target_names=target_names))
-    
-    # Plot Confusion Matrix
-    cm = confusion_matrix(all_labels, all_preds)
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=target_names, yticklabels=target_names)
-    plt.xlabel('Predicted Class')
-    plt.ylabel('Actual Class')
-    plt.title('Vehicle Classification Confusion Matrix')
-    plt.show()
+            loss = criterion(outputs, batch_labels)
+            running_val_loss += loss.item()
 
-# Run the final evaluation block
-evaluate_and_visualize(classifier_model, cursor, VEHICLE_MAP)
+    avg_t_loss = running_train_loss / TRAIN_BATCHES
+    avg_v_loss = running_val_loss / VAL_BATCHES
+    print(
+        f"Epoch [{epoch+1}/{EPOCHS}] | Train Loss: {avg_t_loss:.4f} | Val Loss: {avg_v_loss:.4f}"
+    )
 
-# Clean up the PostgreSQL connection
+    if avg_v_loss < best_val_loss:
+        best_val_loss = avg_v_loss
+        best_model_weights = copy.deepcopy(model.state_dict())
+
+# Save optimal weights with metadata
+print(f"\nTraining Complete. Saving weights to {MODEL_SAVE_PATH}")
+torch.save(
+    {
+        "model_state_dict": best_model_weights,
+        "sensors": TRAIN_SENSORS,
+        "datasets": TRAIN_DATASETS,
+        "in_channels": IN_CHANNELS,
+    },
+    MODEL_SAVE_PATH,
+)
+
+# =====================================================================
+# 4. FINAL EVALUATION (TEST SPLIT)
+# =====================================================================
+model.load_state_dict(best_model_weights)
+model.eval()
+all_preds, all_labels = [], []
+
+print("Starting Final Test Evaluation on Unseen Data...")
+with torch.no_grad():
+    for _ in range(20):
+        batch_features, batch_labels = build_parameterized_batch(cursor, split="test")
+        mel_features = extract_mel_spectrogram_batch_gpu(batch_features, DEVICE)
+
+        outputs = model(mel_features)
+        _, predicted = torch.max(outputs.data, 1)
+
+        all_preds.extend(predicted.cpu().numpy())
+        all_labels.extend(batch_labels.cpu().numpy())
+
+# Evaluation restricted to Precision and Recall
+precision = precision_score(all_labels, all_preds, average=None, zero_division=0)
+recall = recall_score(all_labels, all_preds, average=None, zero_division=0)
+
+target_names = [CLASS_MAP[i] for i in range(3)]
+print("\nClassification Evaluation Metrics:")
+print(f"{'Class':<15} | {'Precision':<10} | {'Recall':<10}")
+print("-" * 40)
+for i, name in enumerate(target_names):
+    print(f"{name:<15} | {precision[i]:<10.4f} | {recall[i]:<10.4f}")
+
 db_close(conn, cursor)

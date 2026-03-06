@@ -1,20 +1,22 @@
 import psycopg2
 from psycopg2 import sql
 import re
-from config import DB_CONN_PARAMS, DB_CHUNK_SIZE
+from config import DB_CONN_PARAMS
+
 
 def sanitize_name(name, max_length=25):
-    """Replicated exactly from load_db.py to ensure perfect table name matching."""
+    """Refines a string to be a safe, clean PostgreSQL identifier."""
     clean_name = str(name).lower()
-    clean_name = re.sub(r'[^a-z0-9_]', '_', clean_name)
-    clean_name = re.sub(r'_+', '_', clean_name)
-    clean_name = clean_name.strip('_')
+    clean_name = re.sub(r"[^a-z0-9_]", "_", clean_name)
+    clean_name = re.sub(r"_+", "_", clean_name)
+    clean_name = clean_name.strip("_")
     if clean_name and clean_name[0].isdigit():
         clean_name = f"v_{clean_name}"
     clean_name = clean_name[:max_length]
     if not clean_name:
         clean_name = "unknown_entity"
     return clean_name
+
 
 def db_connect():
     try:
@@ -27,18 +29,18 @@ def db_connect():
         raise e
     return conn, cursor
 
+
 def db_close(conn, cursor):
     cursor.close()
     conn.close()
 
-def fetch_sensor_batch(cursor, base_name, vehicle, sensor, offset=0, limit=16000):
+
+def fetch_sensor_batch(cursor, table_name, limit, offset):
     """
     Fetches a precise window of data.
-    Automatically handles single-axis (amplitude) or tri-axial (x, y, z) schemas.
+    Infers schema (amplitude vs tri-axial) directly from the table name.
     """
-    table_name = f"{base_name}_{sanitize_name(vehicle)}_{sanitize_name(sensor)}"
-    
-    if base_name == "accel":
+    if "_accel_" in table_name:
         target_cols = "accel_x_ew, accel_y_ns, accel_z_ud"
     else:
         target_cols = "amplitude"
@@ -48,14 +50,14 @@ def fetch_sensor_batch(cursor, base_name, vehicle, sensor, offset=0, limit=16000
     ).format(
         columns=sql.SQL(target_cols),
         table=sql.Identifier(table_name),
-        limit=sql.Literal(limit), # <--- CHANGED THIS LINE
-        offset=sql.Literal(offset)
+        limit=sql.Literal(limit),
+        offset=sql.Literal(offset),
     )
-    
+
     try:
         cursor.execute(query)
-        return cursor.fetchall() 
-        
+        return cursor.fetchall()
+
     except (Exception, psycopg2.Error) as e:
         print(f"Error fetching data from {table_name}: {e}")
         return []
