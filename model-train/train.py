@@ -208,7 +208,7 @@ classifier_model.load_state_dict(best_model_weights)
 print("\nTraining Complete. Best validation weights loaded.")
 
 # Save the optimal weights to disk for future use
-torch.save(best_model_weights, "best_multimodal_classifier.pth")
+torch.save(best_model_weights, "../models/best_multimodal_classifier.pth")
 
 # =====================================================================
 # 5. TESTING & VISUALIZATION
