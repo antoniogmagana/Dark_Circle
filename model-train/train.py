@@ -31,9 +31,9 @@ class VehicleStreamer(IterableDataset):
             class_id = random.choice(list(config.CLASS_MAP.keys()))
 
             if class_id == 0:
-                sig = data_generator.generate_no_vehicle_sample()
-                # CRITICAL FIX: Force the synthetic sample to CPU for DataLoader collation
-                sample = torch.stack([sig] * config.IN_CHANNELS).cpu()
+                sig = data_generator.generate_no_vehicle_sample(config.ACOUSTIC_SR)
+                # Removed the .cpu() call because data_generator now handles it
+                sample = torch.stack([sig] * config.IN_CHANNELS)
                 yield sample, class_id
                 continue
 
@@ -226,12 +226,5 @@ def run_training(model_class):
 
 
 if __name__ == "__main__":
-    import torch.multiprocessing as mp
-
-    # CRITICAL FIX: Safe CUDA context initialization for background workers
-    try:
-        mp.set_start_method("spawn", force=True)
-    except RuntimeError:
-        pass
-
+    # The 'spawn' workaround is removed. We default back to Linux's high-speed 'fork'.
     run_training(models.ClassificationCNN)
