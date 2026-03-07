@@ -6,6 +6,8 @@ import numpy as np
 from sktime.transformations.panel.rocket import MiniRocket
 from sklearn.linear_model import RidgeClassifierCV
 
+import config
+
 # =====================================================================
 # 1. GLOBAL LEARNING DEFAULTS
 # =====================================================================
@@ -288,3 +290,20 @@ MODEL_REGISTRY = {
     "ClassificationMiniRocket": ClassificationMiniRocket,
     # ADD MORE AS NEEDED
 }
+
+
+def build_model(input_channels, num_classes):
+    """
+    Build the model specified in config.MODEL_NAME.
+    All models must be registered in MODEL_REGISTRY.
+    """
+    model_name = config.MODEL_NAME
+
+    if model_name not in MODEL_REGISTRY:
+        raise ValueError(f"Unknown model: {model_name}")
+
+    ModelClass = MODEL_REGISTRY[model_name]
+
+    return ModelClass(
+        in_channels=input_channels, num_classes=num_classes, use_mel=config.USE_MEL
+    )
