@@ -101,6 +101,10 @@ class VehicleDataset(Dataset):
     # PyTorch Dataset API
     # ============================================================
 
+    def set_normalization(self, sensor_mins, sensor_maxs):
+        self.sensor_mins = sensor_mins
+        self.sensor_maxs = sensor_maxs
+
     def __len__(self):
         return len(self.index)
 
@@ -140,7 +144,17 @@ class VehicleDataset(Dataset):
                 # Resample to global reference rate
                 arr = resample_to(arr, sr_native, self.ref_sr)
 
-            chunk_data.append(arr)
+                # -----------------------------
+                # Apply min/max normalization
+                # -----------------------------
+                min_v = self.sensor_mins[sensor]
+                max_v = self.sensor_maxs[sensor]
+
+                # Avoid divide-by-zero
+                arr = (arr - min_v) / (max_v - min_v + 1e-8)  # [0,1]
+                arr = arr * 2 - 1  # [-1,1]
+
+                chunk_data.append(arr)
 
         # Concatenate channels: [audio, seismic, accel_x, accel_y, accel_z]
         window = torch.cat(chunk_data, dim=0)

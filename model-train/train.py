@@ -71,6 +71,36 @@ def evaluate(model, loader, criterion, device, use_mel):
     return total_loss / total_samples, total_correct / total_samples
 
 
+def compute_sensor_stats(dataset):
+    mins = {s: float("inf") for s in config.TRAIN_SENSORS}
+    maxs = {s: float("-inf") for s in config.TRAIN_SENSORS}
+
+    for i in range(len(dataset)):
+        ds, inst, sec = dataset.index[i]
+        tables = dataset.instance_to_tables[inst]
+
+        for sensor in config.TRAIN_SENSORS:
+            matches = [t for t in tables if f"_{sensor}_" in t]
+            if not matches:
+                continue
+
+            table = matches[0]
+            sr_native = config.NATIVE_SR[ds][sensor]
+            raw = fetch_sensor_batch(dataset.cursor, table, sr_native, sec)
+            if not raw:
+                continue
+
+            if sensor == "accel":
+                arr = torch.tensor(raw, dtype=torch.float32).T
+            else:
+                arr = torch.tensor([r[0] for r in raw], dtype=torch.float32)[None, :]
+
+            mins[sensor] = min(mins[sensor], arr.min().item())
+            maxs[sensor] = max(maxs[sensor], arr.max().item())
+
+    return mins, maxs
+
+
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
@@ -79,7 +109,11 @@ def main():
     # Datasets and loaders
     # ------------------------------------------------------------
     train_ds = VehicleDataset(split="train")
+    sensor_mins, sensor_maxs = compute_sensor_stats(train_ds)
+    train_ds.set_normalization(sensor_mins, sensor_maxs)
+
     val_ds = VehicleDataset(split="val")
+    val_ds.set_normalization(sensor_mins, sensor_maxs)
 
     train_loader = DataLoader(
         train_ds,
