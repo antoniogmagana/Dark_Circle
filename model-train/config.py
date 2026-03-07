@@ -2,6 +2,25 @@ import os
 import random
 import torch
 
+
+# ============================================================
+# Training hyperparameters
+# ============================================================
+
+# Core training loop settings
+LEARNING_RATE = 1e-4
+BATCH_SIZE = 128
+EPOCHS = 5
+NUM_WORKERS = 12
+LOG_INTERVAL = 50
+
+# Checkpoint + evaluation output directories
+CHECKPOINT_DIR = "./checkpoints"
+EVAL_RESULTS_DIR = "./eval_results"
+
+# How many batches eval.py should run before stopping
+EVAL_STEPS = 200
+
 # =====================================================================
 # 1. HARDWARE & DEVICE
 # =====================================================================
@@ -23,7 +42,6 @@ DB_CONN_PARAMS = {
     "port": 5432,
 }
 
-NUM_WORKERS = 12
 
 # =====================================================================
 # 3. TRAINING MODE (NEW)
@@ -143,8 +161,7 @@ MODEL_SAVE_PATH = f"saved_models/{MODEL_NAME}_best.pth"
 BATCH_SIZE = 128
 TRAIN_STEPS_PER_EPOCH = 50
 VAL_STEPS_PER_EPOCH = 16
-EVAL_STEPS = 50
-LEARNING_RATE = 1e-4
+
 
 SPLIT_TRAIN = 0.70
 SPLIT_VAL = 0.15
@@ -192,5 +209,3 @@ EITHER_MODELS = [
 
 USE_MEL = True
 BATCH_MODE = True
-EVAL_RESULTS_DIR = "./eval_results"
-CHECKPOINT_DIR = "./checkpoints"
