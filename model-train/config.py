@@ -3,6 +3,11 @@ import random
 import torch
 
 
+# ===========================================================
+# Globals
+# ===========================================================
+
+
 # ============================================================
 # Training hyperparameters
 # ============================================================
@@ -73,6 +78,9 @@ NATIVE_SR = {
     "focal": {"audio": 16000, "seismic": 100, "accel": 100},
     "m3nvc": {"audio": 1600, "seismic": 200, "accel": 200},
 }
+
+# Global reference sample rate for all sensors/datasets
+REF_SAMPLE_RATE = max(NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_SENSORS)
 
 # Semantic category names (used for category-level classification)
 CLASS_MAP = {0: "background", 1: "light", 2: "heavy"}

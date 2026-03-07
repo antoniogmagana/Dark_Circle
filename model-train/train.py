@@ -143,7 +143,7 @@ class VehicleStreamer(IterableDataset):
             label = assign_label(ds, instance)
 
             # Determine reference sample rate (highest among sensors for this dataset)
-            sr_native_ref = max(config.NATIVE_SR[ds][s] for s in self.sensors)
+            sr_native_ref = config.REF_SAMPLE_RATE
 
             # For each run, we need time bounds from one representative table
             rep_table = matching_tables[0]
