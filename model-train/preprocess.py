@@ -125,3 +125,17 @@ def preprocess_for_training(batch_tensor, use_mel=True):
         batch_tensor = extract_mel_spectrogram(batch_tensor)
 
     return batch_tensor
+
+
+def resample_to(x: torch.Tensor, orig_sr: int, target_sr: int) -> torch.Tensor:
+    """
+    x: [C, T_orig]
+    returns: [C, T_target]
+    """
+    if orig_sr == target_sr:
+        return x
+    C, T = x.shape
+    new_T = int(round(T * target_sr / orig_sr))
+    x = x.unsqueeze(0)  # [1, C, T]
+    x = F.interpolate(x, size=new_T, mode="linear", align_corners=False)
+    return x.squeeze(0)

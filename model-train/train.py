@@ -5,6 +5,7 @@ from datetime import datetime
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, IterableDataset
 
 import config
@@ -13,6 +14,7 @@ from preprocess import (
     preprocess_for_training,
     preprocess_window,
     extract_mel_spectrogram,
+    resample_to,
 )
 from models import MODEL_REGISTRY
 
@@ -60,151 +62,159 @@ def assign_label(dataset: str, instance: str) -> int:
 
 
 class VehicleStreamer(IterableDataset):
-    def __init__(self, split="train"):
+    def __init__(self, split: str):
         super().__init__()
+        assert split in {"train", "val", "test"}
         self.split = split
+
         self.chunk_seconds = config.CHUNK_SECONDS
         self.sample_seconds = config.SAMPLE_SECONDS
 
+        self.datasets = config.TRAIN_DATASETS
+        self.sensors = config.TRAIN_SENSORS
+
+        # Precompute split thresholds
+        self.split_train = config.SPLIT_TRAIN
+        self.split_val = config.SPLIT_VAL
+        self.split_test = config.SPLIT_TEST
+
+    def _iter_tables(self, cursor, ds_name):
+        """
+        Yield table names for a given dataset.
+        Assumes your DB has tables like: {dataset}_{sensor}_{instance}_rsX
+        """
+        cursor.execute(
+            f"""
+            SELECT tablename
+            FROM pg_tables
+            WHERE schemaname = 'public'
+              AND tablename LIKE '{ds_name}_%';
+            """
+        )
+        for (tname,) in cursor.fetchall():
+            yield tname
+
+    def _choose_split(self, rng_val: float) -> str:
+        if rng_val < self.split_train:
+            return "train"
+        elif rng_val < self.split_train + self.split_val:
+            return "val"
+        else:
+            return "test"
+
     def __iter__(self):
         conn, cursor = db_connect()
+        print("Connected to PostgreSQL successfully.")
 
-        cursor.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema='public'"
-        )
-        all_tables = [r[0] for r in cursor.fetchall()]
-
-        bounds_cache = {}
-
+        # Infinite stream; DataLoader will stop based on epoch size
         while True:
-            # -----------------------------
-            # Pick dataset
-            # -----------------------------
-            ds = random.choice(config.TRAIN_DATASETS)
-            ds_tables = [t for t in all_tables if t.startswith(ds + "_")]
-            if not ds_tables:
+            # Pick a dataset at random
+            ds = random.choice(self.datasets)
+
+            # Get all tables for this dataset
+            tables = list(self._iter_tables(cursor, ds))
+            if not tables:
                 continue
 
-            # -----------------------------
-            # Pick a table and extract instance
-            # -----------------------------
-            table_name = random.choice(ds_tables)
-            instance = extract_instance_from_table(table_name)
+            # Group tables by instance (so we can pick consistent sensor sets)
+            instance_to_tables = {}
+            for t in tables:
+                inst = extract_instance_from_table(t)
+                instance_to_tables.setdefault(inst, []).append(t)
 
-            # -----------------------------
-            # Extract signal + sensor id
-            # -----------------------------
-            parts = table_name.split("_")
-            signal = parts[1]
-            sensor_id = parts[-1]
+            # Pick a random instance
+            instance = random.choice(list(instance_to_tables.keys()))
+            matching_tables = instance_to_tables[instance]
 
-            # -----------------------------
-            # Find all tables for this instance + sensor
-            # -----------------------------
-            matching_tables = [
-                t
-                for t in ds_tables
-                if extract_instance_from_table(t) == instance and t.endswith(sensor_id)
-            ]
-            if not matching_tables:
+            # Determine label based on TRAINING_MODE
+            label = assign_label(ds, instance)
+
+            # Determine reference sample rate (highest among sensors for this dataset)
+            sr_native_ref = max(config.NATIVE_SR[ds][s] for s in self.sensors)
+
+            # For each run, we need time bounds from one representative table
+            rep_table = matching_tables[0]
+            t_min, t_max = get_time_bounds(cursor, rep_table)
+            if t_max <= t_min:
                 continue
 
-            # -----------------------------
-            # Cache time bounds
-            # -----------------------------
-            for t_name in matching_tables:
-                if t_name not in bounds_cache:
-                    bounds_cache[t_name] = get_time_bounds(cursor, t_name)
-
-            try:
-                min_t = max(bounds_cache[t][0] for t in matching_tables)
-                max_t = min(bounds_cache[t][1] for t in matching_tables)
-            except Exception:
+            total_duration = t_max - t_min
+            if total_duration < self.chunk_seconds:
                 continue
 
-            if max_t - min_t <= self.chunk_seconds:
+            # Randomly choose a chunk start time
+            win_start = random.uniform(t_min, t_max - self.chunk_seconds)
+            win_end = win_start + self.chunk_seconds
+
+            # Decide which split this sample belongs to
+            split_choice = self._choose_split(random.random())
+            if split_choice != self.split:
                 continue
 
-            # -----------------------------
-            # Random chunk start
-            # -----------------------------
-            win_start = random.uniform(min_t, max_t - self.chunk_seconds)
-
-            # -----------------------------
-            # Fetch chunk for each sensor
-            # -----------------------------
+            # --------------------------------------------------
+            # Build multi-sensor chunk, resampled to sr_native_ref
+            # --------------------------------------------------
             chunk_data = []
-            sr_native_ref = None
 
-            for sensor in config.TRAIN_SENSORS:
-                t_name = next(
-                    (t for t in matching_tables if f"_{sensor}_" in t),
-                    None,
-                )
+            for sensor in self.sensors:
+                # Find table for this sensor
+                t_name = next((t for t in matching_tables if f"_{sensor}_" in t), None)
                 if t_name is None:
                     continue
 
                 sr_native = config.NATIVE_SR[ds][sensor]
-                if sr_native_ref is None:
-                    sr_native_ref = sr_native
+                n_samples = int(sr_native * self.chunk_seconds)
 
                 raw = fetch_sensor_batch(
                     cursor,
                     t_name,
-                    int(sr_native * self.chunk_seconds),
+                    n_samples,
                     win_start,
                 )
 
+                if not raw:
+                    continue
+
                 if sensor == "accel":
-                    arr = torch.tensor(raw, dtype=torch.float32).T
+                    # accel: assume multiple axes already in columns
+                    arr = torch.tensor(raw, dtype=torch.float32).T  # [C, T_native]
                 else:
+                    # audio / seismic: single column
                     arr = torch.tensor([r[0] for r in raw], dtype=torch.float32)[
                         None, :
-                    ]
+                    ]  # [1, T_native]
+
+                # Resample to reference rate
+                arr = resample_to(arr, sr_native, sr_native_ref)  # [C, T_ref]
 
                 chunk_data.append(arr)
 
             if not chunk_data:
                 continue
 
-            chunk = torch.cat(chunk_data, dim=0)
+            # Concatenate along channel dimension: [C_total, T_ref]
+            try:
+                chunk = torch.cat(chunk_data, dim=0)
+            except RuntimeError:
+                # If something is still off, skip this sample
+                continue
 
-            # -----------------------------
-            # Slice into 1-second window
-            # -----------------------------
+            # --------------------------------------------------
+            # Now slice windows from this chunk
+            # --------------------------------------------------
             samples_per_window = int(sr_native_ref * self.sample_seconds)
-            num_windows = int(self.chunk_seconds // self.sample_seconds)
-            if samples_per_window <= 0 or num_windows <= 0:
+            total_samples = chunk.shape[-1]
+
+            if total_samples < samples_per_window:
                 continue
 
-            w = random.randint(0, num_windows - 1)
-            start = w * samples_per_window
-            end = start + samples_per_window
-            if end > chunk.shape[-1]:
-                continue
+            # For now, yield a single random window from the chunk
+            start_idx = random.randint(0, total_samples - samples_per_window)
+            end_idx = start_idx + samples_per_window
 
-            window = chunk[:, start:end]
+            window = chunk[:, start_idx:end_idx]  # [C_total, samples_per_window]
 
-            # -----------------------------
-            # Random split assignment
-            # -----------------------------
-            p = random.random()
-            if p < config.SPLIT_TRAIN:
-                assigned_split = "train"
-            elif p < config.SPLIT_TRAIN + config.SPLIT_VAL:
-                assigned_split = "val"
-            else:
-                assigned_split = "test"
-
-            if assigned_split != self.split:
-                continue
-
-            # -----------------------------
-            # Assign label
-            # -----------------------------
-            label = assign_label(ds, instance)
-
+            # Yield raw window + label; preprocessing happens later
             yield window, label
 
 
