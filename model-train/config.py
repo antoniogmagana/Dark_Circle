@@ -215,5 +215,19 @@ EITHER_MODELS = [
     "GenericCNN",
 ]
 
+# ============================================================
+# Mel spectrogram parameters
+# ============================================================
+
+# FFT window size
+N_FFT = 1024
+
+# Hop length between STFT frames
+HOP_LENGTH = 256
+
+# Number of mel bins
+MEL_BINS = 64
+
 USE_MEL = True
+
 BATCH_MODE = True
