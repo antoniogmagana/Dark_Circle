@@ -1,4 +1,5 @@
 import os
+import random
 import torch
 
 # =====================================================================
@@ -23,24 +24,40 @@ DB_CONN_PARAMS = {
 }
 
 # =====================================================================
-# 3. DATASET, SENSOR & CLASS CONSTANTS
+# 3. TRAINING MODE (NEW)
+# =====================================================================
+# Options:
+#   "detection"  -> binary: background vs vehicle
+#   "category"   -> multi-class: background/light/heavy (CLASS_MAP)
+#   "instance"   -> each vehicle instance is its own class
+TRAINING_MODE = "category"
+
+# Reproducible instance-level class IDs
+INSTANCE_SEED = 0
+
+# =====================================================================
+# 4. DATASET, SENSOR & CLASS CONSTANTS
 # =====================================================================
 TRAIN_DATASETS = ["iobt", "focal", "m3nvc"]
-TRAIN_SENSORS = ["audio", "seismic"]
-IN_CHANNELS = len(TRAIN_SENSORS)
+TRAIN_SENSORS = ["audio", "seismic"]  # accel can be added later
 
-# The TARGET sample rate all tensors will be upsampled to for the CNN
+# Derived: audio=1, seismic=1, accel=3
+IN_CHANNELS = len(TRAIN_SENSORS) + (2 if "accel" in TRAIN_SENSORS else 0)
+
+# Target sample rate all tensors will be upsampled to for the CNN
 ACOUSTIC_SR = 16000
 
-# --- NEW: Native Sample Rates per Dataset ---
+# Native sample rates per dataset and sensor
 NATIVE_SR = {
     "iobt": {"audio": 16000, "seismic": 100, "accel": 100},
     "focal": {"audio": 16000, "seismic": 100, "accel": 100},
     "m3nvc": {"audio": 1600, "seismic": 200, "accel": 200},
 }
 
+# Semantic category names (used for category-level classification)
 CLASS_MAP = {0: "background", 1: "light", 2: "heavy"}
 
+# Instance → category mapping (authoritative)
 DATASET_VEHICLE_MAP = {
     "iobt": {
         1: [
@@ -83,9 +100,43 @@ DATASET_VEHICLE_MAP = {
 }
 
 # =====================================================================
-# 4. REPEATED SETTINGS & ORCHESTRATION CONTROLS
+# 5. DYNAMIC LABEL SPACE CONSTRUCTION (NEW)
 # =====================================================================
-MODEL_SAVE_PATH = "saved_models/best_vehicle_model.pth"
+
+# Collect all instances across all datasets
+ALL_INSTANCES = []
+for ds_map in DATASET_VEHICLE_MAP.values():
+    for inst_list in ds_map.values():
+        ALL_INSTANCES.extend(inst_list)
+
+ALL_INSTANCES = sorted(set(ALL_INSTANCES))
+
+# Build reproducible instance-level class IDs
+random.seed(INSTANCE_SEED)
+shuffled_instances = ALL_INSTANCES.copy()
+random.shuffle(shuffled_instances)
+
+INSTANCE_TO_CLASS = {name: idx for idx, name in enumerate(shuffled_instances)}
+
+# Determine number of classes based on training mode
+if TRAINING_MODE == "detection":
+    NUM_CLASSES = 2
+
+elif TRAINING_MODE == "category":
+    NUM_CLASSES = len(CLASS_MAP)
+
+elif TRAINING_MODE == "instance":
+    NUM_CLASSES = len(INSTANCE_TO_CLASS)
+
+else:
+    raise ValueError(f"Unknown TRAINING_MODE: {TRAINING_MODE}")
+
+# =====================================================================
+# 6. MODEL SELECTION
+# =====================================================================
+
+MODEL_NAME = "ClassificationCNN"
+MODEL_SAVE_PATH = f"saved_models/{MODEL_NAME}_best.pth"
 
 BATCH_SIZE = 128
 TRAIN_STEPS_PER_EPOCH = 50
@@ -96,7 +147,47 @@ SPLIT_TRAIN = 0.70
 SPLIT_VAL = 0.15
 SPLIT_TEST = 0.15
 
+# Time-scale knobs
+SAMPLE_SECONDS = 1
+CHUNK_SECONDS = 15
+
+# Mel spectrogram parameters
 MEL_BINS = 64
 MEL_HOP_LENGTH = 512
 MEL_TOP_DB = 80
 NOISE_KERNEL_SIZE = 51
+
+# Model input compatibility
+WAVEFORM_ONLY_MODELS = [
+    "WaveformCNN",
+    "WaveformClassificationCNN",
+    "RawNet",
+    "RawNet2",
+    "TCN",
+    "WaveNet",
+    "MiniRocket",
+    "Rocket",
+    "MultiRocket",
+    "LSTM1D",
+    "GRU1D",
+]
+
+MEL_ONLY_MODELS = [
+    "MelCNN",
+    "CRNN",
+    "ResNetAudio",
+    "VGGish",
+    "AudioSpectrogramCNN",
+    "MobileNetAudio",
+]
+
+EITHER_MODELS = [
+    "ClassificationCNN",
+    "DetectionCNN",
+    "GenericCNN",
+]
+
+USE_MEL = True
+BATCH_MODE = True
+EVAL_RESULTS_DIR = "./eval_results"
+CHECKPOINT_DIR = "./checkpoints"

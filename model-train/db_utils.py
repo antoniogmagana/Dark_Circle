@@ -5,7 +5,6 @@ from config import DB_CONN_PARAMS
 
 
 def sanitize_name(name, max_length=25):
-    """Refines a string to be a safe, clean PostgreSQL identifier."""
     clean_name = str(name).lower()
     clean_name = re.sub(r"[^a-z0-9_]", "_", clean_name)
     clean_name = re.sub(r"_+", "_", clean_name)
@@ -13,9 +12,7 @@ def sanitize_name(name, max_length=25):
     if clean_name and clean_name[0].isdigit():
         clean_name = f"v_{clean_name}"
     clean_name = clean_name[:max_length]
-    if not clean_name:
-        clean_name = "unknown_entity"
-    return clean_name
+    return clean_name or "unknown_entity"
 
 
 def db_connect():
@@ -24,10 +21,10 @@ def db_connect():
         conn.autocommit = True
         cursor = conn.cursor()
         print("Connected to PostgreSQL successfully.")
+        return conn, cursor
     except Exception as e:
         print(f"Failed to connect: {e}")
-        raise e
-    return conn, cursor
+        raise
 
 
 def db_close(conn, cursor):
@@ -35,14 +32,28 @@ def db_close(conn, cursor):
     conn.close()
 
 
-def get_time_bounds(cursor, table_name):
+# ---------------------------------------------------------------------
+# 1. Time bounds WITH optional run_id filtering
+# ---------------------------------------------------------------------
+def get_time_bounds(cursor, table_name, run_id=None):
     """
-    Fetches the actual start and end time of a specific table.
-    Crucial for M3NVC background runs which don't start at T=0.
+    Returns (min_timestamp, max_timestamp) for a table.
+    If run_id is provided, restricts to that run.
     """
-    query = sql.SQL("SELECT MIN(time_stamp), MAX(time_stamp) FROM {table}").format(
-        table=sql.Identifier(table_name)
-    )
+
+    if run_id is None:
+        query = sql.SQL("SELECT MIN(time_stamp), MAX(time_stamp) FROM {table}").format(
+            table=sql.Identifier(table_name)
+        )
+    else:
+        query = sql.SQL(
+            "SELECT MIN(time_stamp), MAX(time_stamp) "
+            "FROM {table} WHERE run_id = {run_id}"
+        ).format(
+            table=sql.Identifier(table_name),
+            run_id=sql.Literal(run_id),
+        )
+
     try:
         cursor.execute(query)
         result = cursor.fetchone()
@@ -52,42 +63,49 @@ def get_time_bounds(cursor, table_name):
         return 0.0, 0.0
 
 
-# db_utils.py (Snippet to update)
+# ---------------------------------------------------------------------
+# 2. Fetch N samples starting at a timestamp WITH optional run_id
+# ---------------------------------------------------------------------
+def fetch_sensor_batch(cursor, table_name, sample_count, start_time, run_id=None):
+    """
+    Fetches `sample_count` rows starting at `start_time`.
+    Uses the B-tree index on time_stamp (and run_id if present).
+    Handles audio, seismic, and 3-axis accelerometer tables.
+    """
 
-
-def fetch_sensor_batch(cursor, table_name, limit_rows, start_time, run_id=None):
+    # Determine which columns to fetch based on TRAIN_SENSORS
     if "_accel_" in table_name:
-        target_cols = "accel_x_ew, accel_y_ns, accel_z_ud"
+        target_cols = sql.SQL("accel_x_ew, accel_y_ns, accel_z_ud")
     else:
-        target_cols = "amplitude"
+        target_cols = sql.SQL("amplitude")
 
-    if run_id is not None:
-        query = sql.SQL(
-            """
-            SELECT {columns} FROM {table} 
-            WHERE time_stamp >= {start_time} AND run_id = {run_id}
-            ORDER BY time_stamp ASC LIMIT {limit}
-            """
+    # WHERE clause depends on whether run_id is used
+    if run_id is None:
+        where_clause = sql.SQL("time_stamp >= {start_time}").format(
+            start_time=sql.Literal(start_time)
+        )
+    else:
+        where_clause = sql.SQL(
+            "time_stamp >= {start_time} AND run_id = {run_id}"
         ).format(
-            columns=sql.SQL(target_cols),
-            table=sql.Identifier(table_name),
             start_time=sql.Literal(start_time),
             run_id=sql.Literal(run_id),
-            limit=sql.Literal(limit_rows),  # Changed from sample_rate
         )
-    else:
-        query = sql.SQL(
-            """
-            SELECT {columns} FROM {table} 
-            WHERE time_stamp >= {start_time} 
-            ORDER BY time_stamp ASC LIMIT {limit}
-            """
-        ).format(
-            columns=sql.SQL(target_cols),
-            table=sql.Identifier(table_name),
-            start_time=sql.Literal(start_time),
-            limit=sql.Literal(limit_rows),  # Changed from sample_rate
-        )
+
+    query = sql.SQL(
+        """
+        SELECT {columns}
+        FROM {table}
+        WHERE {where_clause}
+        ORDER BY time_stamp ASC
+        LIMIT {limit}
+        """
+    ).format(
+        columns=target_cols,
+        table=sql.Identifier(table_name),
+        where_clause=where_clause,
+        limit=sql.Literal(sample_count),
+    )
 
     try:
         cursor.execute(query)

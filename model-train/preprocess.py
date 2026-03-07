@@ -1,70 +1,127 @@
 import torch
 import torch.nn.functional as F
-import torchaudio.transforms as T
+import torchaudio
+import numpy as np
+
 import config
 
 
-def zero_center_window(data_tensor):
-    local_means = torch.mean(data_tensor, dim=-1, keepdim=True)
-    return data_tensor - local_means
+# ============================================================
+# 1. Zero-centering and upsampling
+# ============================================================
 
 
-def standardize_global(centered_data, global_std):
-    if not isinstance(global_std, torch.Tensor):
-        global_std = torch.tensor(global_std, device=config.DEVICE)
-    safe_std = torch.where(
-        global_std == 0, torch.tensor(1e-6, device=config.DEVICE), global_std
-    )
-    return centered_data / safe_std
+def preprocess_window(window_tensor, target_sr=config.ACOUSTIC_SR):
+    """
+    Preprocess a single 1-second window.
+
+    Input:
+        window_tensor: [C, T_native]
+            - C = number of channels (audio, seismic, accel axes)
+            - T_native = native_sr * SAMPLE_SECONDS
+
+    Output:
+        [C, target_sr * SAMPLE_SECONDS]
+            - typically [C, 16000]
+    """
+
+    # Zero-center each channel
+    window_tensor = window_tensor - window_tensor.mean(dim=-1, keepdim=True)
+
+    C, T_native = window_tensor.shape
+    target_length = target_sr * config.SAMPLE_SECONDS  # usually 16000
+
+    # Upsample if needed
+    if T_native != target_length:
+        window_tensor = F.interpolate(
+            window_tensor.unsqueeze(0),  # [1, C, T_native]
+            size=target_length,
+            mode="linear",
+            align_corners=True,
+        ).squeeze(
+            0
+        )  # [C, target_length]
+
+    return window_tensor
 
 
-def calculate_smv(accel_tensor):
-    smv = torch.sqrt(torch.sum(accel_tensor**2, dim=1, keepdim=True))
-    return zero_center_window(smv)
+# ============================================================
+# 2. Batch preprocessing
+# ============================================================
 
 
-def align_and_upsample(signal_tensor, target_length=config.ACOUSTIC_SR):
-    if signal_tensor.shape[-1] == target_length:
-        return signal_tensor
-    return F.interpolate(
-        signal_tensor, size=target_length, mode="linear", align_corners=True
-    )
+def preprocess_batch(batch_tensor):
+    """
+    Preprocess a batch of 1-second windows.
+
+    Input:
+        batch_tensor: [B, C, T_native]
+
+    Output:
+        [B, C, target_sr]
+    """
+    B, C, T_native = batch_tensor.shape
+    processed = []
+
+    for i in range(B):
+        processed.append(preprocess_window(batch_tensor[i]))
+
+    return torch.stack(processed, dim=0)
+
+
+# ============================================================
+# 3. Mel spectrogram extraction
+# ============================================================
+
+_mel_transform = torchaudio.transforms.MelSpectrogram(
+    sample_rate=config.ACOUSTIC_SR,
+    n_fft=2048,
+    hop_length=config.MEL_HOP_LENGTH,
+    n_mels=config.MEL_BINS,
+)
 
 
 def extract_mel_spectrogram(batch_tensor):
     """
-    Converts wave batches to Spectrograms.
-    Note: batch_tensor must already be on config.DEVICE (GPU).
+    Convert waveform batch into mel spectrograms.
+
+    Input:
+        batch_tensor: [B, C, T] after upsampling
+
+    Output:
+        [B, C, MEL_BINS, time_frames]
     """
-    mel_transform = T.MelSpectrogram(
-        sample_rate=config.ACOUSTIC_SR,
-        n_mels=config.MEL_BINS,
-        hop_length=config.MEL_HOP_LENGTH,
-    ).to(batch_tensor.device)
+    B, C, T = batch_tensor.shape
+    mel_list = []
 
-    amplitude_to_db = T.AmplitudeToDB(top_db=config.MEL_TOP_DB).to(batch_tensor.device)
+    for c in range(C):
+        mel = _mel_transform(batch_tensor[:, c, :])  # [B, MEL_BINS, frames]
+        mel_list.append(mel)
 
-    # MelSpectrogram natively supports [Batch, Channel, Time]
-    return amplitude_to_db(mel_transform(batch_tensor))
+    return torch.stack(mel_list, dim=1)  # [B, C, MEL_BINS, frames]
 
 
-def parallel_batch_process(batch_tensor, target_sr=config.ACOUSTIC_SR):
+# ============================================================
+# 4. Convenience wrapper for training
+# ============================================================
+
+
+def preprocess_for_training(batch_tensor, use_mel=True):
     """
-    Takes a 3D tensor [Batch, Channels, Time] and processes it using
-    vectorized operations. This triggers Intel MKL/AVX-512 to use all 120 cores.
-    """
-    # 1. Zero Center (Vectorized across the whole batch)
-    batch_tensor = batch_tensor - batch_tensor.mean(dim=-1, keepdim=True)
+    Full preprocessing pipeline for training.
 
-    # 2. Vectorized Upsampling
-    # Interpolate expects 4D: [Batch, Channels, Depth, Width]
-    # We treat 'Time' as Width and add a dummy Depth dimension of 1.
-    if batch_tensor.shape[-1] != target_sr:
-        batch_tensor = batch_tensor.unsqueeze(2)  # [B, C, 1, T_native]
-        batch_tensor = F.interpolate(
-            batch_tensor, size=(1, target_sr), mode="linear", align_corners=True
-        ).squeeze(
-            2
-        )  # Back to [B, C, T_target]
+    Input:
+        batch_tensor: [B, C, T_native]
+
+    Output:
+        If use_mel:
+            [B, C, MEL_BINS, frames]
+        Else:
+            [B, C, target_sr]
+    """
+    batch_tensor = preprocess_batch(batch_tensor)
+
+    if use_mel:
+        batch_tensor = extract_mel_spectrogram(batch_tensor)
 
     return batch_tensor

@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+
 from sktime.transformations.panel.rocket import MiniRocket
 from sklearn.linear_model import RidgeClassifierCV
-import config
 
 # =====================================================================
 # 1. GLOBAL LEARNING DEFAULTS
@@ -14,7 +14,7 @@ BASE_DROPOUT = 0.3
 NUM_EPOCHS = 5
 
 # =====================================================================
-# 2. ARCHITECTURAL KNOBS (No Hardcoding Below)
+# 2. ARCHITECTURAL KNOBS
 # =====================================================================
 
 # --- Detection CNN (2D Mel-Spectrogram) ---
@@ -33,14 +33,14 @@ CLASS_CNN_PAD = 1
 CLASS_CNN_HIDDEN = 512
 CLASS_CNN_DROPOUT = 0.4
 
-# --- Waveform 1D CNN (Raw 16000 Samples) ---
+# --- Waveform 1D CNN ---
 WAVE_CNN_LR = BASE_LR
 WAVE_CNN_CHANNELS = [32, 64, 128]
 WAVE_CNN_KERNELS = [64, 32, 16]
 WAVE_CNN_STRIDES = [8, 4, 2]
 WAVE_CNN_HIDDEN = 256
 
-# --- LSTM Networks (Raw 16000 Samples) ---
+# --- LSTM Networks ---
 LSTM_LR = 1e-3
 LSTM_CNN_CHANNELS = [16, 32]
 LSTM_CNN_KERNELS = [32, 16]
@@ -55,16 +55,22 @@ LSTM_DROPOUT = BASE_DROPOUT
 ROCKET_NUM_KERNELS = 10000
 ROCKET_ALPHAS = np.logspace(-3, 3, 10)
 
+
 # =====================================================================
-# 3. 2D CONVOLUTIONAL NETWORKS
+# 3. MEL-ONLY MODELS (Conv2d)
 # =====================================================================
 
 
 class DetectionCNN(nn.Module):
-    def __init__(
-        self, in_channels=config.IN_CHANNELS, num_classes=len(config.CLASS_MAP)
-    ):
-        super(DetectionCNN, self).__init__()
+    """
+    Mel-only detection CNN.
+    Input: [B, C, MEL_BINS, FRAMES]
+    """
+
+    def __init__(self, in_channels, num_classes, use_mel=True):
+        super().__init__()
+        self.use_mel = True  # enforce mel-only
+
         self.conv1 = nn.Conv2d(
             in_channels,
             DET_CNN_CHANNELS[0],
@@ -93,10 +99,15 @@ class DetectionCNN(nn.Module):
 
 
 class ClassificationCNN(nn.Module):
-    def __init__(
-        self, in_channels=config.IN_CHANNELS, num_classes=len(config.CLASS_MAP)
-    ):
-        super(ClassificationCNN, self).__init__()
+    """
+    Mel-only classification CNN.
+    Input: [B, C, MEL_BINS, FRAMES]
+    """
+
+    def __init__(self, in_channels, num_classes, use_mel=True):
+        super().__init__()
+        self.use_mel = True  # enforce mel-only
+
         self.conv1 = nn.Conv2d(
             in_channels,
             CLASS_CNN_CHANNELS[0],
@@ -139,15 +150,20 @@ class ClassificationCNN(nn.Module):
 
 
 # =====================================================================
-# 4. 1D CONVOLUTIONAL NETWORKS
+# 4. WAVEFORM-ONLY MODELS (Conv1d)
 # =====================================================================
 
 
 class WaveformClassificationCNN(nn.Module):
-    def __init__(
-        self, in_channels=config.IN_CHANNELS, num_classes=len(config.CLASS_MAP)
-    ):
-        super(WaveformClassificationCNN, self).__init__()
+    """
+    Waveform-only 1D CNN.
+    Input: [B, C, T]
+    """
+
+    def __init__(self, in_channels, num_classes, use_mel=False):
+        super().__init__()
+        self.use_mel = False  # enforce waveform-only
+
         self.conv1 = nn.Conv1d(
             in_channels,
             WAVE_CNN_CHANNELS[0],
@@ -182,15 +198,19 @@ class WaveformClassificationCNN(nn.Module):
 
 
 # =====================================================================
-# 5. LONG SHORT-TERM MEMORY NETWORKS
+# 5. LSTM MODELS (Waveform-only)
 # =====================================================================
 
 
 class ClassificationLSTM(nn.Module):
-    def __init__(
-        self, in_channels=config.IN_CHANNELS, num_classes=len(config.CLASS_MAP)
-    ):
-        super(ClassificationLSTM, self).__init__()
+    """
+    Waveform-only LSTM classifier.
+    Input: [B, C, T]
+    """
+
+    def __init__(self, in_channels, num_classes, use_mel=False):
+        super().__init__()
+        self.use_mel = False  # enforce waveform-only
 
         self.cnn_frontend = nn.Sequential(
             nn.Conv1d(
@@ -230,11 +250,15 @@ class ClassificationLSTM(nn.Module):
 
 
 # =====================================================================
-# 6. miniROCKET
+# 6. miniROCKET (Non-PyTorch)
 # =====================================================================
 
 
 class ClassificationMiniRocket:
+    """
+    Non-neural model: MiniRocket + RidgeClassifierCV.
+    """
+
     def __init__(self):
         self.transformer = MiniRocket(num_kernels=ROCKET_NUM_KERNELS)
         self.classifier = RidgeClassifierCV(alphas=ROCKET_ALPHAS)
@@ -250,3 +274,17 @@ class ClassificationMiniRocket:
             raise RuntimeError("Model must be fitted before prediction.")
         X_feat = self.transformer.transform(X_test)
         return self.classifier.predict(X_feat)
+
+
+# =====================================================================
+# 7. MODEL REGISTRY
+# =====================================================================
+
+MODEL_REGISTRY = {
+    "DetectionCNN": DetectionCNN,
+    "ClassificationCNN": ClassificationCNN,
+    "WaveformClassificationCNN": WaveformClassificationCNN,
+    "ClassificationLSTM": ClassificationLSTM,
+    "ClassificationMiniRocket": ClassificationMiniRocket,
+    # ADD MORE AS NEEDED
+}

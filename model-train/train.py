@@ -1,290 +1,363 @@
 import os
-import torch
-
-# =====================================================================
-# CRITICAL CPU FIX 1: Prevent "Thread Explosion"
-# Forces each worker to use only 1 thread for math, preventing
-# 120-core CPUs from spawning thousands of fighting threads.
-# =====================================================================
-torch.set_num_threads(1)
-
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, IterableDataset
-from torch.amp import GradScaler, autocast
+import time
 import random
-import copy
+from datetime import datetime
+
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, IterableDataset
 
 import config
-import models
-import preprocess
-from db_utils import db_connect, fetch_sensor_batch, get_time_bounds
+from db_utils import db_connect, get_time_bounds, fetch_sensor_batch
+from preprocess import (
+    preprocess_for_training,
+    preprocess_window,
+    extract_mel_spectrogram,
+)
+from models import MODEL_REGISTRY
+
+
+# ============================================================
+# 1. Label helpers
+# ============================================================
+
+
+def extract_instance_from_table(table_name: str) -> str:
+    parts = table_name.split("_")
+    # dataset = parts[0]
+    # signal  = parts[1]
+    # instance = parts[2:-1]
+    instance_parts = parts[2:-1]
+    return "_".join(instance_parts)
+
+
+def instance_to_category(dataset: str, instance: str) -> int:
+    ds_map = config.DATASET_VEHICLE_MAP.get(dataset, {})
+    for cat_id, inst_list in ds_map.items():
+        if instance in inst_list:
+            return cat_id
+    raise KeyError(f"Instance '{instance}' not found in dataset '{dataset}' mapping.")
+
+
+def assign_label(dataset: str, instance: str) -> int:
+    category_id = instance_to_category(dataset, instance)
+
+    if config.TRAINING_MODE == "category":
+        return category_id
+
+    if config.TRAINING_MODE == "detection":
+        return 0 if category_id == 0 else 1
+
+    if config.TRAINING_MODE == "instance":
+        return config.INSTANCE_TO_CLASS[instance]
+
+    raise ValueError(f"Unknown TRAINING_MODE: {config.TRAINING_MODE}")
+
+
+# ============================================================
+# 2. VehicleStreamer (instance-aware)
+# ============================================================
 
 
 class VehicleStreamer(IterableDataset):
     def __init__(self, split="train"):
         super().__init__()
         self.split = split
+        self.chunk_seconds = config.CHUNK_SECONDS
+        self.sample_seconds = config.SAMPLE_SECONDS
 
     def __iter__(self):
         conn, cursor = db_connect()
+
         cursor.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema='public'"
         )
         all_tables = [r[0] for r in cursor.fetchall()]
+
         bounds_cache = {}
 
-        # =========================================================
-        # BULK FETCHING: Fetch 15 seconds of data per DB query
-        # =========================================================
-        CHUNK_SECONDS = 15
-
         while True:
-            # 1. STOP THE SPIN LOOP: Guaranteed valid class/dataset combos
-            class_id = random.choice(list(config.CLASS_MAP.keys()))
-            valid_datasets = [
-                ds
-                for ds in config.TRAIN_DATASETS
-                if class_id in config.DATASET_VEHICLE_MAP[ds]
-            ]
-            if not valid_datasets:
-                continue  # Failsafe
-
-            ds = random.choice(valid_datasets)
-            v_base = random.choice(config.DATASET_VEHICLE_MAP[ds][class_id])
-
-            try:
-                matching_tables = [
-                    t for t in all_tables if f"{ds}_" in t and f"_{v_base}" in t
-                ]
-                if not matching_tables:
-                    continue
-
-                nodes = list(set([t.split("_")[-1] for t in matching_tables]))
-                rs = random.choice(nodes)
-
-                audio_table = next(
-                    (t for t in matching_tables if "_audio_" in t and t.endswith(rs)),
-                    None,
-                )
-                if not audio_table:
-                    continue
-
-                target_run_id = (
-                    random.choice([8, 9]) if (ds == "m3nvc" and class_id == 0) else None
-                )
-
-                cache_key = f"{audio_table}_{target_run_id}"
-                if cache_key not in bounds_cache:
-                    min_t, max_t = get_time_bounds(
-                        cursor, audio_table, run_id=target_run_id
-                    )
-                    bounds_cache[cache_key] = (min_t, max_t)
-                else:
-                    min_t, max_t = bounds_cache[cache_key]
-
-                duration = max_t - min_t
-                if duration <= CHUNK_SECONDS:
-                    continue
-
-                train_bound = min_t + (duration * config.SPLIT_TRAIN)
-                val_bound = train_bound + (duration * config.SPLIT_VAL)
-
-                # Adjusted bounds to fit the 15-second chunk safely
-                if self.split == "train":
-                    high = train_bound - CHUNK_SECONDS
-                    if high <= min_t:
-                        continue
-                    window_start = random.uniform(min_t, high)
-                elif self.split == "val":
-                    high = val_bound - CHUNK_SECONDS
-                    if high <= train_bound:
-                        continue
-                    window_start = random.uniform(train_bound, high)
-                else:
-                    high = max_t - CHUNK_SECONDS
-                    if high <= val_bound:
-                        continue
-                    window_start = random.uniform(val_bound, high)
-
-                current_channels = []
-                for sensor in config.TRAIN_SENSORS:
-                    t_name = next(
-                        (
-                            t
-                            for t in matching_tables
-                            if f"_{sensor}_" in t and t.endswith(rs)
-                        ),
-                        None,
-                    )
-                    if not t_name:
-                        break
-
-                    sensor_type = (
-                        "audio"
-                        if "audio" in t_name
-                        else ("seismic" if "seismic" in t_name else "accel")
-                    )
-                    sr = config.NATIVE_SR[ds][sensor_type]
-
-                    # 2. BULK QUERY: Fetch exactly CHUNK_SECONDS of data
-                    limit_rows = int(sr * CHUNK_SECONDS)
-                    raw = fetch_sensor_batch(
-                        cursor,
-                        t_name,
-                        limit_rows,
-                        start_time=window_start,
-                        run_id=target_run_id,
-                    )
-
-                    if not raw or len(raw) < limit_rows:
-                        break
-
-                    if "_accel_" in t_name or len(raw[0]) >= 3:
-                        x, y, z = [
-                            torch.tensor([r[i] for r in raw], dtype=torch.float32)
-                            for i in range(3)
-                        ]
-                        stacked_xyz = torch.stack([x, y, z]).unsqueeze(0)
-                        chan_tensor = preprocess.calculate_smv(stacked_xyz).squeeze()
-                    else:
-                        chan_tensor = torch.tensor(
-                            [r[0] for r in raw], dtype=torch.float32
-                        )
-
-                    # 3. BULK UPSAMPLE: Stretch to target chunk size
-                    target_length = config.ACOUSTIC_SR * CHUNK_SECONDS
-                    if chan_tensor.shape[-1] != target_length:
-                        chan_tensor = chan_tensor.unsqueeze(0).unsqueeze(0)
-                        chan_tensor = preprocess.align_and_upsample(
-                            chan_tensor, target_length=target_length
-                        ).squeeze()
-
-                    current_channels.append(chan_tensor)
-
-                if len(current_channels) != config.IN_CHANNELS:
-                    continue
-
-                # Stack the multi-modal 15-second block
-                chunk_tensor = torch.stack(current_channels)
-
-                # 4. YIELD SLICES: Loop over the chunk locally in RAM
-                for i in range(CHUNK_SECONDS):
-                    start_idx = i * config.ACOUSTIC_SR
-                    end_idx = start_idx + config.ACOUSTIC_SR
-                    yield chunk_tensor[:, start_idx:end_idx], class_id
-
-            except Exception as e:
+            # -----------------------------
+            # Pick dataset
+            # -----------------------------
+            ds = random.choice(config.TRAIN_DATASETS)
+            ds_tables = [t for t in all_tables if t.startswith(ds + "_")]
+            if not ds_tables:
                 continue
 
+            # -----------------------------
+            # Pick a table and extract instance
+            # -----------------------------
+            table_name = random.choice(ds_tables)
+            instance = extract_instance_from_table(table_name)
 
-def run_training(model_class):
-    os.makedirs(os.path.dirname(config.MODEL_SAVE_PATH), exist_ok=True)
-    model = model_class().to(config.DEVICE)
+            # -----------------------------
+            # Extract signal + sensor id
+            # -----------------------------
+            parts = table_name.split("_")
+            signal = parts[1]
+            sensor_id = parts[-1]
 
-    if isinstance(model, models.ClassificationCNN):
-        lr = models.CLASS_CNN_LR
-    elif isinstance(model, models.DetectionCNN):
-        lr = models.DET_CNN_LR
-    else:
-        lr = models.BASE_LR
+            # -----------------------------
+            # Find all tables for this instance + sensor
+            # -----------------------------
+            matching_tables = [
+                t
+                for t in ds_tables
+                if extract_instance_from_table(t) == instance and t.endswith(sensor_id)
+            ]
+            if not matching_tables:
+                continue
 
-    # =====================================================================
-    # CRITICAL CPU FIX 3: Unleash the Hardware
-    # Now that the CPU isn't thrashing, we can spin up 24 safe workers
-    # to blast your 1 TB of RAM with prefetched data.
-    # =====================================================================
-    train_loader = DataLoader(
-        VehicleStreamer("train"),
-        batch_size=config.BATCH_SIZE,
-        num_workers=24,
-        pin_memory=True,
-        prefetch_factor=4,
-    )
-    val_loader = DataLoader(
-        VehicleStreamer("val"),
-        batch_size=config.BATCH_SIZE,
-        num_workers=8,
-        pin_memory=True,
-        prefetch_factor=4,
-    )
+            # -----------------------------
+            # Cache time bounds
+            # -----------------------------
+            for t_name in matching_tables:
+                if t_name not in bounds_cache:
+                    bounds_cache[t_name] = get_time_bounds(cursor, t_name)
 
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.CrossEntropyLoss()
-    scaler = GradScaler()
+            try:
+                min_t = max(bounds_cache[t][0] for t in matching_tables)
+                max_t = min(bounds_cache[t][1] for t in matching_tables)
+            except Exception:
+                continue
 
-    best_val_loss = float("inf")
-    best_weights = None
+            if max_t - min_t <= self.chunk_seconds:
+                continue
 
-    for epoch in range(models.NUM_EPOCHS):
-        model.train()
-        total_train_loss = 0
-        for i, (features, labels) in enumerate(train_loader):
-            features, labels = features.to(config.DEVICE, non_blocking=True), labels.to(
-                config.DEVICE, non_blocking=True
-            )
-            features = preprocess.align_and_upsample(
-                preprocess.zero_center_window(features)
-            )
+            # -----------------------------
+            # Random chunk start
+            # -----------------------------
+            win_start = random.uniform(min_t, max_t - self.chunk_seconds)
 
-            if isinstance(model, (models.ClassificationCNN, models.DetectionCNN)):
-                features = preprocess.extract_mel_spectrogram(features)
+            # -----------------------------
+            # Fetch chunk for each sensor
+            # -----------------------------
+            chunk_data = []
+            sr_native_ref = None
 
-            with autocast(
-                device_type=config.DEVICE.type, enabled=config.DEVICE.type != "cpu"
-            ):
-                outputs = model(features)
-                loss = criterion(outputs, labels)
-
-            optimizer.zero_grad()
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-
-            total_train_loss += loss.item()
-            if i >= config.TRAIN_STEPS_PER_EPOCH - 1:
-                break
-
-        model.eval()
-        total_val_loss = 0
-        with torch.no_grad():
-            for i, (v_features, v_labels) in enumerate(val_loader):
-                v_features = preprocess.align_and_upsample(
-                    preprocess.zero_center_window(
-                        v_features.to(config.DEVICE, non_blocking=True)
-                    )
+            for sensor in config.TRAIN_SENSORS:
+                t_name = next(
+                    (t for t in matching_tables if f"_{sensor}_" in t),
+                    None,
                 )
-                if isinstance(model, (models.ClassificationCNN, models.DetectionCNN)):
-                    v_features = preprocess.extract_mel_spectrogram(v_features)
+                if t_name is None:
+                    continue
 
-                v_outputs = model(v_features)
-                total_val_loss += criterion(
-                    v_outputs, v_labels.to(config.DEVICE, non_blocking=True)
-                ).item()
-                if i >= config.VAL_STEPS_PER_EPOCH - 1:
-                    break
+                sr_native = config.NATIVE_SR[ds][sensor]
+                if sr_native_ref is None:
+                    sr_native_ref = sr_native
 
-        avg_v_loss = total_val_loss / config.VAL_STEPS_PER_EPOCH
+                raw = fetch_sensor_batch(
+                    cursor,
+                    t_name,
+                    int(sr_native * self.chunk_seconds),
+                    win_start,
+                )
+
+                if sensor == "accel":
+                    arr = torch.tensor(raw, dtype=torch.float32).T
+                else:
+                    arr = torch.tensor([r[0] for r in raw], dtype=torch.float32)[
+                        None, :
+                    ]
+
+                chunk_data.append(arr)
+
+            if not chunk_data:
+                continue
+
+            chunk = torch.cat(chunk_data, dim=0)
+
+            # -----------------------------
+            # Slice into 1-second window
+            # -----------------------------
+            samples_per_window = int(sr_native_ref * self.sample_seconds)
+            num_windows = int(self.chunk_seconds // self.sample_seconds)
+            if samples_per_window <= 0 or num_windows <= 0:
+                continue
+
+            w = random.randint(0, num_windows - 1)
+            start = w * samples_per_window
+            end = start + samples_per_window
+            if end > chunk.shape[-1]:
+                continue
+
+            window = chunk[:, start:end]
+
+            # -----------------------------
+            # Random split assignment
+            # -----------------------------
+            p = random.random()
+            if p < config.SPLIT_TRAIN:
+                assigned_split = "train"
+            elif p < config.SPLIT_TRAIN + config.SPLIT_VAL:
+                assigned_split = "val"
+            else:
+                assigned_split = "test"
+
+            if assigned_split != self.split:
+                continue
+
+            # -----------------------------
+            # Assign label
+            # -----------------------------
+            label = assign_label(ds, instance)
+
+            yield window, label
+
+
+# ============================================================
+# 3. Model loading
+# ============================================================
+
+
+def build_model():
+    model_cls = MODEL_REGISTRY[config.MODEL_NAME]
+
+    if config.MODEL_NAME in config.WAVEFORM_ONLY_MODELS:
+        use_mel = False
+    elif config.MODEL_NAME in config.MEL_ONLY_MODELS:
+        use_mel = True
+    else:
+        use_mel = config.USE_MEL
+
+    model = model_cls(
+        in_channels=config.IN_CHANNELS,
+        num_classes=config.NUM_CLASSES,
+        use_mel=use_mel,
+    )
+    return model, use_mel
+
+
+# ============================================================
+# 4. Training + evaluation
+# ============================================================
+
+
+def train_one_epoch(model, loader, optimizer, criterion, device, use_mel):
+    model.train()
+    total_loss = 0
+    total_correct = 0
+    total_samples = 0
+
+    for x, y in loader:
+        x, y = x.to(device), y.to(device)
+
+        if config.BATCH_MODE:
+            x = preprocess_for_training(x, use_mel=use_mel)
+        else:
+            x = preprocess_window(x[0]).unsqueeze(0)
+            if use_mel:
+                x = extract_mel_spectrogram(x)
+
+        optimizer.zero_grad()
+        logits = model(x)
+        loss = criterion(logits, y)
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item() * x.size(0)
+        total_correct += (logits.argmax(dim=1) == y).sum().item()
+        total_samples += y.size(0)
+
+    return total_loss / total_samples, total_correct / total_samples
+
+
+def evaluate(model, loader, criterion, device, use_mel):
+    model.eval()
+    total_loss = 0
+    total_correct = 0
+    total_samples = 0
+
+    with torch.inference_mode():
+        for x, y in loader:
+            x, y = x.to(device), y.to(device)
+
+            if config.BATCH_MODE:
+                x = preprocess_for_training(x, use_mel=use_mel)
+            else:
+                x = preprocess_window(x[0]).unsqueeze(0)
+                if use_mel:
+                    x = extract_mel_spectrogram(x)
+
+            logits = model(x)
+            loss = criterion(logits, y)
+
+            total_loss += loss.item() * x.size(0)
+            total_correct += (logits.argmax(dim=1) == y).sum().item()
+            total_samples += y.size(0)
+
+    return total_loss / total_samples, total_correct / total_samples
+
+
+# ============================================================
+# 5. Main
+# ============================================================
+
+
+def main():
+    device = config.DEVICE
+
+    model, use_mel = build_model()
+    model.to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
+    criterion = nn.CrossEntropyLoss()
+
+    batch_size = config.BATCH_SIZE if config.BATCH_MODE else 1
+
+    train_loader = DataLoader(
+        VehicleStreamer(split="train"),
+        batch_size=batch_size,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=True,
+    )
+
+    val_loader = DataLoader(
+        VehicleStreamer(split="val"),
+        batch_size=batch_size,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=True,
+    )
+
+    os.makedirs(config.CHECKPOINT_DIR, exist_ok=True)
+    best_val_acc = 0.0
+
+    for epoch in range(1, config.EPOCHS + 1):
+        print(f"\nEpoch {epoch}/{config.EPOCHS}")
+
+        train_loss, train_acc = train_one_epoch(
+            model, train_loader, optimizer, criterion, device, use_mel
+        )
+        val_loss, val_acc = evaluate(model, val_loader, criterion, device, use_mel)
+
         print(
-            f"Epoch {epoch} | Train Loss: {total_train_loss/config.TRAIN_STEPS_PER_EPOCH:.4f} | Val Loss: {avg_v_loss:.4f}"
+            f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | "
+            f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}"
         )
 
-        if avg_v_loss < best_val_loss:
-            best_val_loss, best_weights = avg_v_loss, copy.deepcopy(model.state_dict())
-            print(f"--> Best model saved at epoch {epoch}")
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if best_weights:
-        torch.save(
-            {
-                "model_state_dict": best_weights,
-                "sensors": config.TRAIN_SENSORS,
-                "datasets": config.TRAIN_DATASETS,
-                "in_channels": config.IN_CHANNELS,
-                "val_loss": best_val_loss,
-            },
-            config.MODEL_SAVE_PATH,
-        )
+            ckpt_path = os.path.join(
+                config.CHECKPOINT_DIR,
+                f"{config.MODEL_NAME}_{timestamp}_valacc{val_acc:.4f}.pt",
+            )
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "val_acc": val_acc,
+                    "use_mel": use_mel,
+                },
+                ckpt_path,
+            )
+            print(f"Saved new best checkpoint → {ckpt_path}")
 
 
 if __name__ == "__main__":
-    run_training(models.ClassificationCNN)
+    main()
