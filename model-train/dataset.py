@@ -43,9 +43,13 @@ class VehicleDataset(Dataset):
                 if len(parts) < 4:
                     continue
 
-                _, sensor, inst, _ = parts
+                dataset = parts[0]
+                signal = parts[1]
+                inst = "_".join(parts[2:-1])
+                sensor = parts[-1]
+
                 instance_to_tables.setdefault(inst, []).append(t)
-                instance_to_dataset[inst] = ds
+                instance_to_dataset[inst] = dataset
 
         # ============================================================
         # 2. Compute valid 1‑second windows per instance
