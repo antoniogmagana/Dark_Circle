@@ -52,36 +52,46 @@ def get_time_bounds(cursor, table_name):
         return 0.0, 0.0
 
 
-def fetch_sensor_batch(cursor, table_name, sample_rate, start_time):
-    """
-    Fetches exactly 1 second of data starting from a precise timestamp.
-    Uses the B-Tree index on time_stamp for lightning-fast retrieval.
-    """
+# db_utils.py (Snippet to update)
+
+
+def fetch_sensor_batch(cursor, table_name, limit_rows, start_time, run_id=None):
     if "_accel_" in table_name:
         target_cols = "accel_x_ew, accel_y_ns, accel_z_ud"
     else:
         target_cols = "amplitude"
 
-    # We fetch enough rows to satisfy 1 second of data based on the sample rate.
-    # WHERE time_stamp >= start_time leverages the index instantly.
-    query = sql.SQL(
-        """
-        SELECT {columns} 
-        FROM {table} 
-        WHERE time_stamp >= {start_time} 
-        ORDER BY time_stamp ASC 
-        LIMIT {limit}
-        """
-    ).format(
-        columns=sql.SQL(target_cols),
-        table=sql.Identifier(table_name),
-        start_time=sql.Literal(start_time),
-        limit=sql.Literal(sample_rate),  # 1 second = sample_rate rows
-    )
+    if run_id is not None:
+        query = sql.SQL(
+            """
+            SELECT {columns} FROM {table} 
+            WHERE time_stamp >= {start_time} AND run_id = {run_id}
+            ORDER BY time_stamp ASC LIMIT {limit}
+            """
+        ).format(
+            columns=sql.SQL(target_cols),
+            table=sql.Identifier(table_name),
+            start_time=sql.Literal(start_time),
+            run_id=sql.Literal(run_id),
+            limit=sql.Literal(limit_rows),  # Changed from sample_rate
+        )
+    else:
+        query = sql.SQL(
+            """
+            SELECT {columns} FROM {table} 
+            WHERE time_stamp >= {start_time} 
+            ORDER BY time_stamp ASC LIMIT {limit}
+            """
+        ).format(
+            columns=sql.SQL(target_cols),
+            table=sql.Identifier(table_name),
+            start_time=sql.Literal(start_time),
+            limit=sql.Literal(limit_rows),  # Changed from sample_rate
+        )
 
     try:
         cursor.execute(query)
         return cursor.fetchall()
-    except (Exception, psycopg2.Error) as e:
+    except Exception as e:
         print(f"Error fetching data from {table_name}: {e}")
         return []

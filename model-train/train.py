@@ -32,20 +32,28 @@ class VehicleStreamer(IterableDataset):
             "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
         )
         all_tables = [r[0] for r in cursor.fetchall()]
-
-        # =====================================================================
-        # CRITICAL CPU FIX 2: Boundary Caching
-        # Memorizes the MIN/MAX time of a table so we don't hammer Postgres
-        # with 6,400 full-table scans every single epoch.
-        # =====================================================================
         bounds_cache = {}
 
+        # =========================================================
+        # BULK FETCHING: Fetch 15 seconds of data per DB query
+        # =========================================================
+        CHUNK_SECONDS = 15
+
         while True:
-            ds = random.choices(config.TRAIN_DATASETS, k=1)[0]
+            # 1. STOP THE SPIN LOOP: Guaranteed valid class/dataset combos
             class_id = random.choice(list(config.CLASS_MAP.keys()))
+            valid_datasets = [
+                ds
+                for ds in config.TRAIN_DATASETS
+                if class_id in config.DATASET_VEHICLE_MAP[ds]
+            ]
+            if not valid_datasets:
+                continue  # Failsafe
+
+            ds = random.choice(valid_datasets)
+            v_base = random.choice(config.DATASET_VEHICLE_MAP[ds][class_id])
 
             try:
-                v_base = random.choice(config.DATASET_VEHICLE_MAP[ds][class_id])
                 matching_tables = [
                     t for t in all_tables if f"{ds}_" in t and f"_{v_base}" in t
                 ]
@@ -62,11 +70,10 @@ class VehicleStreamer(IterableDataset):
                 if not audio_table:
                     continue
 
-                target_run_id = None
-                if ds == "m3nvc" and class_id == 0:
-                    target_run_id = random.choice([8, 9])
+                target_run_id = (
+                    random.choice([8, 9]) if (ds == "m3nvc" and class_id == 0) else None
+                )
 
-                # --- CACHE LOOKUP LOGIC ---
                 cache_key = f"{audio_table}_{target_run_id}"
                 if cache_key not in bounds_cache:
                     min_t, max_t = get_time_bounds(
@@ -75,21 +82,30 @@ class VehicleStreamer(IterableDataset):
                     bounds_cache[cache_key] = (min_t, max_t)
                 else:
                     min_t, max_t = bounds_cache[cache_key]
-                # --------------------------
 
                 duration = max_t - min_t
-                if duration <= 1.0:
+                if duration <= CHUNK_SECONDS:
                     continue
 
                 train_bound = min_t + (duration * config.SPLIT_TRAIN)
                 val_bound = train_bound + (duration * config.SPLIT_VAL)
 
+                # Adjusted bounds to fit the 15-second chunk safely
                 if self.split == "train":
-                    window_start = random.uniform(min_t, train_bound - 1.0)
+                    high = train_bound - CHUNK_SECONDS
+                    if high <= min_t:
+                        continue
+                    window_start = random.uniform(min_t, high)
                 elif self.split == "val":
-                    window_start = random.uniform(train_bound, val_bound - 1.0)
+                    high = val_bound - CHUNK_SECONDS
+                    if high <= train_bound:
+                        continue
+                    window_start = random.uniform(train_bound, high)
                 else:
-                    window_start = random.uniform(val_bound, max_t - 1.0)
+                    high = max_t - CHUNK_SECONDS
+                    if high <= val_bound:
+                        continue
+                    window_start = random.uniform(val_bound, high)
 
                 current_channels = []
                 for sensor in config.TRAIN_SENSORS:
@@ -111,15 +127,17 @@ class VehicleStreamer(IterableDataset):
                     )
                     sr = config.NATIVE_SR[ds][sensor_type]
 
+                    # 2. BULK QUERY: Fetch exactly CHUNK_SECONDS of data
+                    limit_rows = int(sr * CHUNK_SECONDS)
                     raw = fetch_sensor_batch(
                         cursor,
                         t_name,
-                        sr,
+                        limit_rows,
                         start_time=window_start,
                         run_id=target_run_id,
                     )
 
-                    if not raw or len(raw) < sr:
+                    if not raw or len(raw) < limit_rows:
                         break
 
                     if "_accel_" in t_name or len(raw[0]) >= 3:
@@ -134,20 +152,28 @@ class VehicleStreamer(IterableDataset):
                             [r[0] for r in raw], dtype=torch.float32
                         )
 
-                    if chan_tensor.shape[-1] != config.ACOUSTIC_SR:
+                    # 3. BULK UPSAMPLE: Stretch to target chunk size
+                    target_length = config.ACOUSTIC_SR * CHUNK_SECONDS
+                    if chan_tensor.shape[-1] != target_length:
                         chan_tensor = chan_tensor.unsqueeze(0).unsqueeze(0)
                         chan_tensor = preprocess.align_and_upsample(
-                            chan_tensor, config.ACOUSTIC_SR
+                            chan_tensor, target_length=target_length
                         ).squeeze()
 
                     current_channels.append(chan_tensor)
 
                 if len(current_channels) != config.IN_CHANNELS:
                     continue
-                yield torch.stack(current_channels), class_id
 
-            except KeyError:
-                continue
+                # Stack the multi-modal 15-second block
+                chunk_tensor = torch.stack(current_channels)
+
+                # 4. YIELD SLICES: Loop over the chunk locally in RAM
+                for i in range(CHUNK_SECONDS):
+                    start_idx = i * config.ACOUSTIC_SR
+                    end_idx = start_idx + config.ACOUSTIC_SR
+                    yield chunk_tensor[:, start_idx:end_idx], class_id
+
             except Exception as e:
                 continue
 
