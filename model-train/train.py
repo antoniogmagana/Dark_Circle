@@ -214,7 +214,12 @@ class VehicleStreamer(IterableDataset):
 
             window = chunk[:, start_idx:end_idx]  # [C_total, samples_per_window]
 
-            # Yield raw window + label; preprocessing happens later
+            # Ensure contiguous, normal storage for DataLoader
+            window = window.contiguous().clone()
+
+            # Make sure label is a plain int
+            label = int(label)
+
             yield window, label
 
 
