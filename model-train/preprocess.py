@@ -73,32 +73,36 @@ def preprocess_batch(batch_tensor):
 # 3. Mel spectrogram extraction
 # ============================================================
 
-_mel_transform = torchaudio.transforms.MelSpectrogram(
-    sample_rate=config.ACOUSTIC_SR,
-    n_fft=2048,
-    hop_length=config.MEL_HOP_LENGTH,
-    n_mels=config.MEL_BINS,
-)
+_mel_transform = None
+
+
+def get_mel_transform(device):
+    global _mel_transform
+    if (
+        _mel_transform is None
+        or next(_mel_transform.parameters(), torch.tensor([], device=device)).device
+        != device
+    ):
+        _mel_transform = torchaudio.transforms.MelSpectrogram(
+            sample_rate=config.REF_SAMPLE_RATE,
+            n_fft=config.N_FFT,
+            hop_length=config.HOP_LENGTH,
+            n_mels=config.MEL_BINS,
+        ).to(device)
+    return _mel_transform
 
 
 def extract_mel_spectrogram(batch_tensor):
-    """
-    Convert waveform batch into mel spectrograms.
+    # batch_tensor: [B, C, T]
+    device = batch_tensor.device
+    mel_transform = get_mel_transform(device)
 
-    Input:
-        batch_tensor: [B, C, T] after upsampling
-
-    Output:
-        [B, C, MEL_BINS, time_frames]
-    """
     B, C, T = batch_tensor.shape
-    mel_list = []
-
+    mels = []
     for c in range(C):
-        mel = _mel_transform(batch_tensor[:, c, :])  # [B, MEL_BINS, frames]
-        mel_list.append(mel)
-
-    return torch.stack(mel_list, dim=1)  # [B, C, MEL_BINS, frames]
+        mel = mel_transform(batch_tensor[:, c, :])  # [B, MEL_BINS, frames]
+        mels.append(mel)
+    return torch.stack(mels, dim=1)  # [B, C, MEL_BINS, frames]
 
 
 # ============================================================
