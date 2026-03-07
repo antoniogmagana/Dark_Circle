@@ -186,6 +186,10 @@ class VehicleStreamer(IterableDataset):
                 )
 
                 if not raw:
+                    # No data → zero channel
+                    n_samples_ref = int(sr_native_ref * self.chunk_seconds)
+                    zero_chan = torch.zeros(1, n_samples_ref, dtype=torch.float32)
+                    chunk_data.append(zero_chan)
                     continue
 
                 if sensor == "accel":
