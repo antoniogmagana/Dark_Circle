@@ -24,6 +24,19 @@ from models import MODEL_REGISTRY
 # ============================================================
 
 
+def collate_batch(batch):
+    # batch is a list of (window, label)
+    xs, ys = zip(*batch)
+
+    # Ensure all windows are contiguous tensors
+    xs = [x.contiguous() for x in xs]
+
+    x_batch = torch.stack(xs, dim=0)  # [B, C, T]
+    y_batch = torch.tensor(ys, dtype=torch.long)
+
+    return x_batch, y_batch
+
+
 def extract_instance_from_table(table_name: str) -> str:
     parts = table_name.split("_")
     # dataset = parts[0]
@@ -215,7 +228,7 @@ class VehicleStreamer(IterableDataset):
             window = chunk[:, start_idx:end_idx]  # [C_total, samples_per_window]
 
             # Ensure contiguous, normal storage for DataLoader
-            window = window.contiguous().clone()
+            window = window.contiguous()
 
             # Make sure label is a plain int
             label = int(label)
@@ -325,16 +338,18 @@ def main():
 
     train_loader = DataLoader(
         VehicleStreamer(split="train"),
-        batch_size=batch_size,
+        batch_size=config.BATCH_SIZE,
         num_workers=config.NUM_WORKERS,
         pin_memory=True,
+        collate_fn=collate_batch,
     )
 
     val_loader = DataLoader(
         VehicleStreamer(split="val"),
-        batch_size=batch_size,
+        batch_size=config.BATCH_SIZE,
         num_workers=config.NUM_WORKERS,
         pin_memory=True,
+        collate_fn=collate_batch,
     )
 
     os.makedirs(config.CHECKPOINT_DIR, exist_ok=True)
