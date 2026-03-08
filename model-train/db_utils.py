@@ -20,7 +20,7 @@ def db_connect():
         conn = psycopg2.connect(**DB_CONN_PARAMS)
         conn.autocommit = True
         cursor = conn.cursor()
-        print("Connected to PostgreSQL successfully.")
+        # print("Connected to PostgreSQL successfully.")
         return conn, cursor
     except Exception as e:
         print(f"Failed to connect: {e}")
