@@ -88,9 +88,11 @@ class VehicleDataset(Dataset):
         sample_rate = config.NATIVE_SR[parts[0]][parts[1]]
 
         expected_window = int(sample_rate * config.SAMPLE_SECONDS)
-        start_time_seconds = float(time * config.SAMPLE_SECONDS)
 
-        # Build the dynamic WHERE clause based on whether this dataset uses run_id
+        # We now calculate the timestamp relative to the perfectly synchronized group start time
+        min_t = self.table_run_min_time[(table, run_id)]
+        start_time_seconds = min_t + float(time * config.SAMPLE_SECONDS)
+
         if run_id is not None:
             where_clause = (
                 f"WHERE run_id = {run_id} AND time_stamp >= {start_time_seconds}"
@@ -98,7 +100,6 @@ class VehicleDataset(Dataset):
         else:
             where_clause = f"WHERE time_stamp >= {start_time_seconds}"
 
-        # Inject the WHERE clause into the query
         if parts[1] == "accel":
             query = f"""SELECT accel_x_ew, accel_y_ns, accel_z_ud
                         FROM {table}
@@ -117,7 +118,6 @@ class VehicleDataset(Dataset):
         cursor.execute(query)
         raw_data = cursor.fetchall()
 
-        # Catch completely empty database responses gracefully
         if not raw_data:
             run_str = f" (Run: {run_id})" if run_id is not None else ""
             raise ValueError(
@@ -125,10 +125,8 @@ class VehicleDataset(Dataset):
                 f"Check database table for missing rows or alignment issues."
             )
 
-        # Create Tensor (Shape: [Channels, Length])
         sensor_data = torch.tensor(raw_data, dtype=torch.float32).T
 
-        # 1. FFT Fix: Fix dropped packets in the database natively
         if sensor_data.shape[1] != expected_window:
             if hasattr(self, "_fft_resample"):
                 sensor_data = self._fft_resample(sensor_data, expected_window)
@@ -136,12 +134,10 @@ class VehicleDataset(Dataset):
                 pad_amount = expected_window - sensor_data.shape[1]
                 sensor_data = torch.nn.functional.pad(sensor_data, (0, pad_amount))
 
-        # 2. Torchaudio: Massive upsampler for matching the global reference rate
         target_freq = int(max_time_steps / config.SAMPLE_SECONDS)
         if sample_rate < target_freq:
             sensor_data = self._upsample_signal(sensor_data, sample_rate, target_freq)
 
-        # 3. Fast Safety Clamp: torchaudio float math can occasionally be off by 1 sample.
         if sensor_data.shape[1] > max_time_steps:
             sensor_data = sensor_data[:, :max_time_steps]
         elif sensor_data.shape[1] < max_time_steps:
@@ -182,53 +178,76 @@ class VehicleDataset(Dataset):
         db_close(_, cursor)
 
     def _get_table_max_time(self):
-        # 1. Open a temporary connection just for the Main Thread setup
+        # 1. Open a temporary connection
         temp_conn, temp_cursor = db_connect()
 
-        # We now map (table, run_id) to its max time!
         self.table_run_max_time = {}
+        self.table_run_min_time = (
+            {}
+        )  # NEW: We must track where the recording actually started
 
         for table in self.tables:
-            # Only m3nvc uses the run_id column
             if table.startswith("m3nvc_"):
                 temp_cursor.execute(
                     f"SELECT DISTINCT run_id FROM {table} WHERE run_id IS NOT NULL;"
                 )
                 runs = [row[0] for row in temp_cursor.fetchall()]
             else:
-                # iobt and focal do not use runs
                 runs = [None]
 
-            # Get the exact physical time bounds for each run (or the entire table if None)
             for run_id in runs:
                 min_t, max_t = get_time_bounds(temp_cursor, table, run_id=run_id)
-                self.table_run_max_time[(table, run_id)] = math.floor(
-                    max_t / config.SAMPLE_SECONDS
-                )
+                self.table_run_min_time[(table, run_id)] = min_t
+                self.table_run_max_time[(table, run_id)] = max_t
 
-        # 2. Close the temporary connection
         db_close(temp_conn, temp_cursor)
 
     def _align_max_time(self):
-        # Group tables by the specific physical sensor AND run_id
         groups = {}
-        for (table, run_id), time in self.table_run_max_time.items():
+        for (table, run_id), max_t in self.table_run_max_time.items():
             parts = table.split("_")
             dataset = parts[0]
             instance = "_".join(parts[2:-1])
             sensor_node = parts[-1]
 
-            # A unique group: e.g., (iobt, polaris0150pm, rs1, None) or (m3nvc, miata, rs1, 2)
             group_key = (dataset, instance, sensor_node, run_id)
             if group_key not in groups:
                 groups[group_key] = []
             groups[group_key].append((table, run_id))
 
-        # Force all signals for that specific node & run to match the shortest time
+        keys_to_delete = []
+
         for group_key, table_runs in groups.items():
-            min_time = min(self.table_run_max_time[tr] for tr in table_runs)
-            for tr in table_runs:
-                self.table_run_max_time[tr] = min_time
+            # 1. COMPLETENESS CHECK: Ensure every requested sensor exists for this run
+            present_signals = [tr[0].split("_")[1] for tr in table_runs]
+            has_all_signals = all(
+                signal in present_signals for signal in config.TRAIN_SENSORS
+            )
+
+            if not has_all_signals:
+                # If a modality is completely missing, discard this run so it is never sampled
+                for tr in table_runs:
+                    keys_to_delete.append(tr)
+            else:
+                # 2. TIME INTERSECTION: Find the synchronized absolute time overlap
+                group_min_t = max(self.table_run_min_time[tr] for tr in table_runs)
+                group_max_t = min(self.table_run_max_time[tr] for tr in table_runs)
+
+                valid_duration = group_max_t - group_min_t
+
+                if valid_duration <= 0:
+                    for tr in table_runs:
+                        keys_to_delete.append(tr)
+                else:
+                    # Apply the synchronized bounds back to the tables
+                    valid_windows = math.floor(valid_duration / config.SAMPLE_SECONDS)
+                    for tr in table_runs:
+                        self.table_run_min_time[tr] = group_min_t
+                        self.table_run_max_time[tr] = valid_windows
+
+        for k in keys_to_delete:
+            del self.table_run_max_time[k]
+            del self.table_run_min_time[k]
 
     def _get_samples(self):
         unique_samples = set()
