@@ -90,17 +90,23 @@ class VehicleDataset(Dataset):
         expected_window = int(sample_rate * config.SAMPLE_SECONDS)
         sample_offset = int(time * expected_window)
 
+        # Calculate the exact physical timestamp in seconds where this window begins
+        start_time_seconds = float(time * config.SAMPLE_SECONDS)
+
+        # Use an indexed WHERE clause to instantly jump to the correct float timestamp
         if parts[1] == "accel":
             query = f"""SELECT accel_x_ew, accel_y_ns, accel_z_ud
                         FROM {table}
-                        ORDER BY time_stamp
-                        LIMIT {expected_window} OFFSET {sample_offset};
+                        WHERE time_stamp >= {start_time_seconds}
+                        ORDER BY time_stamp ASC
+                        LIMIT {expected_window};
                         """
         else:
             query = f"""SELECT amplitude
                         FROM {table}
-                        ORDER BY time_stamp
-                        LIMIT {expected_window} OFFSET {sample_offset};
+                        WHERE time_stamp >= {start_time_seconds}
+                        ORDER BY time_stamp ASC
+                        LIMIT {expected_window};
                         """
 
         self.cursor.execute(query)
