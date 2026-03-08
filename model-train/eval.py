@@ -138,7 +138,7 @@ def run_evaluation():
     plt.ylabel("Actual")
     plt.title(f"Confusion Matrix: {config.MODEL_NAME}")
     plt.savefig(config.IMG_SAVE_PATH)
-    print("Confusion matrix saved to test_confusion_matrix.png")
+    print(f"Confusion matrix saved to {config.IMG_SAVE_PATH}")
 
 
 if __name__ == "__main__":
