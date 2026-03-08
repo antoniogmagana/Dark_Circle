@@ -46,9 +46,7 @@ class VehicleDataset(Dataset):
             table = next((t for t in sensor_tables if f"_{target_sensor}_" in t), None)
 
             if table:
-                sensor_data = self._fetch_sensor_data(
-                    self.cursor, table, time, max_time_steps
-                )
+                sensor_data = self._fetch_sensor_data(table, time, max_time_steps)
                 sensor_tensors.append(sensor_data)
             else:
                 raise ValueError(
