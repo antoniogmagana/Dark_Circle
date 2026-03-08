@@ -108,8 +108,9 @@ class VehicleDataset(Dataset):
         return sensor_data
 
     def _get_tables(self):
+        _, cursor = db_connect()
         for dataset in config.TRAIN_DATASETS:
-            self.cursor.execute(
+            cursor.execute(
                 """
                 SELECT tablename
                 FROM pg_tables
@@ -118,18 +119,21 @@ class VehicleDataset(Dataset):
                   """,
                 (f"{dataset}_%",),
             )
-            self.tables.extend([table[0] for table in self.cursor.fetchall()])
+            self.tables.extend([table[0] for table in cursor.fetchall()])
+        db_close()
 
     def _get_table_max_time(self):
+        _, cursor = db_connect()
         for table in self.tables:
-            self.cursor.execute(f"SELECT count(*) FROM {table};")
+            cursor.execute(f"SELECT count(*) FROM {table};")
             parts = table.split("_")
 
             self.table_max_time[table] = math.floor(
-                self.cursor.fetchone()[0]
+                cursor.fetchone()[0]
                 / config.NATIVE_SR[parts[0]][parts[1]]
                 / config.SAMPLE_SECONDS
             )
+        db_close()
 
     def _align_max_time(self):
         for table, time in self.table_max_time.items():
