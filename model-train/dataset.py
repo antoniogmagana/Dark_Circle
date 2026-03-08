@@ -43,9 +43,7 @@ class VehicleDataset(Dataset):
             exact_table = f"{dataset}_{signal}_{instance}_{sensor_node}"
 
             # get sensor data
-            sensor_data = self._fetch_sensor_data(
-                self.cursor, exact_table, time, max_time_steps
-            )
+            sensor_data = self._fetch_sensor_data(exact_table, time, max_time_steps)
 
             sensor_tensors.append(sensor_data)
 
