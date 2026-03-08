@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 import atexit
 
+from data_generator import augment_batch
 from dataset import VehicleDataset
 from models import build_model
 from preprocess import preprocess_for_training
@@ -37,6 +38,15 @@ def train_one_epoch(
 
     for batch_idx, (x, y) in enumerate(loader):
         x, y = x.to(device), y.to(device)
+
+        # -----------------------------------------------------------------
+        # DYNAMIC SYNTHESIS: SNR Augmentation (Controlled via config)
+        # -----------------------------------------------------------------
+        if getattr(config, "AUGMENT_SNR", False):
+            # Safely grab the range, defaulting to (10, 30) if missing
+            current_snr_range = getattr(config, "AUGMENT_SNR_RANGE", (10, 30))
+            x = augment_batch(x, snr_range=current_snr_range)
+        # -----------------------------------------------------------------
 
         # Preprocessing on the GPU
         x = preprocess_for_training(x, channel_maxs, use_mel=use_mel)

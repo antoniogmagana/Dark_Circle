@@ -80,7 +80,6 @@ REF_SAMPLE_RATE = max(NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_S
 
 # Semantic category names (used for category-level classification)
 CLASS_MAP = {0: "background", 1: "light", 2: "heavy"}
-CLASS_WEIGHTS = [1.0, 10.0, 1.0]
 
 # Instance → category mapping (authoritative)
 DATASET_VEHICLE_MAP = {
@@ -143,11 +142,15 @@ random.shuffle(shuffled_instances)
 
 INSTANCE_TO_CLASS = {name: idx for idx, name in enumerate(shuffled_instances)}
 
+CLASS_WEIGHTS = []
+
 # Determine number of classes based on training mode
 if TRAINING_MODE == "detection":
     NUM_CLASSES = 2
+    CLASS_WEIGHTS = [1.0, 1.0]
 elif TRAINING_MODE == "category":
     NUM_CLASSES = len(CLASS_MAP)
+    CLASS_WEIGHTS = [1.0, 1.0, 1.0]
 elif TRAINING_MODE == "instance":
     NUM_CLASSES = len(INSTANCE_TO_CLASS)
 else:
@@ -194,8 +197,17 @@ BATCH_MODE = True
 # Toggle to dynamically inject generated background noise during training
 SYNTHESIZE_BACKGROUND = True
 
-# The probability (0.0 to 1.0) of replacing a REAL background sample with a SYNTHETIC one
+# The probability (0.0 to 1.0) of adding a SYNTHETIC background sample
 SYNTHESIZE_PROBABILITY = 0.5
+
+# Toggle to dynamically add noise to the raw waveform during training
+AUGMENT_SNR = True
+
+# The minimum and maximum SNR (in decibels) to apply when augmenting
+AUGMENT_SNR_RANGE = (10, 30)
+
+# add extra synthetic background samples
+OVERSAMPLE_BACKGROUNDS = True
 
 # ---------------------------------------------------------------------
 # DYNAMIC SYNCHRONIZATION: Prevent Circular Imports

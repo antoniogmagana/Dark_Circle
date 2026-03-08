@@ -289,6 +289,33 @@ class VehicleDataset(Dataset):
 
         self.samples = sorted(list(unique_samples))
 
+        # -----------------------------------------------------------------
+        # CONTROLLED OVER-SAMPLING: Background Balancing
+        # -----------------------------------------------------------------
+        if (
+            config.TRAINING_MODE == "detection"
+            and self.split == "train"
+            and getattr(config, "OVERSAMPLE_BACKGROUNDS", False)
+        ):
+            background_samples = [
+                s for s in self.samples if s[5] == 0
+            ]  # Label is index 5
+            vehicle_samples = [s for s in self.samples if s[5] == 1]
+
+            # Calculate how many background samples we need to match vehicle count
+            shortfall = len(vehicle_samples) - len(background_samples)
+
+            if shortfall > 0:
+                import random
+
+                # Duplicate background metadata entries to make up the difference
+                extra_backgrounds = random.choices(background_samples, k=shortfall)
+                self.samples.extend(extra_backgrounds)
+
+                # Shuffle the dataset so all the new backgrounds aren't just at the end
+                random.shuffle(self.samples)
+        # -----------------------------------------------------------------
+
     def close_connection(self):
         if getattr(self, "cursor", None) and not self.cursor.closed:
             self.cursor.close()

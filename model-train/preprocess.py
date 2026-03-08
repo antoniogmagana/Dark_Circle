@@ -8,17 +8,18 @@ import config
 
 
 def standardize_batch(batch_tensor, channel_maxs, eps=1e-8):
-    """
-    batch_tensor: [B, C, T]
-    channel_maxs: [C] (The maximum amplitude of each channel from the training set)
-    """
     # 1. Window-level Mean Subtraction (Fixes sensor hardware drift/DC offset)
     mean = batch_tensor.mean(dim=-1, keepdim=True)
     centered = batch_tensor - mean
 
-    # 2. Global-level Scaling (Preserves relative volume, prevents gradient explosion)
-    # We reshape channel_maxs from [C] to [1, C, 1] so it broadcasts across batches and time
-    scaled = centered / (channel_maxs.view(1, -1, 1) + eps)
+    # 2. Dynamic Scaling based on Pipeline Stage
+    if config.TRAINING_MODE == "detection":
+        # Global Scaling (Keeps background quiet)
+        scaled = centered / (channel_maxs.view(1, -1, 1) + eps)
+    else:
+        # Per-Window Scaling (Distance Invariance for Classification)
+        window_maxs = centered.abs().amax(dim=-1, keepdim=True)
+        scaled = centered / (window_maxs + eps)
 
     return scaled
 
