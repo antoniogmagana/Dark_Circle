@@ -93,16 +93,14 @@ class VehicleDataset(Dataset):
         if parts[1] == "accel":
             query = f"""SELECT accel_x_ew, accel_y_ns, accel_z_ud
                         FROM {table}
-                        WHERE time_stamp >= {time * config.SAMPLE_SECONDS}
                         ORDER BY time_stamp
-                        LIMIT {expected_window};
+                        LIMIT {expected_window} OFFSET {sample_offset};
                         """
         else:
             query = f"""SELECT amplitude
                         FROM {table}
-                        WHERE time_stamp >= {time * config.SAMPLE_SECONDS}
                         ORDER BY time_stamp
-                        LIMIT {expected_window};
+                        LIMIT {expected_window} OFFSET {sample_offset};
                         """
 
         self.cursor.execute(query)
