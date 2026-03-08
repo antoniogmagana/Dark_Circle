@@ -1,191 +1,189 @@
 import random
+import math
 import torch
+import torchaudio.transforms
 from torch.utils.data import Dataset
-from db_utils import db_connect, fetch_sensor_batch, get_time_bounds
+from sklearn.model_selection import train_test_split
+from db_utils import db_connect, db_close, fetch_sensor_batch, get_time_bounds
 import config
 
 
 class VehicleDataset(Dataset):
-    """
-    Finite, leak‑free dataset with per‑instance splitting.
-    Each item is a 1‑second multimodal window:
-        [audio, seismic, accel_x, accel_y, accel_z]
-    """
+    """ """
 
     def __init__(self, split):
-        assert split in {"train", "val", "test"}
         self.split = split
+        self.tables = []
+        self.table_max_time = {}
+        self.split_idx = {}
+        self.samples = []
+        self.resamplers = {}
+        self.conn = None
+        self.cursor = None
 
+        self._get_tables()
+        self._get_table_max_time()
+        self._align_max_time()
+        self._get_samples()
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        instance, time, label = self.samples[idx]
+        sensor_tensors = []
+
+        # Determine the max time steps for this specific group of sensors
+        sensor_tables = [table for table in self.tables if instance in table]
+        rates = [
+            config.NATIVE_SR[t.split("_")[0]][t.split("_")[1]] for t in sensor_tables
+        ]
+        max_time_steps = max(rates) * config.SAMPLE_SECONDS
+
+        # 1. STRICT CHANNEL ORDERING
+        for target_sensor in config.TRAIN_SENSORS:
+            # Find the specific table for this sensor type
+            table = next((t for t in sensor_tables if f"_{target_sensor}_" in t), None)
+
+            if table:
+                sensor_data = self._fetch_sensor_data(
+                    self.cursor, table, time, max_time_steps
+                )
+                sensor_tensors.append(sensor_data)
+            else:
+                raise ValueError(
+                    f"Missing {target_sensor} table for instance {instance}"
+                )
+
+        # Concatenate all channels along dim 0. Shape will be [IN_CHANNELS, max_time_steps]
+        X = torch.cat(sensor_tensors, dim=0)
+        y = torch.tensor(label, dtype=torch.long)
+
+        return X, y
+
+    def _fetch_sensor_data(self, cursor, table, time, max_time_steps):
+        parts = table.split("_")
+        sample_rate = config.NATIVE_SR[parts[0]][parts[1]]
+
+        sample_window = sample_rate * config.SAMPLE_SECONDS
+        sample_offset = time * sample_window
+
+        if parts[1] == "accel":
+            query = f"""SELECT accel_x_ew, accel_y_ns, accel_z_ud
+                        FROM {table}
+                        ORDER BY time_step
+                        LIMIT {sample_window} OFFSET {sample_offset};
+                        """
+        else:
+            query = f"""SELECT amplitude
+                        FROM {table}
+                        ORDER BY time_step
+                        LIMIT {sample_window} OFFSET {sample_offset};
+                        """
+
+        cursor.execute(query)
+
+        raw_data = cursor.fetchall()
+
+        sensor_data = torch.tensor(raw_data, dtype=torch.float32).T
+        if sensor_data.shape[1] < max_time_steps:
+            target_freq = int(max_time_steps / config.SAMPLE_SECONDS)
+
+            sensor_data = self._upsample_signal(sensor_data, sample_rate, target_freq)
+
+        return sensor_data
+
+    def _upsample_signal(self, sensor_data, sample_rate, target_freq):
+        # pull resample structure from cache
+        resample_key = (sample_rate, target_freq)
+
+        # If resampler not built yet, build it and save it
+        if resample_key not in self.resamplers:
+            self.resamplers[resample_key] = torchaudio.transforms.Resample(
+                orig_freq=sample_rate, new_freq=target_freq
+            )
+
+        sensor_data = self.resamplers[resample_key](sensor_data)
+
+        return sensor_data
+
+    def _get_tables(self):
         conn, cursor = db_connect()
-
-        # ============================================================
-        # 1. Discover all tables and group them by instance
-        # ============================================================
-        instance_to_tables = {}  # inst → [table1, table2, ...]
-        instance_to_dataset = {}  # inst → dataset name
-
-        for ds in config.TRAIN_DATASETS:
+        for dataset in config.TRAIN_DATASETS:
             cursor.execute(
                 """
                 SELECT tablename
                 FROM pg_tables
                 WHERE schemaname='public'
                   AND tablename LIKE %s;
-            """,
-                (f"{ds}_%",),
+                  """,
+                (f"{dataset}_%",),
             )
-            tables = [t[0] for t in cursor.fetchall()]
+            self.tables.extend([table[0] for table in cursor.fetchall()])
+        db_close()
 
-            for t in tables:
-                # Example: iobt_audio_polaris0150pm_rs3
-                parts = t.split("_")
-                # parts = [dataset, sensor, instance, rsX]
-                if len(parts) < 4:
-                    continue
+    def _get_table_max_time(self):
+        conn, cursor = db_connect()
+        for table in self.tables:
+            cursor.execute(f"SELECT count(*) FROM {table};")
+            parts = table.split("_")
 
-                dataset = parts[0]
-                signal = parts[1]
-                inst = "_".join(parts[2:-1])
-                sensor = parts[-1]
+            self.table_max_time[table] = math.floor(
+                cursor.fetchone()[0]
+                / config.NATIVE_SR[parts[0]][parts[1]]
+                / config.SAMPLE_SECONDS
+            )
+        db_close()
 
-                instance_to_tables.setdefault(inst, []).append(t)
-                instance_to_dataset[inst] = dataset
+    def _align_max_time(self):
+        for table, time in self.table_max_time.items():
+            parts = table.split("_")
+            suffix = "_".join(parts[2:])
 
-        # ============================================================
-        # 2. Compute valid 1‑second windows per instance
-        # ============================================================
-        instance_to_windows = {}
+            related = [
+                val
+                for name, val in self.table_max_time.items()
+                if name.endswith(suffix)
+            ]
+            min_time = min(related)
 
-        for inst, tables in instance_to_tables.items():
-            ds = instance_to_dataset[inst]
+            if time > min_time:
+                self.table_max_time[table] = min_time
 
-            # Pick any table for time bounds
-            rep_table = tables[0]
-            t_min, t_max = get_time_bounds(cursor, rep_table)
-            duration_sec = int(t_max - t_min)
+    def _get_samples(self):
+        """
+        Determinisitically store indices for train, test,
+        validation splits with implied sensor alignment and output labels
+        """
+        unique_samples = set()
 
-            if duration_sec <= 0:
-                continue
+        for table, times in self.table_max_time.items():
 
-            # Build window list
-            instance_to_windows[inst] = [(ds, inst, sec) for sec in range(duration_sec)]
+            indices = list(range(times))
+            parts = table.split("_")
+            instance = "_".join(parts[2:-1])
+            label = config.DATASET_VEHICLE_MAP[parts[0]][instance]
 
-        # ============================================================
-        # 3. Per‑instance split (no leakage)
-        # ============================================================
-        rng = random.Random(config.INSTANCE_SEED)
-        all_instances = list(instance_to_windows.keys())
-        rng.shuffle(all_instances)
+            train, test = train_test_split(indices, test_size=0.3, random_state=42)
+            test, val = train_test_split(test, test_size=0.5, random_state=42)
 
-        n = len(all_instances)
-        n_train = int(0.7 * n)
-        n_val = int(0.2 * n)
+            target_idx = {"train": train, "test": test, "val": val}[self.split]
 
-        if split == "train":
-            chosen_instances = all_instances[:n_train]
-        elif split == "val":
-            chosen_instances = all_instances[n_train : n_train + n_val]
-        else:
-            chosen_instances = all_instances[n_train + n_val :]
+            for time in target_idx:
+                unique_samples.add((instance, time, label))
 
-        # Flatten windows for chosen instances
-        self.index = []
-        for inst in chosen_instances:
-            self.index.extend(instance_to_windows[inst])
+        self.samples = sorted(list(unique_samples))
 
-        # Store for __getitem__
-        self.instance_to_tables = instance_to_tables
-        self.instance_to_dataset = instance_to_dataset
-        self.ref_sr = config.REF_SAMPLE_RATE
+    def close_connection(self):
+        """Safely closes DB connections if they exist and are open."""
+        # Check if cursor exists and isn't already closed
+        if getattr(self, "cursor", None) and not self.cursor.closed:
+            self.cursor.close()
 
-        self.conn = conn
-        self.cursor = cursor
+        # Check if conn exists and isn't already closed (psycopg2 uses closed == 0 for open)
+        if getattr(self, "conn", None) and self.conn.closed == 0:
+            self.conn.close()
 
-    # ============================================================
-    # PyTorch Dataset API
-    # ============================================================
-
-    def set_normalization(self, sensor_mins, sensor_maxs):
-        self.sensor_mins = sensor_mins
-        self.sensor_maxs = sensor_maxs
-
-    def __len__(self):
-        return len(self.index)
-
-    def __getitem__(self, idx):
-        ds, inst, sec = self.index[idx]
-        tables = self.instance_to_tables[inst]
-
-        chunk_data = []
-
-        for sensor in config.TRAIN_SENSORS:
-            # Find the correct table for this sensor (rsX suffix varies)
-            matches = [t for t in tables if f"_{sensor}_" in t]
-            if not matches:
-                # Missing sensor → zero channel
-                arr = torch.zeros(1, int(self.ref_sr), dtype=torch.float32)
-                chunk_data.append(arr)
-                continue
-
-            table = matches[0]
-            sr_native = config.NATIVE_SR[ds][sensor]
-
-            # Fetch exactly 1 second
-            raw = fetch_sensor_batch(self.cursor, table, sr_native, sec)
-
-            if not raw:
-                arr = torch.zeros(1, int(self.ref_sr), dtype=torch.float32)
-            else:
-                if sensor == "accel":
-                    # raw is list of rows: [ [x,y,z], ... ]
-                    arr = torch.tensor(raw, dtype=torch.float32).T  # [3, T_native]
-                else:
-                    # raw is list of single-column rows
-                    arr = torch.tensor([r[0] for r in raw], dtype=torch.float32)[
-                        None, :
-                    ]
-
-                # Resample to global reference rate
-                arr = resample_to(arr, sr_native, self.ref_sr)
-
-                # -----------------------------
-                # Apply min/max normalization
-                # -----------------------------
-                min_v = self.sensor_mins[sensor]
-                max_v = self.sensor_maxs[sensor]
-
-                # Avoid divide-by-zero
-                arr = (arr - min_v) / (max_v - min_v + 1e-8)  # [0,1]
-                arr = arr * 2 - 1  # [-1,1]
-
-                chunk_data.append(arr)
-
-        # Concatenate channels: [audio, seismic, accel_x, accel_y, accel_z]
-        window = torch.cat(chunk_data, dim=0)
-
-        # Label is determined by dataset + instance
-        label = assign_label(ds, inst)
-
-        return window, label
-
-
-# ============================================================
-# Helper functions you already have elsewhere
-# ============================================================
-
-
-def resample_to(arr, sr_native, sr_ref):
-    """
-    Resample arr from sr_native → sr_ref.
-    arr: [C, T_native]
-    """
-    import torchaudio
-
-    return torchaudio.functional.resample(arr, sr_native, sr_ref)
-
-
-def assign_label(dataset_name, instance_name):
-    """
-    Your existing logic for mapping (dataset, instance) → class label.
-    """
-    return config.INSTANCE_LABELS[(dataset_name, instance_name)]
+    def __del__(self):
+        """Python's garbage collection destructor."""
+        self.close_connection()
