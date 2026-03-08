@@ -79,7 +79,7 @@ def run_evaluation():
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(y.cpu().numpy())
 
-            if (i + 1) % 10 == 0:
+            if (i + 1) % config.LOG_INTERVAL == 0:
                 print(f"Eval Progress: Batch {i+1}/{len(test_loader)}")
 
     # 4. Metrics Calculation
