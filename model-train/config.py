@@ -51,7 +51,7 @@ DB_CONN_PARAMS = {
 #   "detection"  -> binary: background vs vehicle
 #   "category"   -> multi-class: background/light/heavy (CLASS_MAP)
 #   "instance"   -> each vehicle instance is its own class
-TRAINING_MODE = "category"
+TRAINING_MODE = os.environ.get("TRAINING_MODE", "detection")
 
 # Reproducible instance-level class IDs
 INSTANCE_SEED = 0
@@ -221,10 +221,27 @@ LEARNING_RATE = _model_ref.LR if getattr(_model_ref, "LR", None) is not None els
 
 # copy this into terminal to loop over all models in one go!
 """
-for model in DetectionCNN ClassificationCNN WaveformClassificationCNN ClassificationLSTM; do
-    echo "========================================"
-    echo "TRAINING AND EVALUATING: $model"
-    echo "========================================"
-    MODEL_NAME=$model poetry run python train.py && MODEL_NAME=$model poetry run python eval.py
+for mode in detection category instance; do
+    for model in DetectionCNN ClassificationCNN WaveformClassificationCNN ClassificationLSTM; do
+        echo "============================================================"
+        echo "STARTING RUN -> MODE: $mode | MODEL: $model"
+        echo "============================================================"
+        
+        TRAINING_MODE=$mode MODEL_NAME=$model poetry run python train.py
+        
+        # Only run eval if training succeeds
+        if [ $? -eq 0 ]; then
+            TRAINING_MODE=$mode MODEL_NAME=$model poetry run python eval.py
+        else
+            echo "Training failed for $model in $mode mode. Skipping eval."
+        fi
+        
+    done
+    # Run the Rocket specific pipeline
+    echo "============================================================"
+    echo "STARTING MINIROCKET RUN -> MODE: $mode"
+    echo "============================================================"
+    TRAINING_MODE=$mode poetry run python train_rocket.py
+    # (Evaluation is built-in, but you can run eval_rocket.py separately if needed)
 done
 """
