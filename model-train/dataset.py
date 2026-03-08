@@ -61,7 +61,7 @@ class VehicleDataset(Dataset):
 
         return X, y
 
-    def _fetch_sensor_data(self, cursor, table, time, max_time_steps):
+    def _fetch_sensor_data(self, table, time, max_time_steps):
         parts = table.split("_")
         sample_rate = config.NATIVE_SR[parts[0]][parts[1]]
 
@@ -81,9 +81,9 @@ class VehicleDataset(Dataset):
                         LIMIT {sample_window} OFFSET {sample_offset};
                         """
 
-        cursor.execute(query)
+        self.cursor.execute(query)
 
-        raw_data = cursor.fetchall()
+        raw_data = self.cursor.fetchall()
 
         sensor_data = torch.tensor(raw_data, dtype=torch.float32).T
         if sensor_data.shape[1] < max_time_steps:
@@ -108,9 +108,8 @@ class VehicleDataset(Dataset):
         return sensor_data
 
     def _get_tables(self):
-        conn, cursor = db_connect()
         for dataset in config.TRAIN_DATASETS:
-            cursor.execute(
+            self.cursor.execute(
                 """
                 SELECT tablename
                 FROM pg_tables
@@ -119,21 +118,18 @@ class VehicleDataset(Dataset):
                   """,
                 (f"{dataset}_%",),
             )
-            self.tables.extend([table[0] for table in cursor.fetchall()])
-        db_close()
+            self.tables.extend([table[0] for table in self.cursor.fetchall()])
 
     def _get_table_max_time(self):
-        conn, cursor = db_connect()
         for table in self.tables:
-            cursor.execute(f"SELECT count(*) FROM {table};")
+            self.cursor.execute(f"SELECT count(*) FROM {table};")
             parts = table.split("_")
 
             self.table_max_time[table] = math.floor(
-                cursor.fetchone()[0]
+                self.cursor.fetchone()[0]
                 / config.NATIVE_SR[parts[0]][parts[1]]
                 / config.SAMPLE_SECONDS
             )
-        db_close()
 
     def _align_max_time(self):
         for table, time in self.table_max_time.items():
