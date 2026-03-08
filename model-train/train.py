@@ -96,7 +96,7 @@ def compute_global_maxs(train_loader, device):
     total_batches = len(train_loader)
 
     with torch.no_grad():
-        for i, (x, y) in train_loader:
+        for i, (x, y) in enumerate(train_loader):
             x = x.to(device)
 
             # 1. Zero-center the windows first (subtract mean along the time dimension)
