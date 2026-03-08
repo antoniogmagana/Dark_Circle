@@ -209,7 +209,7 @@ def main():
     # ------------------------------------------------------------
     torch.save(
         model.state_dict(),
-        f"{config.MODEL_SAVE_PATH}/{config.MODEL_NAME}_final_model.pt",
+        config.MODEL_SAVE_PATH,
     )
     print("Training complete. Model saved to final_model.pt")
 
