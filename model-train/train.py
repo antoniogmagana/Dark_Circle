@@ -16,6 +16,7 @@ def db_worker_init(worker_id):
     This function runs once per worker when it is spawned.
     It gives each worker its own dedicated PostgreSQL connection.
     """
+    torch.set_num_threads(1)
     worker_info = get_worker_info()
     dataset = worker_info.dataset  # Get this worker's copy of the dataset
 
@@ -130,7 +131,9 @@ def main():
         shuffle=True,
         num_workers=config.NUM_WORKERS,
         worker_init_fn=db_worker_init,  # FIXED TYPO: was worker_int_fn
+        persistent_workers=True,
         pin_memory=True,
+        prefetch_factor=2,
     )
 
     val_loader = DataLoader(
@@ -139,7 +142,9 @@ def main():
         shuffle=False,
         num_workers=config.NUM_WORKERS,
         worker_init_fn=db_worker_init,  # FIXED TYPO: was worker_int_fn
+        persistent_workers=True,
         pin_memory=True,
+        prefetch_factor=2,
     )
 
     # ------------------------------------------------------------
