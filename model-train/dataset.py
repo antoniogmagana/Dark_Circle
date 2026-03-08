@@ -120,7 +120,7 @@ class VehicleDataset(Dataset):
                 (f"{dataset}_%",),
             )
             self.tables.extend([table[0] for table in cursor.fetchall()])
-        db_close()
+        db_close(_, cursor)
 
     def _get_table_max_time(self):
         _, cursor = db_connect()
@@ -133,7 +133,7 @@ class VehicleDataset(Dataset):
                 / config.NATIVE_SR[parts[0]][parts[1]]
                 / config.SAMPLE_SECONDS
             )
-        db_close()
+        db_close(_, cursor)
 
     def _align_max_time(self):
         for table, time in self.table_max_time.items():
