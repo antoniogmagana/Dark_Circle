@@ -135,8 +135,8 @@ DATASET_VEHICLE_MAP = {
 # Collect all instances across all datasets
 ALL_INSTANCES = []
 for ds_map in DATASET_VEHICLE_MAP.values():
-    for inst_list in ds_map.values():
-        ALL_INSTANCES.extend(inst_list)
+    # Since instances are now keys, we extend using .keys()
+    ALL_INSTANCES.extend(ds_map.keys())
 
 ALL_INSTANCES = sorted(set(ALL_INSTANCES))
 
