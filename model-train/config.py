@@ -2,18 +2,15 @@ import os
 import random
 import torch
 
-
 # ===========================================================
 # Globals
 # ===========================================================
-
 
 # ============================================================
 # Training hyperparameters
 # ============================================================
 
 # Core training loop settings
-LEARNING_RATE = 1e-4
 BATCH_SIZE = 32
 EPOCHS = 5
 NUM_WORKERS = 32
@@ -46,7 +43,6 @@ DB_CONN_PARAMS = {
     "host": "localhost",
     "port": 5432,
 }
-
 
 # =====================================================================
 # 3. TRAINING MODE (NEW)
@@ -136,7 +132,6 @@ DATASET_VEHICLE_MAP = {
 # Collect all instances across all datasets
 ALL_INSTANCES = []
 for ds_map in DATASET_VEHICLE_MAP.values():
-    # Since instances are now keys, we extend using .keys()
     ALL_INSTANCES.extend(ds_map.keys())
 
 ALL_INSTANCES = sorted(set(ALL_INSTANCES))
@@ -151,27 +146,24 @@ INSTANCE_TO_CLASS = {name: idx for idx, name in enumerate(shuffled_instances)}
 # Determine number of classes based on training mode
 if TRAINING_MODE == "detection":
     NUM_CLASSES = 2
-
 elif TRAINING_MODE == "category":
     NUM_CLASSES = len(CLASS_MAP)
-
 elif TRAINING_MODE == "instance":
     NUM_CLASSES = len(INSTANCE_TO_CLASS)
-
 else:
     raise ValueError(f"Unknown TRAINING_MODE: {TRAINING_MODE}")
 
 # =====================================================================
-# 6. MODEL SELECTION
+# 6. MODEL SELECTION & AUTOMATIC TOGGLES
 # =====================================================================
 
 MODEL_NAME = "ClassificationCNN"
 MODEL_SAVE_PATH = f"saved_models/{MODEL_NAME}_best.pth"
+META_SAVE_PATH = f"saved_models/{MODEL_NAME}_meta.pt"
 
 BATCH_SIZE = 128
 TRAIN_STEPS_PER_EPOCH = 50
 VAL_STEPS_PER_EPOCH = 16
-
 
 SPLIT_TRAIN = 0.70
 SPLIT_VAL = 0.15
@@ -187,49 +179,29 @@ MEL_HOP_LENGTH = 512
 MEL_TOP_DB = 80
 NOISE_KERNEL_SIZE = 51
 
-# Model input compatibility
-WAVEFORM_ONLY_MODELS = [
-    "WaveformCNN",
-    "WaveformClassificationCNN",
-    "RawNet",
-    "RawNet2",
-    "TCN",
-    "WaveNet",
-    "MiniRocket",
-    "Rocket",
-    "MultiRocket",
-    "LSTM1D",
-    "GRU1D",
-]
-
-MEL_ONLY_MODELS = [
-    "MelCNN",
-    "CRNN",
-    "ResNetAudio",
-    "VGGish",
-    "AudioSpectrogramCNN",
-    "MobileNetAudio",
-]
-
-EITHER_MODELS = [
-    "ClassificationCNN",
-    "DetectionCNN",
-    "GenericCNN",
-]
-
-# ============================================================
-# Mel spectrogram parameters
-# ============================================================
-
 # FFT window size
 N_FFT = 1024
 
 # Hop length between STFT frames
 HOP_LENGTH = 256
 
-# Number of mel bins
-MEL_BINS = 64
-
-USE_MEL = True
-
 BATCH_MODE = True
+
+# =====================================================================
+# 7. DATA AUGMENTATION & SYNTHESIS
+# =====================================================================
+# Toggle to dynamically inject generated background noise during training
+SYNTHESIZE_BACKGROUND = True
+
+# The probability (0.0 to 1.0) of replacing a REAL background sample with a SYNTHETIC one
+SYNTHESIZE_PROBABILITY = 0.5
+
+# ---------------------------------------------------------------------
+# DYNAMIC SYNCHRONIZATION: Prevent Circular Imports
+# ---------------------------------------------------------------------
+# We import MODEL_REGISTRY at the bottom so models.py can safely load config.py first.
+from models import MODEL_REGISTRY
+
+_model_ref = MODEL_REGISTRY[MODEL_NAME]
+USE_MEL = _model_ref.REQUIRED_SHAPE == "2D"
+LEARNING_RATE = _model_ref.LR if getattr(_model_ref, "LR", None) is not None else 1e-4

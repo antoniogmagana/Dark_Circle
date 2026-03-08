@@ -1,3 +1,4 @@
+import os
 import torch
 from torch.utils.data import DataLoader, get_worker_info
 import torch.nn as nn
@@ -6,7 +7,7 @@ import atexit
 
 from dataset import VehicleDataset
 from models import build_model
-from preprocess import preprocess_for_training, extract_mel_spectrogram
+from preprocess import preprocess_for_training
 from db_utils import db_connect, db_close
 import config
 
@@ -123,8 +124,11 @@ def compute_global_maxs(train_loader, device):
 
 
 def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = config.DEVICE
     print("Using device:", device)
+
+    # Ensure save directory exists
+    os.makedirs(os.path.dirname(config.MODEL_SAVE_PATH), exist_ok=True)
 
     # ------------------------------------------------------------
     # Datasets and loaders
@@ -137,7 +141,7 @@ def main():
         batch_size=config.BATCH_SIZE,
         shuffle=True,
         num_workers=config.NUM_WORKERS,
-        worker_init_fn=db_worker_init,  # FIXED TYPO: was worker_int_fn
+        worker_init_fn=db_worker_init,
         persistent_workers=True,
         pin_memory=True,
         prefetch_factor=2,
@@ -148,18 +152,26 @@ def main():
         batch_size=config.BATCH_SIZE,
         shuffle=False,
         num_workers=config.NUM_WORKERS,
-        worker_init_fn=db_worker_init,  # FIXED TYPO: was worker_int_fn
+        worker_init_fn=db_worker_init,
         persistent_workers=True,
         pin_memory=True,
         prefetch_factor=2,
     )
 
     # ------------------------------------------------------------
-    # Calculate Global Maxes for Scaling
+    # Calculate Global Maxes for Scaling & Save Metadata
     # ------------------------------------------------------------
-    # We do this AFTER train_loader is built, but BEFORE the training loop!
-    # (Make sure the compute_global_maxs function from the previous step is in this file)
     channel_maxs = compute_global_maxs(train_loader, device)
+
+    torch.save(
+        {
+            "channel_maxs": channel_maxs,
+            "model_name": config.MODEL_NAME,
+            "use_mel": config.USE_MEL,
+        },
+        config.META_SAVE_PATH,
+    )
+    print(f"Metadata saved to {config.META_SAVE_PATH}")
 
     # ------------------------------------------------------------
     # Model, optimizer, loss
@@ -167,9 +179,31 @@ def main():
     model = build_model(
         input_channels=config.IN_CHANNELS, num_classes=config.NUM_CLASSES
     ).to(device)
-    weights = torch.tensor(config.CLASS_WEIGHTS, device=device)
+
+    # 1. Robust Fix: Dummy pass to initialize PyTorch Lazy modules before optimizer binding
+    print("Performing dummy pass to initialize Lazy modules...")
+    model.eval()
+    with torch.no_grad():
+        for x_dummy, _ in train_loader:
+            x_dummy = x_dummy.to(device)
+            x_dummy = preprocess_for_training(
+                x_dummy, channel_maxs, use_mel=config.USE_MEL
+            )
+            model(x_dummy)
+            break
+
+    # 2. Robust Fix: Dynamic weight allocation check
+    if len(config.CLASS_WEIGHTS) == config.NUM_CLASSES:
+        weights = torch.tensor(config.CLASS_WEIGHTS, device=device)
+        criterion = nn.CrossEntropyLoss(weight=weights)
+    else:
+        print(
+            f"Warning: CLASS_WEIGHTS len ({len(config.CLASS_WEIGHTS)}) != NUM_CLASSES ({config.NUM_CLASSES}). Defaulting to unweighted loss."
+        )
+        criterion = nn.CrossEntropyLoss()
+
+    # Optimizer must be defined AFTER the dummy pass
     optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
-    criterion = nn.CrossEntropyLoss(weight=weights)
 
     # ------------------------------------------------------------
     # Training loop

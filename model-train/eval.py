@@ -16,7 +16,7 @@ from datetime import datetime
 
 import config
 from models import MODEL_REGISTRY
-from train import db_worker_init  # Reuse the worker init we fixed!
+from train import db_worker_init
 from dataset import VehicleDataset
 from preprocess import preprocess_for_training
 
@@ -25,12 +25,19 @@ def run_evaluation():
     device = config.DEVICE
     print(f"Using device: {device}")
 
-    # 1. LOAD THE EXACT MAXS FROM YOUR SUCCESSFUL TRAINING RUN
-    # This is critical for the standardization math to match
-    channel_maxs = torch.tensor([61425.66796875, 660595.25], device=device)
+    # 1. LOAD METADATA AND NORMALIZATION STATS
+    # No hardcoded fallbacks allowed. If train.py hasn't generated this, we halt.
+    if not os.path.exists(config.META_SAVE_PATH):
+        raise FileNotFoundError(
+            f"Metadata file {config.META_SAVE_PATH} not found. "
+            "Please run train.py first so it can compute and save the dynamic channel_maxs."
+        )
+
+    meta = torch.load(config.META_SAVE_PATH, map_location=device)
+    channel_maxs = meta["channel_maxs"]
+    print(f"Loaded normalization stats from metadata: {channel_maxs.tolist()}")
 
     # 2. Initialize the Test Dataset
-    # (The new dataset.py handles run_id/time_stamp alignment automatically)
     test_ds = VehicleDataset(split="test")
 
     test_loader = DataLoader(
@@ -88,8 +95,16 @@ def run_evaluation():
 
     accuracy = accuracy_score(all_labels, all_preds)
 
-    # Get class names from config mapping
-    class_names = [config.CLASS_MAP[i] for i in sorted(config.CLASS_MAP.keys())]
+    # Get class names dynamically based on the active training mode
+    if config.TRAINING_MODE == "detection":
+        class_names = ["background", "vehicle"]
+    elif config.TRAINING_MODE == "category":
+        class_names = [config.CLASS_MAP[i] for i in sorted(config.CLASS_MAP.keys())]
+    elif config.TRAINING_MODE == "instance":
+        inv_map = {v: k for k, v in config.INSTANCE_TO_CLASS.items()}
+        class_names = [inv_map[i] for i in range(config.NUM_CLASSES)]
+    else:
+        class_names = [str(i) for i in range(config.NUM_CLASSES)]
 
     precision = precision_score(all_labels, all_preds, average=None)
     recall = recall_score(all_labels, all_preds, average=None)

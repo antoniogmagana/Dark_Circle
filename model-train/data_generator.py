@@ -1,33 +1,53 @@
 import torch
+import config
 
 
-def generate_white_noise(window_length=16000, amplitude=0.01):
-    # CRITICAL FIX: Workers must generate on CPU. Main thread moves to GPU later.
-    noise = torch.randn(window_length, device="cpu") * amplitude
+def generate_white_noise(window_length=None, num_channels=None, amplitude=0.01):
+    # Dynamic defaults synced with global configuration
+    if window_length is None:
+        window_length = int(config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS)
+    if num_channels is None:
+        num_channels = config.IN_CHANNELS
+
+    # CRITICAL FIX: Workers generate [C, T] on CPU. Main thread moves to GPU later.
+    noise = torch.randn((num_channels, window_length), device="cpu") * amplitude
     return noise.to(torch.float32)
 
 
 def generate_no_vehicle_sample(
-    window_length=16000, noise_profile="environmental", amplitude=0.01
+    window_length=None, num_channels=None, noise_profile="environmental", amplitude=0.01
 ):
-    # CRITICAL FIX: Device set explicitly to CPU
-    base_noise = torch.randn(window_length, device="cpu")
+    if window_length is None:
+        window_length = int(config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS)
+    if num_channels is None:
+        num_channels = config.IN_CHANNELS
+
+    # CRITICAL FIX: Device set explicitly to CPU, Shape set to [C, T]
+    base_noise = torch.randn((num_channels, window_length), device="cpu")
 
     if noise_profile == "sensor_hiss":
         return (base_noise * amplitude).to(torch.float32)
 
     elif noise_profile == "environmental":
         kernel_size = 51
+        # Conv1d expects [Batch, Channels, Time]. We treat num_channels as the Batch dimension.
         kernel = torch.ones((1, 1, kernel_size), device="cpu") / kernel_size
-        noise_reshaped = base_noise.view(1, 1, -1)
+        noise_reshaped = base_noise.view(num_channels, 1, window_length)
 
         environmental_rumble = torch.nn.functional.conv1d(
             noise_reshaped, kernel, padding=kernel_size // 2
         )
-        environmental_rumble = environmental_rumble / torch.max(
-            torch.abs(environmental_rumble)
+
+        # Safe normalization per-channel to avoid divide-by-zero
+        max_vals = (
+            torch.max(torch.abs(environmental_rumble), dim=2, keepdim=True)[0] + 1e-8
         )
-        return (environmental_rumble.squeeze() * amplitude).to(torch.float32)
+        environmental_rumble = environmental_rumble / max_vals
+
+        # Reshape back to [C, T]
+        return (environmental_rumble.view(num_channels, window_length) * amplitude).to(
+            torch.float32
+        )
 
 
 def inject_snr_noise(clean_signal, target_snr_db):

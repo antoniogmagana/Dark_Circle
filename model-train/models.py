@@ -20,7 +20,7 @@ NUM_EPOCHS = 5
 # =====================================================================
 
 # --- Detection CNN (2D Mel-Spectrogram) ---
-DET_CNN_LR = BASE_LR
+DET_CNN_LR = 1e-3
 DET_CNN_CHANNELS = [16, 32]
 DET_CNN_KERNELS = [5, 3]
 DET_CNN_STRIDES = [2, 1]
@@ -36,7 +36,7 @@ CLASS_CNN_HIDDEN = 512
 CLASS_CNN_DROPOUT = 0.4
 
 # --- Waveform 1D CNN ---
-WAVE_CNN_LR = BASE_LR
+WAVE_CNN_LR = 1e-3
 WAVE_CNN_CHANNELS = [32, 64, 128]
 WAVE_CNN_KERNELS = [64, 32, 16]
 WAVE_CNN_STRIDES = [8, 4, 2]
@@ -59,20 +59,18 @@ ROCKET_ALPHAS = np.logspace(-3, 3, 10)
 
 
 # =====================================================================
-# 3. MEL-ONLY MODELS (Conv2d)
+# 3. 2D MODELS (Mel-Spectrogram Input)
 # =====================================================================
 
 
 class DetectionCNN(nn.Module):
-    """
-    Mel-only detection CNN.
-    Input: [B, C, MEL_BINS, FRAMES]
-    """
+    """Expects 2D Spectrogram: [B, C, MEL_BINS, FRAMES]"""
+
+    REQUIRED_SHAPE = "2D"
+    LR = DET_CNN_LR
 
     def __init__(self, in_channels, num_classes, use_mel=True):
         super().__init__()
-        self.use_mel = True  # enforce mel-only
-
         self.conv1 = nn.Conv2d(
             in_channels,
             DET_CNN_CHANNELS[0],
@@ -101,15 +99,13 @@ class DetectionCNN(nn.Module):
 
 
 class ClassificationCNN(nn.Module):
-    """
-    Mel-only classification CNN.
-    Input: [B, C, MEL_BINS, FRAMES]
-    """
+    """Expects 2D Spectrogram: [B, C, MEL_BINS, FRAMES]"""
+
+    REQUIRED_SHAPE = "2D"
+    LR = CLASS_CNN_LR
 
     def __init__(self, in_channels, num_classes, use_mel=True):
         super().__init__()
-        self.use_mel = True  # enforce mel-only
-
         self.conv1 = nn.Conv2d(
             in_channels,
             CLASS_CNN_CHANNELS[0],
@@ -152,20 +148,18 @@ class ClassificationCNN(nn.Module):
 
 
 # =====================================================================
-# 4. WAVEFORM-ONLY MODELS (Conv1d)
+# 4. 1D MODELS (Raw Waveform Input)
 # =====================================================================
 
 
 class WaveformClassificationCNN(nn.Module):
-    """
-    Waveform-only 1D CNN.
-    Input: [B, C, T]
-    """
+    """Expects 1D Waveform: [B, C, T]"""
+
+    REQUIRED_SHAPE = "1D"
+    LR = WAVE_CNN_LR
 
     def __init__(self, in_channels, num_classes, use_mel=False):
         super().__init__()
-        self.use_mel = False  # enforce waveform-only
-
         self.conv1 = nn.Conv1d(
             in_channels,
             WAVE_CNN_CHANNELS[0],
@@ -199,21 +193,14 @@ class WaveformClassificationCNN(nn.Module):
         return self.fc2(x)
 
 
-# =====================================================================
-# 5. LSTM MODELS (Waveform-only)
-# =====================================================================
-
-
 class ClassificationLSTM(nn.Module):
-    """
-    Waveform-only LSTM classifier.
-    Input: [B, C, T]
-    """
+    """Expects 1D Waveform: [B, C, T]"""
+
+    REQUIRED_SHAPE = "1D"
+    LR = LSTM_LR
 
     def __init__(self, in_channels, num_classes, use_mel=False):
         super().__init__()
-        self.use_mel = False  # enforce waveform-only
-
         self.cnn_frontend = nn.Sequential(
             nn.Conv1d(
                 in_channels,
@@ -252,16 +239,17 @@ class ClassificationLSTM(nn.Module):
 
 
 # =====================================================================
-# 6. miniROCKET (Non-PyTorch)
+# 5. NON-PYTORCH MODELS
 # =====================================================================
 
 
 class ClassificationMiniRocket:
-    """
-    Non-neural model: MiniRocket + RidgeClassifierCV.
-    """
+    """MiniRocket + RidgeClassifierCV"""
 
-    def __init__(self):
+    REQUIRED_SHAPE = "1D"
+    LR = None  # Non-gradient model
+
+    def __init__(self, in_channels=None, num_classes=None, use_mel=False):
         self.transformer = MiniRocket(num_kernels=ROCKET_NUM_KERNELS)
         self.classifier = RidgeClassifierCV(alphas=ROCKET_ALPHAS)
         self.is_fitted = False
@@ -279,7 +267,7 @@ class ClassificationMiniRocket:
 
 
 # =====================================================================
-# 7. MODEL REGISTRY
+# 6. MODEL REGISTRY
 # =====================================================================
 
 MODEL_REGISTRY = {
@@ -288,21 +276,20 @@ MODEL_REGISTRY = {
     "WaveformClassificationCNN": WaveformClassificationCNN,
     "ClassificationLSTM": ClassificationLSTM,
     "ClassificationMiniRocket": ClassificationMiniRocket,
-    # ADD MORE AS NEEDED
 }
 
 
 def build_model(input_channels, num_classes):
-    """
-    Build the model specified in config.MODEL_NAME.
-    All models must be registered in MODEL_REGISTRY.
-    """
     model_name = config.MODEL_NAME
 
     if model_name not in MODEL_REGISTRY:
         raise ValueError(f"Unknown model: {model_name}")
 
     ModelClass = MODEL_REGISTRY[model_name]
+
+    # Check if the class is a standard PyTorch module or MiniRocket
+    if model_name == "ClassificationMiniRocket":
+        return ModelClass()
 
     return ModelClass(
         in_channels=input_channels, num_classes=num_classes, use_mel=config.USE_MEL

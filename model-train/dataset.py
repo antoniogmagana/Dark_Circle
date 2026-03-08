@@ -4,13 +4,13 @@ import torch
 import torchaudio.transforms
 from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
+
+# Centralized imports
 from db_utils import db_connect, db_close, fetch_sensor_batch, get_time_bounds
 import config
 
 
 class VehicleDataset(Dataset):
-    """ """
-
     def __init__(self, split):
         self.split = split
         self.tables = []
@@ -32,6 +32,26 @@ class VehicleDataset(Dataset):
     def __getitem__(self, idx):
         # Unpack the fully-defined sample tuple
         dataset, instance, sensor_node, run_id, time, label = self.samples[idx]
+
+        # -----------------------------------------------------------------
+        # DYNAMIC SYNTHESIS: Background Augmentation
+        # -----------------------------------------------------------------
+        # If toggled ON, and the sample is a background class, flip a coin
+        if (
+            getattr(config, "SYNTHESIZE_BACKGROUND", False)
+            and label == 0
+            and self.split == "train"
+        ):
+            if random.random() < getattr(config, "SYNTHESIZE_PROBABILITY", 0.5):
+                # Lazy import prevents circular dependency issues at load time
+                from data_generator import generate_no_vehicle_sample
+
+                # Generate a purely synthetic background tensor [C, T] directly on CPU
+                X = generate_no_vehicle_sample(noise_profile="environmental")
+                y = torch.tensor(label, dtype=torch.long)
+                return X, y
+        # -----------------------------------------------------------------
+
         sensor_tensors = []
 
         # Lock to the Global Reference Rate!
@@ -40,9 +60,9 @@ class VehicleDataset(Dataset):
         for signal in config.TRAIN_SENSORS:
             exact_table = f"{dataset}_{signal}_{instance}_{sensor_node}"
 
-            # Pass run_id down to the database query
+            # Pass dataset and signal natively down to avoid dangerous string parsing
             sensor_data = self._fetch_sensor_data(
-                self.cursor, exact_table, run_id, time, max_time_steps
+                self.cursor, exact_table, dataset, signal, run_id, time, max_time_steps
             )
             sensor_tensors.append(sensor_data)
 
@@ -61,62 +81,38 @@ class VehicleDataset(Dataset):
         if T_in == target_length:
             return signal
 
-        # 1. Transform to frequency domain
         freqs = torch.fft.rfft(signal, dim=1)
-
-        # 2. Create empty frequency bins for the new target length
         target_bins = target_length // 2 + 1
         new_freqs = torch.zeros(
             (C, target_bins), dtype=freqs.dtype, device=freqs.device
         )
 
-        # 3. Map frequencies (truncates if downsampling, zero-pads if upsampling)
         copy_bins = min(freqs.shape[1], target_bins)
         new_freqs[:, :copy_bins] = freqs[:, :copy_bins]
 
-        # 4. Inverse transform back to the time domain
         resampled = torch.fft.irfft(new_freqs, n=target_length, dim=1)
-
-        # 5. Scale amplitude to preserve original energy levels
-        # Scaling factor: N_target / N_input
         resampled = resampled * (target_length / T_in)
 
         return resampled
 
-    def _fetch_sensor_data(self, cursor, table, run_id, time, max_time_steps):
-        parts = table.split("_")
-        sample_rate = config.NATIVE_SR[parts[0]][parts[1]]
-
+    def _fetch_sensor_data(
+        self, cursor, table, dataset, signal, run_id, time, max_time_steps
+    ):
+        sample_rate = config.NATIVE_SR[dataset][signal]
         expected_window = int(sample_rate * config.SAMPLE_SECONDS)
 
-        # We now calculate the timestamp relative to the perfectly synchronized group start time
+        # Calculate timestamp relative to the synchronized group start time
         min_t = self.table_run_min_time[(table, run_id)]
         start_time_seconds = min_t + float(time * config.SAMPLE_SECONDS)
 
-        if run_id is not None:
-            where_clause = (
-                f"WHERE run_id = {run_id} AND time_stamp >= {start_time_seconds}"
-            )
-        else:
-            where_clause = f"WHERE time_stamp >= {start_time_seconds}"
-
-        if parts[1] == "accel":
-            query = f"""SELECT accel_x_ew, accel_y_ns, accel_z_ud
-                        FROM {table}
-                        {where_clause}
-                        ORDER BY time_stamp ASC
-                        LIMIT {expected_window};
-                        """
-        else:
-            query = f"""SELECT amplitude
-                        FROM {table}
-                        {where_clause}
-                        ORDER BY time_stamp ASC
-                        LIMIT {expected_window};
-                        """
-
-        cursor.execute(query)
-        raw_data = cursor.fetchall()
+        # Use the Centralized DB utility!
+        raw_data = fetch_sensor_batch(
+            cursor=cursor,
+            table_name=table,
+            sample_count=expected_window,
+            start_time=start_time_seconds,
+            run_id=run_id,
+        )
 
         if not raw_data:
             run_str = f" (Run: {run_id})" if run_id is not None else ""
@@ -149,21 +145,15 @@ class VehicleDataset(Dataset):
         return sensor_data
 
     def _upsample_signal(self, sensor_data, sample_rate, target_freq):
-        # pull resample structure from cache
         resample_key = (sample_rate, target_freq)
-
-        # If resampler not built yet, build it and save it
         if resample_key not in self.resamplers:
             self.resamplers[resample_key] = torchaudio.transforms.Resample(
                 orig_freq=sample_rate, new_freq=target_freq
             )
-
-        sensor_data = self.resamplers[resample_key](sensor_data)
-
-        return sensor_data
+        return self.resamplers[resample_key](sensor_data)
 
     def _get_tables(self):
-        _, cursor = db_connect()
+        conn, cursor = db_connect()
         for dataset in config.TRAIN_DATASETS:
             cursor.execute(
                 """
@@ -175,23 +165,25 @@ class VehicleDataset(Dataset):
                 (f"{dataset}_%",),
             )
             self.tables.extend([table[0] for table in cursor.fetchall()])
-        db_close(_, cursor)
+        db_close(conn, cursor)
 
     def _get_table_max_time(self):
-        # 1. Open a temporary connection
         temp_conn, temp_cursor = db_connect()
 
         self.table_run_max_time = {}
-        self.table_run_min_time = (
-            {}
-        )  # NEW: We must track where the recording actually started
+        self.table_run_min_time = {}
 
         for table in self.tables:
             if table.startswith("m3nvc_"):
-                temp_cursor.execute(
-                    f"SELECT DISTINCT run_id FROM {table} WHERE run_id IS NOT NULL;"
-                )
-                runs = [row[0] for row in temp_cursor.fetchall()]
+                try:
+                    temp_cursor.execute(
+                        f"SELECT DISTINCT run_id FROM {table} WHERE run_id IS NOT NULL;"
+                    )
+                    runs = [row[0] for row in temp_cursor.fetchall()]
+                except Exception:
+                    # Table exists but lacks a run_id column. Rollback and treat as standard table.
+                    temp_conn.rollback()
+                    runs = [None]
             else:
                 runs = [None]
 
@@ -218,18 +210,15 @@ class VehicleDataset(Dataset):
         keys_to_delete = []
 
         for group_key, table_runs in groups.items():
-            # 1. COMPLETENESS CHECK: Ensure every requested sensor exists for this run
             present_signals = [tr[0].split("_")[1] for tr in table_runs]
             has_all_signals = all(
                 signal in present_signals for signal in config.TRAIN_SENSORS
             )
 
             if not has_all_signals:
-                # If a modality is completely missing, discard this run so it is never sampled
                 for tr in table_runs:
                     keys_to_delete.append(tr)
             else:
-                # 2. TIME INTERSECTION: Find the synchronized absolute time overlap
                 group_min_t = max(self.table_run_min_time[tr] for tr in table_runs)
                 group_max_t = min(self.table_run_max_time[tr] for tr in table_runs)
 
@@ -239,7 +228,6 @@ class VehicleDataset(Dataset):
                     for tr in table_runs:
                         keys_to_delete.append(tr)
                 else:
-                    # Apply the synchronized bounds back to the tables
                     valid_windows = math.floor(valid_duration / config.SAMPLE_SECONDS)
                     for tr in table_runs:
                         self.table_run_min_time[tr] = group_min_t
@@ -254,19 +242,47 @@ class VehicleDataset(Dataset):
 
         for (table, run_id), times in self.table_run_max_time.items():
             indices = list(range(times))
+            if not indices:
+                continue
+
             parts = table.split("_")
             dataset = parts[0]
             instance = "_".join(parts[2:-1])
             sensor_node = parts[-1]
-            label = config.DATASET_VEHICLE_MAP[dataset][instance]
 
-            train, test = train_test_split(indices, test_size=0.3, random_state=42)
-            test, val = train_test_split(test, test_size=0.5, random_state=42)
+            # 1. Fetch from mapping
+            category = config.DATASET_VEHICLE_MAP.get(dataset, {}).get(instance, None)
+            if category is None:
+                continue
 
-            target_idx = {"train": train, "test": test, "val": val}[self.split]
+            # 2. Assign dynamic label based on config
+            if config.TRAINING_MODE == "detection":
+                label = 1 if category > 0 else 0
+            elif config.TRAINING_MODE == "category":
+                label = category
+            elif config.TRAINING_MODE == "instance":
+                label = config.INSTANCE_TO_CLASS[instance]
+            else:
+                raise ValueError(f"Unknown TRAINING_MODE: {config.TRAINING_MODE}")
+
+            # 3. Handle small-dataset exceptions safely
+            try:
+                train, test = train_test_split(
+                    indices,
+                    test_size=config.SPLIT_TEST + config.SPLIT_VAL,
+                    random_state=42,
+                )
+
+                val_ratio = config.SPLIT_VAL / (config.SPLIT_TEST + config.SPLIT_VAL)
+                val, test = train_test_split(
+                    test, test_size=1.0 - val_ratio, random_state=42
+                )
+            except ValueError:
+                train, test, val = indices, [], []
+
+            target_idx = {"train": train, "test": test, "val": val}.get(self.split, [])
 
             for time in target_idx:
-                # Store the FULL identity of the sample, including run_id!
                 unique_samples.add(
                     (dataset, instance, sensor_node, run_id, time, label)
                 )
@@ -274,15 +290,11 @@ class VehicleDataset(Dataset):
         self.samples = sorted(list(unique_samples))
 
     def close_connection(self):
-        """Safely closes DB connections if they exist and are open."""
-        # Check if cursor exists and isn't already closed
         if getattr(self, "cursor", None) and not self.cursor.closed:
             self.cursor.close()
 
-        # Check if conn exists and isn't already closed (psycopg2 uses closed == 0 for open)
         if getattr(self, "conn", None) and self.conn.closed == 0:
             self.conn.close()
 
     def __del__(self):
-        """Python's garbage collection destructor."""
         self.close_connection()

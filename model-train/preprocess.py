@@ -60,7 +60,7 @@ def extract_mel_spectrogram(batch_tensor):
 
     # Flatten the Batch and Channel dimensions together for massive GPU speedup
     # Shape becomes: [B * C, T]
-    flat_batch = batch_tensor.view(B * C, T)
+    flat_batch = batch_tensor.reshape(B * C, T)
 
     # Process everything in one single pass
     flat_mels = mel_transform(flat_batch)  # Shape: [B * C, MEL_BINS, FRAMES]
