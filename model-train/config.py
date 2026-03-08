@@ -160,7 +160,7 @@ else:
 # 6. MODEL SELECTION & AUTOMATIC TOGGLES
 # =====================================================================
 
-MODEL_NAME = "ClassificationCNN"
+MODEL_NAME = os.environ.get("MODEL_NAME", "DetectionCNN")
 MODEL_SAVE_PATH = f"saved_models/{TRAINING_MODE}_{MODEL_NAME}_best.pth"
 META_SAVE_PATH = f"saved_models/{TRAINING_MODE}_{MODEL_NAME}_meta.pt"
 IMG_SAVE_PATH = f"saved_models/{TRAINING_MODE}_{MODEL_NAME}_conf_matrix.png"
@@ -218,3 +218,13 @@ from models import MODEL_REGISTRY
 _model_ref = MODEL_REGISTRY[MODEL_NAME]
 USE_MEL = _model_ref.REQUIRED_SHAPE == "2D"
 LEARNING_RATE = _model_ref.LR if getattr(_model_ref, "LR", None) is not None else 1e-4
+
+# copy this into terminal to loop over all models in one go!
+"""
+for model in DetectionCNN ClassificationCNN WaveformClassificationCNN ClassificationLSTM; do
+    echo "========================================"
+    echo "TRAINING AND EVALUATING: $model"
+    echo "========================================"
+    MODEL_NAME=$model poetry run python train.py && MODEL_NAME=$model poetry run python eval.py
+done
+"""
