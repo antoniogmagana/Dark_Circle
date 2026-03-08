@@ -69,13 +69,13 @@ class VehicleDataset(Dataset):
         if parts[1] == "accel":
             query = f"""SELECT accel_x_ew, accel_y_ns, accel_z_ud
                         FROM {table}
-                        ORDER BY time_step
+                        ORDER BY time_stamp
                         LIMIT {sample_window} OFFSET {sample_offset};
                         """
         else:
             query = f"""SELECT amplitude
                         FROM {table}
-                        ORDER BY time_step
+                        ORDER BY time_stamp
                         LIMIT {sample_window} OFFSET {sample_offset};
                         """
 
