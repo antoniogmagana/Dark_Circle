@@ -53,35 +53,84 @@ class VehicleDataset(Dataset):
 
         return X, y
 
+    def _fft_resample(self, signal, target_length):
+        """
+        Resamples a 1D signal to an exact target length using Fourier interpolation.
+        signal: [C, T_in]
+        """
+        C, T_in = signal.shape
+        if T_in == target_length:
+            return signal
+
+        # 1. Transform to frequency domain
+        freqs = torch.fft.rfft(signal, dim=1)
+
+        # 2. Create empty frequency bins for the new target length
+        target_bins = target_length // 2 + 1
+        new_freqs = torch.zeros(
+            (C, target_bins), dtype=freqs.dtype, device=freqs.device
+        )
+
+        # 3. Map frequencies (truncates if downsampling, zero-pads if upsampling)
+        copy_bins = min(freqs.shape[1], target_bins)
+        new_freqs[:, :copy_bins] = freqs[:, :copy_bins]
+
+        # 4. Inverse transform back to the time domain
+        resampled = torch.fft.irfft(new_freqs, n=target_length, dim=1)
+
+        # 5. Scale amplitude to preserve original energy levels
+        # Scaling factor: N_target / N_input
+        resampled = resampled * (target_length / T_in)
+
+        return resampled
+
     def _fetch_sensor_data(self, table, time, max_time_steps):
         parts = table.split("_")
         sample_rate = config.NATIVE_SR[parts[0]][parts[1]]
 
-        sample_window = sample_rate * config.SAMPLE_SECONDS
-        sample_offset = time * sample_window
+        expected_window = int(sample_rate * config.SAMPLE_SECONDS)
+        sample_offset = int(time * expected_window)
 
         if parts[1] == "accel":
             query = f"""SELECT accel_x_ew, accel_y_ns, accel_z_ud
                         FROM {table}
-                        ORDER BY time_stamp
-                        LIMIT {sample_window} OFFSET {sample_offset};
+                        ORDER BY time_step
+                        LIMIT {expected_window} OFFSET {sample_offset};
                         """
         else:
             query = f"""SELECT amplitude
                         FROM {table}
-                        ORDER BY time_stamp
-                        LIMIT {sample_window} OFFSET {sample_offset};
+                        ORDER BY time_step
+                        LIMIT {expected_window} OFFSET {sample_offset};
                         """
 
         self.cursor.execute(query)
-
         raw_data = self.cursor.fetchall()
 
-        sensor_data = torch.tensor(raw_data, dtype=torch.float32).T
-        if sensor_data.shape[1] < max_time_steps:
-            target_freq = int(max_time_steps / config.SAMPLE_SECONDS)
+        # Catch completely empty database responses
+        if not raw_data:
+            raise ValueError(
+                f"CRITICAL: 0 rows returned for {table} at time offset {time}. "
+                f"Check database table for missing rows or alignment issues."
+            )
 
+        # Create Tensor (Shape: [Channels, Length])
+        sensor_data = torch.tensor(raw_data, dtype=torch.float32).T
+
+        # 1. FFT Fix: If the database dropped packets, mathematically stretch it
+        # to the perfect expected native window using the frequency domain
+        if sensor_data.shape[1] != expected_window:
+            sensor_data = self._fft_resample(sensor_data, expected_window)
+
+        # 2. Sinc Upsample: Now that the window is perfect, use torchaudio
+        # to upsample it to the globally aligned max_time_steps
+        target_freq = int(max_time_steps / config.SAMPLE_SECONDS)
+        if sample_rate < target_freq:
             sensor_data = self._upsample_signal(sensor_data, sample_rate, target_freq)
+
+        # 3. Final safety clamp (torchaudio can occasionally round off by 1 sample)
+        if sensor_data.shape[1] != max_time_steps:
+            sensor_data = self._fft_resample(sensor_data, max_time_steps)
 
         return sensor_data
 
