@@ -93,9 +93,10 @@ def compute_global_maxs(train_loader, device):
     """
     print("Computing global maximums from training set (GPU Accelerated)...")
     channel_maxs = None
+    total_batches = len(train_loader)
 
     with torch.no_grad():
-        for x, y in train_loader:
+        for i, (x, y) in train_loader:
             x = x.to(device)
 
             # 1. Zero-center the windows first (subtract mean along the time dimension)
@@ -110,6 +111,12 @@ def compute_global_maxs(train_loader, device):
                 channel_maxs = batch_maxs
             else:
                 channel_maxs = torch.maximum(channel_maxs, batch_maxs)
+
+            # NEW: Print progress every 10 batches
+            if (i + 1) % 10 == 0 or i == total_batches - 1:
+                print(
+                    f"Max Computation Progress: Batch {i+1}/{total_batches}", flush=True
+                )
 
     print(f"Global Channel Maxs found: {channel_maxs.cpu().tolist()}")
     return channel_maxs
