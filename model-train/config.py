@@ -14,9 +14,9 @@ import torch
 
 # Core training loop settings
 LEARNING_RATE = 1e-4
-BATCH_SIZE = 128
+BATCH_SIZE = 32
 EPOCHS = 5
-NUM_WORKERS = 12
+NUM_WORKERS = 32
 LOG_INTERVAL = 50
 
 # Checkpoint + evaluation output directories
