@@ -17,7 +17,7 @@ LEARNING_RATE = 1e-4
 BATCH_SIZE = 32
 EPOCHS = 5
 NUM_WORKERS = 32
-LOG_INTERVAL = 50
+LOG_INTERVAL = 500
 
 # Checkpoint + evaluation output directories
 CHECKPOINT_DIR = "./checkpoints"

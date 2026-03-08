@@ -112,8 +112,8 @@ def compute_global_maxs(train_loader, device):
             else:
                 channel_maxs = torch.maximum(channel_maxs, batch_maxs)
 
-            # NEW: Print progress every 10 batches
-            if (i + 1) % 10 == 0 or i == total_batches - 1:
+            # NEW: Print progress on batches
+            if (i + 1) % config.LOG_INTERVAL == 0 or i == total_batches - 1:
                 print(
                     f"Max Computation Progress: Batch {i+1}/{total_batches}", flush=True
                 )
