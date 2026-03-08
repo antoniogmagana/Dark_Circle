@@ -30,23 +30,23 @@ class VehicleDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        dataset, instance, sensor_node, time, label = self.samples[idx]
+        # Unpack the fully-defined sample tuple
+        dataset, instance, sensor_node, run_id, time, label = self.samples[idx]
         sensor_tensors = []
 
-        # Determine the max time steps for this specific group of sensors
+        # Lock to the Global Reference Rate!
         max_time_steps = config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS
 
-        # 1. STRICT CHANNEL ORDERING
         for signal in config.TRAIN_SENSORS:
-            # Find the specific table for this sensor type
             exact_table = f"{dataset}_{signal}_{instance}_{sensor_node}"
 
-            # get sensor data
-            sensor_data = self._fetch_sensor_data(exact_table, time, max_time_steps)
-
+            # Pass run_id down to the database query
+            sensor_data = self._fetch_sensor_data(
+                self.cursor, exact_table, run_id, time, max_time_steps
+            )
             sensor_tensors.append(sensor_data)
 
-        # Concatenate all channels along dim 0. Shape will be [IN_CHANNELS, max_time_steps]
+        # Concatenate all channels along dim 0
         X = torch.cat(sensor_tensors, dim=0)
         y = torch.tensor(label, dtype=torch.long)
 
@@ -83,59 +83,72 @@ class VehicleDataset(Dataset):
 
         return resampled
 
-    def _fetch_sensor_data(self, table, time, max_time_steps):
+    def _fetch_sensor_data(self, cursor, table, run_id, time, max_time_steps):
         parts = table.split("_")
         sample_rate = config.NATIVE_SR[parts[0]][parts[1]]
 
         expected_window = int(sample_rate * config.SAMPLE_SECONDS)
-        sample_offset = int(time * expected_window)
-
-        # Calculate the exact physical timestamp in seconds where this window begins
         start_time_seconds = float(time * config.SAMPLE_SECONDS)
 
-        # Use an indexed WHERE clause to instantly jump to the correct float timestamp
+        # Build the dynamic WHERE clause based on whether this dataset uses run_id
+        if run_id is not None:
+            where_clause = (
+                f"WHERE run_id = {run_id} AND time_stamp >= {start_time_seconds}"
+            )
+        else:
+            where_clause = f"WHERE time_stamp >= {start_time_seconds}"
+
+        # Inject the WHERE clause into the query
         if parts[1] == "accel":
             query = f"""SELECT accel_x_ew, accel_y_ns, accel_z_ud
                         FROM {table}
-                        WHERE time_stamp >= {start_time_seconds}
+                        {where_clause}
                         ORDER BY time_stamp ASC
                         LIMIT {expected_window};
                         """
         else:
             query = f"""SELECT amplitude
                         FROM {table}
-                        WHERE time_stamp >= {start_time_seconds}
+                        {where_clause}
                         ORDER BY time_stamp ASC
                         LIMIT {expected_window};
                         """
 
-        self.cursor.execute(query)
-        raw_data = self.cursor.fetchall()
+        cursor.execute(query)
+        raw_data = cursor.fetchall()
 
-        # Catch completely empty database responses
+        # Catch completely empty database responses gracefully
         if not raw_data:
+            run_str = f" (Run: {run_id})" if run_id is not None else ""
             raise ValueError(
-                f"CRITICAL: 0 rows returned for {table} at time offset {time}. "
+                f"CRITICAL: 0 rows returned for {table}{run_str} at time_stamp {start_time_seconds}. "
                 f"Check database table for missing rows or alignment issues."
             )
 
         # Create Tensor (Shape: [Channels, Length])
         sensor_data = torch.tensor(raw_data, dtype=torch.float32).T
 
-        # 1. FFT Fix: If the database dropped packets, mathematically stretch it
-        # to the perfect expected native window using the frequency domain
+        # 1. FFT Fix: Fix dropped packets in the database natively
         if sensor_data.shape[1] != expected_window:
-            sensor_data = self._fft_resample(sensor_data, expected_window)
+            if hasattr(self, "_fft_resample"):
+                sensor_data = self._fft_resample(sensor_data, expected_window)
+            else:
+                pad_amount = expected_window - sensor_data.shape[1]
+                sensor_data = torch.nn.functional.pad(sensor_data, (0, pad_amount))
 
-        # 2. Sinc Upsample: Now that the window is perfect, use torchaudio
-        # to upsample it to the globally aligned max_time_steps
+        # 2. Torchaudio: Massive upsampler for matching the global reference rate
         target_freq = int(max_time_steps / config.SAMPLE_SECONDS)
         if sample_rate < target_freq:
             sensor_data = self._upsample_signal(sensor_data, sample_rate, target_freq)
 
-        # 3. Final safety clamp (torchaudio can occasionally round off by 1 sample)
-        if sensor_data.shape[1] != max_time_steps:
-            sensor_data = self._fft_resample(sensor_data, max_time_steps)
+        # 3. Fast Safety Clamp: torchaudio float math can occasionally be off by 1 sample.
+        if sensor_data.shape[1] > max_time_steps:
+            sensor_data = sensor_data[:, :max_time_steps]
+        elif sensor_data.shape[1] < max_time_steps:
+            pad_amount = max_time_steps - sensor_data.shape[1]
+            sensor_data = torch.nn.functional.pad(
+                sensor_data, (0, pad_amount), mode="replicate"
+            )
 
         return sensor_data
 
@@ -169,51 +182,64 @@ class VehicleDataset(Dataset):
         db_close(_, cursor)
 
     def _get_table_max_time(self):
-        _, cursor = db_connect()
-        for table in self.tables:
-            cursor.execute(f"SELECT count(*) FROM {table};")
-            parts = table.split("_")
+        # 1. Open a temporary connection just for the Main Thread setup
+        temp_conn, temp_cursor = db_connect()
 
-            self.table_max_time[table] = math.floor(
-                cursor.fetchone()[0]
-                / config.NATIVE_SR[parts[0]][parts[1]]
-                / config.SAMPLE_SECONDS
-            )
-        db_close(_, cursor)
+        # We now map (table, run_id) to its max time!
+        self.table_run_max_time = {}
+
+        for table in self.tables:
+            # Only m3nvc uses the run_id column
+            if table.startswith("m3nvc_"):
+                temp_cursor.execute(
+                    f"SELECT DISTINCT run_id FROM {table} WHERE run_id IS NOT NULL;"
+                )
+                runs = [row[0] for row in temp_cursor.fetchall()]
+            else:
+                # iobt and focal do not use runs
+                runs = [None]
+
+            # Get the exact physical time bounds for each run (or the entire table if None)
+            for run_id in runs:
+                min_t, max_t = get_time_bounds(temp_cursor, table, run_id=run_id)
+                self.table_run_max_time[(table, run_id)] = math.floor(
+                    max_t / config.SAMPLE_SECONDS
+                )
+
+        # 2. Close the temporary connection
+        db_close(temp_conn, temp_cursor)
 
     def _align_max_time(self):
+        # Group tables by the specific physical sensor AND run_id
         groups = {}
-        for table, time in self.table_max_time.items():
+        for (table, run_id), time in self.table_run_max_time.items():
             parts = table.split("_")
             dataset = parts[0]
             instance = "_".join(parts[2:-1])
-            sensor = parts[-1]
+            sensor_node = parts[-1]
 
-            group_key = (dataset, instance, sensor)
+            # A unique group: e.g., (iobt, polaris0150pm, rs1, None) or (m3nvc, miata, rs1, 2)
+            group_key = (dataset, instance, sensor_node, run_id)
             if group_key not in groups:
                 groups[group_key] = []
-            groups[group_key].append(table)
+            groups[group_key].append((table, run_id))
 
-            for group_key, tables in groups.items():
-                min_time = min(self.table_max_time[t] for t in tables)
-                for t in tables:
-                    self.table_max_time[t] = min_time
+        # Force all signals for that specific node & run to match the shortest time
+        for group_key, table_runs in groups.items():
+            min_time = min(self.table_run_max_time[tr] for tr in table_runs)
+            for tr in table_runs:
+                self.table_run_max_time[tr] = min_time
 
     def _get_samples(self):
-        """
-        Determinisitically store indices for train, test,
-        validation splits with implied sensor alignment and output labels
-        """
         unique_samples = set()
 
-        for table, times in self.table_max_time.items():
-
+        for (table, run_id), times in self.table_run_max_time.items():
             indices = list(range(times))
             parts = table.split("_")
             dataset = parts[0]
             instance = "_".join(parts[2:-1])
-            label = config.DATASET_VEHICLE_MAP[parts[0]][instance]
-            sensor = parts[-1]
+            sensor_node = parts[-1]
+            label = config.DATASET_VEHICLE_MAP[dataset][instance]
 
             train, test = train_test_split(indices, test_size=0.3, random_state=42)
             test, val = train_test_split(test, test_size=0.5, random_state=42)
@@ -221,7 +247,10 @@ class VehicleDataset(Dataset):
             target_idx = {"train": train, "test": test, "val": val}[self.split]
 
             for time in target_idx:
-                unique_samples.add((dataset, instance, sensor, time, label))
+                # Store the FULL identity of the sample, including run_id!
+                unique_samples.add(
+                    (dataset, instance, sensor_node, run_id, time, label)
+                )
 
         self.samples = sorted(list(unique_samples))
 
