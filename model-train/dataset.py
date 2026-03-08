@@ -30,28 +30,24 @@ class VehicleDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        instance, time, label = self.samples[idx]
+        dataset, instance, sensor_node, time, label = self.samples[idx]
         sensor_tensors = []
 
         # Determine the max time steps for this specific group of sensors
-        sensor_tables = [table for table in self.tables if instance in table]
-        rates = [
-            config.NATIVE_SR[t.split("_")[0]][t.split("_")[1]] for t in sensor_tables
-        ]
+        rates = [config.NATIVE_SR[dataset][signal] for signal in config.TRAIN_SENSORS]
         max_time_steps = max(rates) * config.SAMPLE_SECONDS
 
         # 1. STRICT CHANNEL ORDERING
-        for target_sensor in config.TRAIN_SENSORS:
+        for signal in config.TRAIN_SENSORS:
             # Find the specific table for this sensor type
-            table = next((t for t in sensor_tables if f"_{target_sensor}_" in t), None)
+            exact_table = f"{dataset}_{signal}_{instance}_{sensor_node}"
 
-            if table:
-                sensor_data = self._fetch_sensor_data(table, time, max_time_steps)
-                sensor_tensors.append(sensor_data)
-            else:
-                raise ValueError(
-                    f"Missing {target_sensor} table for instance {instance}"
-                )
+            # get sensor data
+            sensor_data = self._fetch_sensor_data(
+                self.cursor, exact_table, time, max_time_steps
+            )
+
+            sensor_tensors.append(sensor_data)
 
         # Concatenate all channels along dim 0. Shape will be [IN_CHANNELS, max_time_steps]
         X = torch.cat(sensor_tensors, dim=0)
@@ -134,19 +130,22 @@ class VehicleDataset(Dataset):
         db_close(_, cursor)
 
     def _align_max_time(self):
+        groups = {}
         for table, time in self.table_max_time.items():
             parts = table.split("_")
-            suffix = "_".join(parts[2:])
+            dataset = parts[0]
+            instance = "_".join(parts[2:-1])
+            sensor = parts[-1]
 
-            related = [
-                val
-                for name, val in self.table_max_time.items()
-                if name.endswith(suffix)
-            ]
-            min_time = min(related)
+            group_key = (dataset, instance, sensor)
+            if group_key not in groups:
+                groups[group_key] = []
+            groups[group_key].append(table)
 
-            if time > min_time:
-                self.table_max_time[table] = min_time
+            for group_key, tables in groups.items():
+                min_time = min(self.table_max_time[t] for t in tables)
+                for t in tables:
+                    self.table_max_time[t] = min_time
 
     def _get_samples(self):
         """
@@ -159,8 +158,10 @@ class VehicleDataset(Dataset):
 
             indices = list(range(times))
             parts = table.split("_")
+            dataset = parts[0]
             instance = "_".join(parts[2:-1])
             label = config.DATASET_VEHICLE_MAP[parts[0]][instance]
+            sensor = parts[-1]
 
             train, test = train_test_split(indices, test_size=0.3, random_state=42)
             test, val = train_test_split(test, test_size=0.5, random_state=42)
@@ -168,7 +169,7 @@ class VehicleDataset(Dataset):
             target_idx = {"train": train, "test": test, "val": val}[self.split]
 
             for time in target_idx:
-                unique_samples.add((instance, time, label))
+                unique_samples.add((dataset, instance, sensor, time, label))
 
         self.samples = sorted(list(unique_samples))
 
