@@ -34,8 +34,7 @@ class VehicleDataset(Dataset):
         sensor_tensors = []
 
         # Determine the max time steps for this specific group of sensors
-        rates = [config.NATIVE_SR[dataset][signal] for signal in config.TRAIN_SENSORS]
-        max_time_steps = max(rates) * config.SAMPLE_SECONDS
+        max_time_steps = config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS
 
         # 1. STRICT CHANNEL ORDERING
         for signal in config.TRAIN_SENSORS:
