@@ -51,11 +51,13 @@ def run_evaluation():
         use_mel=config.USE_MEL,
     ).to(device)
 
-    if os.path.exists("final_model.pt"):
-        model.load_state_dict(torch.load("final_model.pt", map_location=device))
-        print("Successfully loaded final_model.pt")
+    if os.path.exists(config.MODEL_SAVE_PATH):
+        model.load_state_dict(torch.load(config.MODEL_SAVE_PATH, map_location=device))
+        print(f"Successfully loaded {config.MODEL_SAVE_PATH}")
     else:
-        raise FileNotFoundError("Could not find final_model.pt. Did training finish?")
+        raise FileNotFoundError(
+            f"Could not find {config.MODEL_SAVE_PATH}. Did training finish?"
+        )
 
     model.eval()
 
