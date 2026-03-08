@@ -158,9 +158,9 @@ else:
 # =====================================================================
 
 MODEL_NAME = "ClassificationCNN"
-MODEL_SAVE_PATH = f"saved_models/{MODEL_NAME}_best.pth"
-META_SAVE_PATH = f"saved_models/{MODEL_NAME}_meta.pt"
-IMG_SAVE_PATH = f"saved_models/{MODEL_NAME}_conf_matrix.png"
+MODEL_SAVE_PATH = f"saved_models/{TRAINING_MODE}_{MODEL_NAME}_best.pth"
+META_SAVE_PATH = f"saved_models/{TRAINING_MODE}_{MODEL_NAME}_meta.pt"
+IMG_SAVE_PATH = f"saved_models/{TRAINING_MODE}_{MODEL_NAME}_conf_matrix.png"
 
 BATCH_SIZE = 128
 TRAIN_STEPS_PER_EPOCH = 50
