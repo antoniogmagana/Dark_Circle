@@ -211,7 +211,7 @@ def main():
         model.state_dict(),
         config.MODEL_SAVE_PATH,
     )
-    print("Training complete. Model saved to final_model.pt")
+    print(f"Training complete. Model saved to {config.MODEL_SAVE_PATH}")
 
 
 if __name__ == "__main__":
