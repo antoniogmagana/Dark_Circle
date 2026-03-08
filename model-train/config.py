@@ -84,6 +84,7 @@ REF_SAMPLE_RATE = max(NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_S
 
 # Semantic category names (used for category-level classification)
 CLASS_MAP = {0: "background", 1: "light", 2: "heavy"}
+CLASS_WEIGHTS = [1.0, 10.0, 1.0]
 
 # Instance → category mapping (authoritative)
 DATASET_VEHICLE_MAP = {

@@ -167,9 +167,9 @@ def main():
     model = build_model(
         input_channels=config.IN_CHANNELS, num_classes=config.NUM_CLASSES
     ).to(device)
-
+    weights = torch.tensor(config.CLASS_WEIGHTS, device=device)
     optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(weight=weights)
 
     # ------------------------------------------------------------
     # Training loop
