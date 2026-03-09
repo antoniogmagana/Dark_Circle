@@ -6,6 +6,8 @@ import numpy as np
 
 from tsai.models.MINIROCKET_Pytorch import MiniRocketFeatures, get_minirocket_features
 from sklearn.linear_model import RidgeClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
 
 import config
 
@@ -183,9 +185,19 @@ class ClassificationLSTM(nn.Module):
 
 class MRFWrapper:
     """Wrapper to make tsai's PyTorch MiniRocket look identical to sktime for eval_rocket.py"""
-    def __init__(self, mrf, device):
-        self.mrf = mrf
-        self.device = device
+    def __init__(self, in_channels=None, num_classes=None, use_mel=False):
+        self.c_in = config.IN_CHANNELS
+        self.seq_len = int(config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS)
+        self.device = config.DEVICE
+        
+        self.mrf = MiniRocketFeatures(c_in=self.c_in, seq_len=self.seq_len).to(self.device)
+        
+        # FIX: Standardize the 10,000 features so the math engine doesn't choke
+        self.classifier = make_pipeline(
+            StandardScaler(), 
+            RidgeClassifier(alpha=100.0) 
+        )
+        self.is_fitted = False
         
     def transform(self, X):
         if isinstance(X, np.ndarray):

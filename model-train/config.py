@@ -54,7 +54,9 @@ DB_CONN_PARAMS = {
 #   "detection"  -> binary: background vs vehicle
 #   "category"   -> multi-class: background/light/heavy (CLASS_MAP)
 #   "instance"   -> each vehicle instance is its own class
-TRAINING_MODE = os.environ.get("TRAINING_MODE", "detection")
+TRAINING_MODE = os.environ.get("TRAINING_MODE")
+if not TRAINING_MODE:
+    TRAINING_MODE = input('Enter Training Mode ["detection", "category", "instance"]: ')
 
 # Reproducible instance-level class IDs
 INSTANCE_SEED = 0
@@ -163,11 +165,15 @@ else:
 # 6. MODEL SELECTION & DYNAMIC VERSIONING
 # =====================================================================
 
-MODEL_NAME = os.environ.get("MODEL_NAME", "DetectionCNN")
+MODEL_NAME = os.environ.get("MODEL_NAME")
+if not MODEL_NAME:
+    MODEL_NAME = input('Enter Model Name: ')
 
 # 1. Generate or Retrieve RUN_ID
 # If evaluating, we can pass RUN_ID="20260308_2032". Otherwise, it generates a new timestamp.
-RUN_ID = os.environ.get("RUN_ID", datetime.now().strftime("%Y%m%d_%H%M%S"))
+RUN_ID = os.environ.get("RUN_ID")
+if not RUN_ID:
+    RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # 2. Build the nested directory structure
 RUN_DIR = os.path.join("saved_models", TRAINING_MODE, MODEL_NAME, RUN_ID)
@@ -335,36 +341,37 @@ def save_config_snapshot():
 # copy this into terminal to loop over all models in one go!
 """
 for mode in detection category instance; do
+    # --- Deep Learning Models ---
     for model in DetectionCNN ClassificationCNN WaveformClassificationCNN ClassificationLSTM; do
-        # 1. Generate a unique timestamp for this specific run
         CURRENT_RUN_ID=$(date +%Y%m%d_%H%M%S)
         
         echo "============================================================"
         echo "STARTING RUN -> MODE: $mode | MODEL: $model | RUN_ID: $CURRENT_RUN_ID"
         echo "============================================================"
         
-        # 2. Pass the RUN_ID to the training script
         RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode MODEL_NAME=$model poetry run python train.py
         
-        # 3. Pass the EXACT SAME RUN_ID to the eval script so it finds the right folder
         if [ $? -eq 0 ]; then
             RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode MODEL_NAME=$model poetry run python eval.py
         else
             echo "Training failed for $model in $mode mode. Skipping eval."
         fi
-        
     done
     
-    # 4. Handle the MiniRocket run with its own timestamp
+    # --- MiniRocket Model ---
     ROCKET_RUN_ID=$(date +%Y%m%d_%H%M%S)
     echo "============================================================"
     echo "STARTING MINIROCKET RUN -> MODE: $mode | RUN_ID: $ROCKET_RUN_ID"
     echo "============================================================"
-    RUN_ID=$ROCKET_RUN_ID TRAINING_MODE=$mode poetry run python train_rocket.py
+    
+    # FIX: Added MODEL_NAME=ClassificationMiniRocket here
+    RUN_ID=$ROCKET_RUN_ID TRAINING_MODE=$mode MODEL_NAME=ClassificationMiniRocket poetry run python train_rocket.py
+    
+    if [ $? -eq 0 ]; then
+        # FIX: Added MODEL_NAME=ClassificationMiniRocket here as well
+        RUN_ID=$ROCKET_RUN_ID TRAINING_MODE=$mode MODEL_NAME=ClassificationMiniRocket poetry run python eval_rocket.py
+    else
+        echo "Training failed for MiniRocket in $mode mode. Skipping eval."
+    fi
 done
-"""
-
-# use this syntax in bash to evaluate a single historical model
-"""
-RUN_ID="20260308_203200" TRAINING_MODE="detection" MODEL_NAME="DetectionCNN" poetry run python eval.py
 """

@@ -1,172 +1,110 @@
 import os
+import time
+import csv
 import torch
-import numpy as np
 import joblib
-from torch.utils.data import DataLoader
-from sklearn.metrics import (
-    precision_score,
-    recall_score,
-    f1_score,
-    confusion_matrix,
-    accuracy_score,
-)
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from torch.utils.data import DataLoader
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
 import config
-from dataset import VehicleDataset
 from models import MODEL_REGISTRY
+from dataset import VehicleDataset
 from train import db_worker_init, compute_global_maxs
 from preprocess import preprocess_for_training
 
-
 def gather_data_into_ram(loader, device, channel_maxs, max_samples=None):
-    """
-    Rapidly iterates through the PyTorch DataLoader, applies GPU preprocessing,
-    and stacks the dataset into a NumPy array up to max_samples.
-    """
-    X_all = []
-    y_all = []
+    """Rapidly extracts preprocessed 1D waveforms into RAM."""
+    X_all, y_all = [], []
     total_samples = 0
-
     with torch.inference_mode():
         for i, (x, y) in enumerate(loader):
             if max_samples and total_samples >= max_samples:
                 break
-                
             x = x.to(device)
-            # CRITICAL: use_mel=False. MiniRocket needs the 1D raw waveforms!
             x = preprocess_for_training(x, channel_maxs, use_mel=False)
-
             X_all.append(x.cpu().numpy())
             y_all.append(y.numpy())
-            
             total_samples += x.size(0)
-
             if (i + 1) % config.LOG_INTERVAL == 0:
                 print(f"Data Extraction Progress: {total_samples} samples extracted...")
-
-    # Concatenate and strictly enforce the limit before returning
+    
     X_final = np.concatenate(X_all, axis=0)
     y_final = np.concatenate(y_all, axis=0)
-    
     if max_samples:
         return X_final[:max_samples], y_final[:max_samples]
     return X_final, y_final
 
-
 def main():
+    print(f"DEBUG: Run Dir is resolving to -> {os.path.abspath(config.RUN_DIR)}")
+    print(f"DEBUG: Model path is resolving to -> {os.path.abspath(config.MODEL_SAVE_PATH)}")
+
     device = config.DEVICE
     print(f"Using device: {device} for preprocessing.")
-
-    # 1. Force MiniRocket Configurations
-    config.MODEL_NAME = "ClassificationMiniRocket"
-    config.USE_MEL = False
-
-    # --- NEW: Create Directory and Save Config Snapshot ---
     print(f"Starting MiniRocket Run ID: {config.RUN_ID}")
-    config.save_config_snapshot()
 
-    # 2. Datasets & Loaders
+    os.makedirs(config.RUN_DIR, exist_ok=True)
+
+    # 1. Compute or Load Metadata
+    if os.path.exists(config.META_SAVE_PATH):
+        meta = torch.load(config.META_SAVE_PATH, map_location=device)
+        channel_maxs = meta["channel_maxs"]
+        print(f"Loaded normalization stats: {channel_maxs.tolist()}")
+    else:
+        print("Computing global maximums from training set (GPU Accelerated)...")
+        temp_ds = VehicleDataset(split="train")
+        temp_loader = DataLoader(temp_ds, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=config.NUM_WORKERS)
+        channel_maxs = compute_global_maxs(temp_loader, device)
+        torch.save({"channel_maxs": channel_maxs}, config.META_SAVE_PATH)
+
+    # 2. Initialize Training and Validation Datasets ONLY
     train_ds = VehicleDataset(split="train")
-    test_ds = VehicleDataset(split="test")
-
     train_loader = DataLoader(
-        train_ds,
-        batch_size=config.BATCH_SIZE,
-        shuffle=False,  # Order doesn't matter for whole-batch fitting
-        num_workers=config.NUM_WORKERS,
-        worker_init_fn=db_worker_init,
-    )
-    test_loader = DataLoader(
-        test_ds,
-        batch_size=config.BATCH_SIZE,
-        shuffle=False,
-        num_workers=config.NUM_WORKERS,
-        worker_init_fn=db_worker_init,
+        train_ds, batch_size=config.BATCH_SIZE, shuffle=True, 
+        num_workers=config.NUM_WORKERS, worker_init_fn=db_worker_init
     )
 
-    # 3. Calculate Scaling Metrics
-    channel_maxs = compute_global_maxs(train_loader, device)
-
-    # Save metadata so eval.py could theoretically use it later
-    torch.save(
-        {
-            "channel_maxs": channel_maxs,
-            "model_name": config.MODEL_NAME,
-            "use_mel": False,
-        },
-        config.META_SAVE_PATH,
+    val_ds = VehicleDataset(split="val")
+    val_loader = DataLoader(
+        val_ds, batch_size=config.BATCH_SIZE, shuffle=False, 
+        num_workers=config.NUM_WORKERS, worker_init_fn=db_worker_init
     )
 
-    # 4. Extract Data into RAM
-# 4. Extract Data into RAM
+    # 3. Extract Data into RAM
     print(f"\n--- Extracting Training Data (Capped at {config.ROCKET_MAX_SAMPLES}) ---")
     X_train, y_train = gather_data_into_ram(train_loader, device, channel_maxs, max_samples=config.ROCKET_MAX_SAMPLES)
 
-    print(f"\n--- Extracting Test Data (Capped at {config.ROCKET_MAX_SAMPLES}) ---")
-    X_test, y_test = gather_data_into_ram(test_loader, device, channel_maxs, max_samples=config.ROCKET_MAX_SAMPLES)
+    print(f"\n--- Extracting Validation Data (Capped at {config.ROCKET_MAX_SAMPLES}) ---")
+    X_val, y_val = gather_data_into_ram(val_loader, device, channel_maxs, max_samples=config.ROCKET_MAX_SAMPLES)
 
-    # 5. Fit MiniRocket
+    # 4. Train Model
     print(f"\nTraining ClassificationMiniRocket on shape {X_train.shape}...")
     model = MODEL_REGISTRY["ClassificationMiniRocket"]()
     model.fit(X_train, y_train)
 
-    # Scikit-learn models must be saved with joblib, not torch.save
+    # 5. Save Model
     save_path = config.MODEL_SAVE_PATH.replace(".pth", ".joblib")
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     joblib.dump(model, save_path)
-    print(f"MiniRocket saved to {save_path}")
+    print(f"Model saved to {save_path}")
 
-    # 6. Immediate Evaluation
-    print("\nEvaluating MiniRocket Test Set...")
-    preds = model.predict(X_test)
+    # 6. Evaluation (Validation Set Only)
+    print("\nEvaluating MiniRocket on Validation Set...")
+    train_preds = model.predict(X_train)
+    train_acc = accuracy_score(y_train, train_preds)
+    
+    val_preds = model.predict(X_val)
+    val_acc = accuracy_score(y_val, val_preds)
 
-    # Determine class names dynamically
-    if config.TRAINING_MODE == "detection":
-        class_names = ["background", "vehicle"]
-    elif config.TRAINING_MODE == "category":
-        class_names = [config.CLASS_MAP[i] for i in sorted(config.CLASS_MAP.keys())]
-    elif config.TRAINING_MODE == "instance":
-        inv_map = {v: k for k, v in config.INSTANCE_TO_CLASS.items()}
-        class_names = [inv_map[i] for i in range(config.NUM_CLASSES)]
-    else:
-        class_names = [str(i) for i in range(config.NUM_CLASSES)]
+    # Log to universal metrics tracker
+    with open(config.METRICS_LOG_PATH, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["Epoch", "Train_Loss", "Train_Acc", "Val_Loss", "Val_Acc"])
+        writer.writerow([1, "N/A", f"{train_acc:.4f}", "N/A", f"{val_acc:.4f}"])
 
-    # Metrics Calculation
-    accuracy = accuracy_score(y_test, preds)
-    precision = precision_score(y_test, preds, average=None)
-    recall = recall_score(y_test, preds, average=None)
-    f1 = f1_score(y_test, preds, average=None)
-    cm = confusion_matrix(y_test, preds)
-
-    print("\n" + "=" * 60)
-    print(f"{'Vehicle Class':<25} | {'Precision':<10} | {'Recall':<10} | {'F1':<10}")
-    print("-" * 60)
-    for i, name in enumerate(class_names):
-        print(
-            f"{name:<25} | {precision[i]:<10.4f} | {recall[i]:<10.4f} | {f1[i]:<10.4f}"
-        )
-    print("-" * 60)
-    print(f"Overall Test Accuracy: {accuracy:.4f}")
-    print("=" * 60 + "\n")
-
-    # Save Confusion Matrix
-    plt.figure(figsize=(12, 10))
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt="d",
-        cmap="Blues",
-        xticklabels=class_names,
-        yticklabels=class_names,
-    )
-    plt.xlabel("Predicted")
-    plt.ylabel("Actual")
-    plt.title(f"Confusion Matrix: ClassificationMiniRocket")
-    plt.savefig(config.IMG_SAVE_PATH.replace(".png", "_minirocket.png"))
-    print("Confusion matrix saved!")
-
+    print(f"MiniRocket Fit Summary | Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f}")
+    print("Training complete. Run eval_rocket.py for the full Test Set confusion matrix and metrics.")
 
 if __name__ == "__main__":
     main()
