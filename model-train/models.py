@@ -1,9 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import time
+import numpy as np
 
-from sktime.transformations.panel.rocket import MiniRocket
-from sklearn.linear_model import RidgeClassifierCV
+from tsai.models.MINIROCKET_Pytorch import MiniRocketFeatures, get_minirocket_features
+from sklearn.linear_model import RidgeClassifier
 
 import config
 
@@ -179,25 +181,80 @@ class ClassificationLSTM(nn.Module):
 # 3. NON-PYTORCH MODELS
 # =====================================================================
 
+class MRFWrapper:
+    """Wrapper to make tsai's PyTorch MiniRocket look identical to sktime for eval_rocket.py"""
+    def __init__(self, mrf, device):
+        self.mrf = mrf
+        self.device = device
+        
+    def transform(self, X):
+        if isinstance(X, np.ndarray):
+            X = torch.tensor(X, dtype=torch.float32, device=self.device)
+        else:
+            X = X.to(self.device)
+            
+        self.mrf = self.mrf.to(self.device)
+        X_feat = get_minirocket_features(X, self.mrf, chunksize=10, to_np=True)
+        
+        # FIX: Squeeze out the trailing dimension from tsai's output
+        if X_feat.ndim == 3:
+            X_feat = X_feat.squeeze(-1)
+            
+        return X_feat
 
 class ClassificationMiniRocket:
-    """MiniRocket + RidgeClassifierCV"""
+    """GPU-Accelerated MiniRocket + RidgeClassifier"""
     def __init__(self, in_channels=None, num_classes=None, use_mel=False):
-        self.transformer = MiniRocket(num_kernels=config.ROCKET_NUM_KERNELS)
-        # FORCE 5-folds to prevent the SVD memory explosion
-        self.classifier = RidgeClassifierCV(alphas=config.ROCKET_ALPHAS, cv=config.ROCKET_CV_FOLDS)
+        self.c_in = config.IN_CHANNELS
+        self.seq_len = int(config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS)
+        self.device = config.DEVICE
+        
+        self.mrf = MiniRocketFeatures(c_in=self.c_in, seq_len=self.seq_len).to(self.device)
+        self.classifier = RidgeClassifier(alpha=1.0) 
         self.is_fitted = False
 
     def fit(self, X_train, y_train):
-        X_feat = self.transformer.fit_transform(X_train)
+        print("\n  -> [Diagnostics] Starting tsai GPU Feature Transformation...", flush=True)
+        t0 = time.time()
+        
+        if isinstance(X_train, np.ndarray):
+            X_train = torch.tensor(X_train, dtype=torch.float32, device=self.device)
+        else:
+            X_train = X_train.to(self.device)
+            
+        print("  -> [Diagnostics] Fitting MRF biases...", flush=True)
+        self.mrf.fit(X_train[:10])
+        
+        print("  -> [Diagnostics] Extracting features in safe chunks...", flush=True)
+        X_feat = get_minirocket_features(X_train, self.mrf, chunksize=10, to_np=True)
+        
+        # FIX: Squeeze out the trailing dimension from tsai's output
+        if X_feat.ndim == 3:
+            X_feat = X_feat.squeeze(-1)
+        
+        t1 = time.time()
+        print(f"  -> [Diagnostics] GPU Transformation complete in {t1 - t0:.2f} seconds.", flush=True)
+        print(f"  -> [Diagnostics] New Feature Matrix Shape: {X_feat.shape}", flush=True)
+        print("  -> [Diagnostics] Starting scikit-learn Ridge Fitting...", flush=True)
+        
         self.classifier.fit(X_feat, y_train)
+        
+        t2 = time.time()
+        print(f"  -> [Diagnostics] Ridge fit complete in {t2 - t1:.2f} seconds.", flush=True)
         self.is_fitted = True
+        
+        self.mrf = self.mrf.cpu()
 
     def predict(self, X_test):
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before prediction.")
+        
         X_feat = self.transformer.transform(X_test)
         return self.classifier.predict(X_feat)
+        
+    @property
+    def transformer(self):
+        return MRFWrapper(self.mrf, self.device)
 
 
 # =====================================================================
