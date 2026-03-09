@@ -20,28 +20,39 @@ from train import db_worker_init, compute_global_maxs
 from preprocess import preprocess_for_training
 
 
-def gather_data_into_ram(loader, device, channel_maxs):
+def gather_data_into_ram(loader, device, channel_maxs, max_samples=None):
     """
     Rapidly iterates through the PyTorch DataLoader, applies GPU preprocessing,
-    and stacks the entire dataset into a NumPy array for scikit-learn.
+    and stacks the dataset into a NumPy array up to max_samples.
     """
     X_all = []
     y_all = []
+    total_samples = 0
 
     with torch.inference_mode():
         for i, (x, y) in enumerate(loader):
+            if max_samples and total_samples >= max_samples:
+                break
+                
             x = x.to(device)
-
             # CRITICAL: use_mel=False. MiniRocket needs the 1D raw waveforms!
             x = preprocess_for_training(x, channel_maxs, use_mel=False)
 
             X_all.append(x.cpu().numpy())
             y_all.append(y.numpy())
+            
+            total_samples += x.size(0)
 
             if (i + 1) % config.LOG_INTERVAL == 0:
-                print(f"Data Extraction Progress: Batch {i+1}/{len(loader)}")
+                print(f"Data Extraction Progress: {total_samples} samples extracted...")
 
-    return np.concatenate(X_all, axis=0), np.concatenate(y_all, axis=0)
+    # Concatenate and strictly enforce the limit before returning
+    X_final = np.concatenate(X_all, axis=0)
+    y_final = np.concatenate(y_all, axis=0)
+    
+    if max_samples:
+        return X_final[:max_samples], y_final[:max_samples]
+    return X_final, y_final
 
 
 def main():
@@ -89,11 +100,12 @@ def main():
     )
 
     # 4. Extract Data into RAM
-    print("\n--- Extracting Training Data ---")
-    X_train, y_train = gather_data_into_ram(train_loader, device, channel_maxs)
+# 4. Extract Data into RAM
+    print(f"\n--- Extracting Training Data (Capped at {config.ROCKET_MAX_SAMPLES}) ---")
+    X_train, y_train = gather_data_into_ram(train_loader, device, channel_maxs, max_samples=config.ROCKET_MAX_SAMPLES)
 
-    print("\n--- Extracting Test Data ---")
-    X_test, y_test = gather_data_into_ram(test_loader, device, channel_maxs)
+    print(f"\n--- Extracting Test Data (Capped at {config.ROCKET_MAX_SAMPLES}) ---")
+    X_test, y_test = gather_data_into_ram(test_loader, device, channel_maxs, max_samples=config.ROCKET_MAX_SAMPLES)
 
     # 5. Fit MiniRocket
     print(f"\nTraining ClassificationMiniRocket on shape {X_train.shape}...")

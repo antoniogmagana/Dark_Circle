@@ -14,10 +14,10 @@ import numpy as np
 # ============================================================
 
 # Core training loop settings
-BATCH_SIZE = 32
-EPOCHS = 5
+BATCH_SIZE = 128
+EPOCHS = 10
 NUM_WORKERS = 32
-LOG_INTERVAL = 500
+LOG_INTERVAL = 10
 
 # Checkpoint + evaluation output directories
 CHECKPOINT_DIR = "./checkpoints"
@@ -177,6 +177,7 @@ MODEL_SAVE_PATH = os.path.join(RUN_DIR, "best_model.pth")
 META_SAVE_PATH = os.path.join(RUN_DIR, "meta.pt")
 IMG_SAVE_PATH = os.path.join(RUN_DIR, "conf_matrix.png")
 JSON_LOG_PATH = os.path.join(RUN_DIR, "hyperparameters.json")
+METRICS_LOG_PATH = os.path.join(RUN_DIR, "metrics.csv")
 
 BATCH_SIZE = 128
 TRAIN_STEPS_PER_EPOCH = 50
@@ -265,6 +266,8 @@ LSTM_DROPOUT = BASE_DROPOUT
 # --- miniROCKET ---
 ROCKET_NUM_KERNELS = 10000
 ROCKET_ALPHAS = np.logspace(-3, 3, 10)
+ROCKET_MAX_SAMPLES = 50000  
+ROCKET_CV_FOLDS = 5         
 
 # =====================================================================
 # 9. ROUTING LOGIC (Replacing Circular Dependencies)

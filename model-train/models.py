@@ -182,10 +182,10 @@ class ClassificationLSTM(nn.Module):
 
 class ClassificationMiniRocket:
     """MiniRocket + RidgeClassifierCV"""
-
     def __init__(self, in_channels=None, num_classes=None, use_mel=False):
         self.transformer = MiniRocket(num_kernels=config.ROCKET_NUM_KERNELS)
-        self.classifier = RidgeClassifierCV(alphas=config.ROCKET_ALPHAS)
+        # FORCE 5-folds to prevent the SVD memory explosion
+        self.classifier = RidgeClassifierCV(alphas=config.ROCKET_ALPHAS, cv=config.ROCKET_CV_FOLDS)
         self.is_fitted = False
 
     def fit(self, X_train, y_train):

@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import numpy as np
 import pandas as pd
@@ -9,6 +10,8 @@ from sklearn.metrics import (
     f1_score,
     confusion_matrix,
     accuracy_score,
+    matthews_corrcoef,
+    roc_auc_score
 )
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -26,11 +29,10 @@ def run_evaluation():
     print(f"Using device: {device}")
 
     # 1. LOAD METADATA AND NORMALIZATION STATS
-    # No hardcoded fallbacks allowed. If train.py hasn't generated this, we halt.
     if not os.path.exists(config.META_SAVE_PATH):
         raise FileNotFoundError(
             f"Metadata file {config.META_SAVE_PATH} not found. "
-            "Please run train.py first so it can compute and save the dynamic channel_maxs."
+            "Please run train.py first."
         )
 
     meta = torch.load(config.META_SAVE_PATH, map_location=device)
@@ -39,7 +41,6 @@ def run_evaluation():
 
     # 2. Initialize the Test Dataset
     test_ds = VehicleDataset(split="test")
-
     test_loader = DataLoader(
         test_ds,
         batch_size=config.BATCH_SIZE,
@@ -62,16 +63,18 @@ def run_evaluation():
         model.load_state_dict(torch.load(config.MODEL_SAVE_PATH, map_location=device))
         print(f"Successfully loaded {config.MODEL_SAVE_PATH}")
     else:
-        raise FileNotFoundError(
-            f"Could not find {config.MODEL_SAVE_PATH}. Did training finish?"
-        )
+        raise FileNotFoundError(f"Could not find {config.MODEL_SAVE_PATH}.")
 
     model.eval()
 
     all_preds = []
     all_labels = []
+    all_probs = []
 
     print(f"Starting Evaluation on {len(test_ds)} samples...")
+
+    # --- START TIMING ---
+    start_time = time.perf_counter()
 
     with torch.no_grad():
         for i, (x, y) in enumerate(test_loader):
@@ -81,21 +84,45 @@ def run_evaluation():
             x = preprocess_for_training(x, channel_maxs, use_mel=config.USE_MEL)
 
             logits = model(x)
+            probs = torch.softmax(logits, dim=1)
             preds = torch.argmax(logits, dim=1)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(y.cpu().numpy())
+            all_probs.extend(probs.cpu().numpy())
 
             if (i + 1) % config.LOG_INTERVAL == 0:
                 print(f"Eval Progress: Batch {i+1}/{len(test_loader)}")
 
+    # --- END TIMING ---
+    end_time = time.perf_counter()
+
     # 4. Metrics Calculation
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
+    all_probs = np.array(all_probs)
 
     accuracy = accuracy_score(all_labels, all_preds)
+    mcc = matthews_corrcoef(all_labels, all_preds)
+    
+    total_samples = len(all_labels)
+    latency_ms = ((end_time - start_time) / total_samples) * 1000
 
-    # Get class names dynamically based on the active training mode
+    # ROC-AUC Calculation (Handles both binary and multiclass safely)
+    if config.NUM_CLASSES == 2:
+        auc = roc_auc_score(all_labels, all_probs[:, 1])
+    else:
+        auc = roc_auc_score(all_labels, all_probs, multi_class='ovr')
+
+    # False Alarm Rate (Specific to Detection mode)
+    cm = confusion_matrix(all_labels, all_preds)
+    if config.TRAINING_MODE == "detection" and cm.shape == (2, 2):
+        tn, fp, fn, tp = cm.ravel()
+        far = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    else:
+        far = None
+
+    # Get class names dynamically
     if config.TRAINING_MODE == "detection":
         class_names = ["background", "vehicle"]
     elif config.TRAINING_MODE == "category":
@@ -106,34 +133,40 @@ def run_evaluation():
     else:
         class_names = [str(i) for i in range(config.NUM_CLASSES)]
 
-    precision = precision_score(all_labels, all_preds, average=None)
-    recall = recall_score(all_labels, all_preds, average=None)
-    f1 = f1_score(all_labels, all_preds, average=None)
-    cm = confusion_matrix(all_labels, all_preds)
+    precision = precision_score(all_labels, all_preds, average=None, zero_division=0)
+    recall = recall_score(all_labels, all_preds, average=None, zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
 
-    # Console output
+    # 5. Console Output
     print("\n" + "=" * 60)
     print(f"{'Vehicle Class':<25} | {'Precision':<10} | {'Recall':<10} | {'F1':<10}")
     print("-" * 60)
     for i, name in enumerate(class_names):
-        print(
-            f"{name:<25} | {precision[i]:<10.4f} | {recall[i]:<10.4f} | {f1[i]:<10.4f}"
-        )
-
+        print(f"{name:<25} | {precision[i]:<10.4f} | {recall[i]:<10.4f} | {f1[i]:<10.4f}")
     print("-" * 60)
     print(f"Overall Test Accuracy: {accuracy:.4f}")
+    print(f"MCC: {mcc:.4f} | AUC: {auc:.4f} | Latency: {latency_ms:.2f} ms/sample")
+    if far is not None:
+        print(f"False Alarm Rate: {far:.4%}")
     print("=" * 60 + "\n")
 
-    # 5. Plot Confusion Matrix
+    # 6. Save Report to Text File
+    report_path = os.path.join(config.RUN_DIR, "evaluation_report.txt")
+    with open(report_path, "w") as f:
+        f.write("MODEL PERFORMANCE REPORT\n")
+        f.write(f"Timestamp: {config.RUN_ID}\n")
+        f.write(f"Mode: {config.TRAINING_MODE} | Model: {config.MODEL_NAME}\n")
+        f.write("-" * 40 + "\n")
+        f.write(f"Accuracy:  {accuracy:.4f}\n")
+        f.write(f"MCC:       {mcc:.4f}\n")
+        f.write(f"ROC-AUC:   {auc:.4f}\n")
+        f.write(f"Latency:   {latency_ms:.4f} ms/sample\n")
+        if far is not None:
+            f.write(f"False Alarm Rate: {far:.4%}\n")
+
+    # 7. Plot Confusion Matrix
     plt.figure(figsize=(12, 10))
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt="d",
-        cmap="Blues",
-        xticklabels=class_names,
-        yticklabels=class_names,
-    )
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=class_names, yticklabels=class_names)
     plt.xlabel("Predicted")
     plt.ylabel("Actual")
     plt.title(f"Confusion Matrix: {config.MODEL_NAME}")

@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader, get_worker_info
 import torch.nn as nn
 import torch.optim as optim
 import atexit
+import csv
 
 from data_generator import augment_batch
 from dataset import VehicleDataset
@@ -63,12 +64,12 @@ def train_one_epoch(
         total_samples += y.size(0)
 
         # Logging
-        if (batch_idx + 1) % config.LOG_INTERVAL == 0:
-            print(
-                f"Train Epoch {epoch} | Batch {batch_idx+1}/{len(loader)} "
-                f"| Loss: {loss.item():.4f}",
-                flush=True,
-            )
+        # if (batch_idx + 1) % config.LOG_INTERVAL == 0:
+        #     print(
+        #         f"Train Epoch {epoch} | Batch {batch_idx+1}/{len(loader)} "
+        #         f"| Loss: {loss.item():.4f}",
+        #         flush=True,
+        #     )
 
     return total_loss / total_samples, total_correct / total_samples
 
@@ -123,11 +124,11 @@ def compute_global_maxs(train_loader, device):
             else:
                 channel_maxs = torch.maximum(channel_maxs, batch_maxs)
 
-            # NEW: Print progress on batches
-            if (i + 1) % config.LOG_INTERVAL == 0 or i == total_batches - 1:
-                print(
-                    f"Max Computation Progress: Batch {i+1}/{total_batches}", flush=True
-                )
+            # # NEW: Print progress on batches
+            # if (i + 1) % config.LOG_INTERVAL == 0 or i == total_batches - 1:
+            #     print(
+            #         f"Max Computation Progress: Batch {i+1}/{total_batches}", flush=True
+            #     )
 
     print(f"Global Channel Maxs found: {channel_maxs.cpu().tolist()}")
     return channel_maxs
@@ -217,9 +218,14 @@ def main():
     # Optimizer must be defined AFTER the dummy pass
     optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
 
-    # ------------------------------------------------------------
+# ------------------------------------------------------------
     # Training loop
     # ------------------------------------------------------------
+    # 1. Initialize the CSV file with headers
+    with open(config.METRICS_LOG_PATH, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["Epoch", "Train_Loss", "Train_Acc", "Val_Loss", "Val_Acc"])
+
     for epoch in range(1, config.EPOCHS + 1):
         print(f"\nEpoch {epoch}/{config.EPOCHS}")
 
@@ -249,6 +255,17 @@ def main():
             f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}",
             flush=True,
         )
+
+        # 2. Append the current epoch's metrics to the CSV
+        with open(config.METRICS_LOG_PATH, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                epoch, 
+                f"{train_loss:.4f}", 
+                f"{train_acc:.4f}", 
+                f"{val_loss:.4f}", 
+                f"{val_acc:.4f}"
+            ])
 
     # ------------------------------------------------------------
     # Save final model

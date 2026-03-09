@@ -1,0 +1,9 @@
+MODEL PERFORMANCE REPORT
+Timestamp: 20260309_012519
+Mode: detection | Model: WaveformClassificationCNN
+----------------------------------------
+Accuracy:  0.9984
+MCC:       0.9810
+ROC-AUC:   0.9996
+Latency:   0.3163 ms/sample
+False Alarm Rate: 1.3218%
