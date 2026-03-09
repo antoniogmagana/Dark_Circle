@@ -1,6 +1,9 @@
 import os
 import random
 import torch
+import json
+from datetime import datetime
+import numpy as np
 
 # ===========================================================
 # Globals
@@ -157,13 +160,23 @@ else:
     raise ValueError(f"Unknown TRAINING_MODE: {TRAINING_MODE}")
 
 # =====================================================================
-# 6. MODEL SELECTION & AUTOMATIC TOGGLES
+# 6. MODEL SELECTION & DYNAMIC VERSIONING
 # =====================================================================
 
 MODEL_NAME = os.environ.get("MODEL_NAME", "DetectionCNN")
-MODEL_SAVE_PATH = f"saved_models/{TRAINING_MODE}_{MODEL_NAME}_best.pth"
-META_SAVE_PATH = f"saved_models/{TRAINING_MODE}_{MODEL_NAME}_meta.pt"
-IMG_SAVE_PATH = f"saved_models/{TRAINING_MODE}_{MODEL_NAME}_conf_matrix.png"
+
+# 1. Generate or Retrieve RUN_ID
+# If evaluating, we can pass RUN_ID="20260308_2032". Otherwise, it generates a new timestamp.
+RUN_ID = os.environ.get("RUN_ID", datetime.now().strftime("%Y%m%d_%H%M%S"))
+
+# 2. Build the nested directory structure
+RUN_DIR = os.path.join("saved_models", TRAINING_MODE, MODEL_NAME, RUN_ID)
+
+# 3. Define the specific file paths inside that new folder
+MODEL_SAVE_PATH = os.path.join(RUN_DIR, "best_model.pth")
+META_SAVE_PATH = os.path.join(RUN_DIR, "meta.pt")
+IMG_SAVE_PATH = os.path.join(RUN_DIR, "conf_matrix.png")
+JSON_LOG_PATH = os.path.join(RUN_DIR, "hyperparameters.json")
 
 BATCH_SIZE = 128
 TRAIN_STEPS_PER_EPOCH = 50
@@ -209,39 +222,146 @@ AUGMENT_SNR_RANGE = (10, 30)
 # add extra synthetic background samples
 OVERSAMPLE_BACKGROUNDS = True
 
-# ---------------------------------------------------------------------
-# DYNAMIC SYNCHRONIZATION: Prevent Circular Imports
-# ---------------------------------------------------------------------
-# We import MODEL_REGISTRY at the bottom so models.py can safely load config.py first.
-from models import MODEL_REGISTRY
+# =====================================================================
+# 8. MODEL HYPERPARAMETERS & CONTROL FLOW
+# =====================================================================
+BASE_LR = 1e-3
+BASE_DROPOUT = 0.3
 
-_model_ref = MODEL_REGISTRY[MODEL_NAME]
-USE_MEL = _model_ref.REQUIRED_SHAPE == "2D"
-LEARNING_RATE = _model_ref.LR if getattr(_model_ref, "LR", None) is not None else 1e-4
+# --- Detection CNN ---
+DET_CNN_LR = 1e-3
+DET_CNN_CHANNELS = [16, 32]
+DET_CNN_KERNELS = [5, 3]
+DET_CNN_STRIDES = [2, 1]
+DET_CNN_PADS = [2, 1]
+DET_CNN_HIDDEN = 64
+
+# --- Classification CNN ---
+CLASS_CNN_LR = 5e-4
+CLASS_CNN_CHANNELS = [32, 64, 128, 256]
+CLASS_CNN_KERNEL = 3
+CLASS_CNN_PAD = 1
+CLASS_CNN_HIDDEN = 512
+CLASS_CNN_DROPOUT = 0.4
+
+# --- Waveform 1D CNN ---
+WAVE_CNN_LR = 1e-3
+WAVE_CNN_CHANNELS = [32, 64, 128]
+WAVE_CNN_KERNELS = [64, 32, 16]
+WAVE_CNN_STRIDES = [8, 4, 2]
+WAVE_CNN_HIDDEN = 256
+
+# --- LSTM Networks ---
+LSTM_LR = 1e-3
+LSTM_CNN_CHANNELS = [16, 32]
+LSTM_CNN_KERNELS = [32, 16]
+LSTM_CNN_STRIDES = [8, 4]
+LSTM_CNN_POOLS = [4, 2]
+LSTM_HIDDEN = 128
+LSTM_LAYERS = 3
+LSTM_FC_DIM = 64
+LSTM_DROPOUT = BASE_DROPOUT
+
+# --- miniROCKET ---
+ROCKET_NUM_KERNELS = 10000
+ROCKET_ALPHAS = np.logspace(-3, 3, 10)
+
+# =====================================================================
+# 9. ROUTING LOGIC (Replacing Circular Dependencies)
+# =====================================================================
+
+# Map the current model to its specific learning rate
+LR_MAP = {
+    "DetectionCNN": DET_CNN_LR,
+    "ClassificationCNN": CLASS_CNN_LR,
+    "WaveformClassificationCNN": WAVE_CNN_LR,
+    "ClassificationLSTM": LSTM_LR,
+    "ClassificationMiniRocket": None,  # Non-gradient
+}
+LEARNING_RATE = LR_MAP.get(MODEL_NAME, BASE_LR)
+
+# Map the current model to its required input shape
+SHAPE_MAP = {
+    "DetectionCNN": "2D",
+    "ClassificationCNN": "2D",
+    "WaveformClassificationCNN": "1D",
+    "ClassificationLSTM": "1D",
+    "ClassificationMiniRocket": "1D",
+}
+USE_MEL = SHAPE_MAP.get(MODEL_NAME, "1D") == "2D"
+
+# =====================================================================
+# 10. EXPERIMENT TRACKING UTILITY
+# =====================================================================
+
+
+def save_config_snapshot():
+    """
+    Scans the config namespace for hyperparameter variables and dumps them
+    into a JSON file inside the specific run's directory.
+    """
+    os.makedirs(RUN_DIR, exist_ok=True)
+
+    config_dict = {}
+
+    # Iterate through all variables in this file
+    for key, value in list(globals().items()):
+        # Only grab standard uppercase configuration variables
+        if key.isupper() and not key.startswith("_"):
+
+            # Handle NumPy arrays (like ROCKET_ALPHAS) which JSON hates
+            if isinstance(value, np.ndarray):
+                config_dict[key] = value.tolist()
+            # Handle PyTorch devices
+            elif isinstance(value, torch.device):
+                config_dict[key] = str(value)
+            # Handle standard JSON-serializable types
+            elif isinstance(
+                value, (int, float, str, list, dict, bool, tuple, type(None))
+            ):
+                config_dict[key] = value
+
+    with open(JSON_LOG_PATH, "w") as f:
+        json.dump(config_dict, f, indent=4)
+
+
+# ===========================================================
+# Bash script for looping over training pipeline
+# ===========================================================
 
 # copy this into terminal to loop over all models in one go!
 """
 for mode in detection category instance; do
     for model in DetectionCNN ClassificationCNN WaveformClassificationCNN ClassificationLSTM; do
+        # 1. Generate a unique timestamp for this specific run
+        CURRENT_RUN_ID=$(date +%Y%m%d_%H%M%S)
+        
         echo "============================================================"
-        echo "STARTING RUN -> MODE: $mode | MODEL: $model"
+        echo "STARTING RUN -> MODE: $mode | MODEL: $model | RUN_ID: $CURRENT_RUN_ID"
         echo "============================================================"
         
-        TRAINING_MODE=$mode MODEL_NAME=$model poetry run python train.py
+        # 2. Pass the RUN_ID to the training script
+        RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode MODEL_NAME=$model poetry run python train.py
         
-        # Only run eval if training succeeds
+        # 3. Pass the EXACT SAME RUN_ID to the eval script so it finds the right folder
         if [ $? -eq 0 ]; then
-            TRAINING_MODE=$mode MODEL_NAME=$model poetry run python eval.py
+            RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode MODEL_NAME=$model poetry run python eval.py
         else
             echo "Training failed for $model in $mode mode. Skipping eval."
         fi
         
     done
-    # Run the Rocket specific pipeline
+    
+    # 4. Handle the MiniRocket run with its own timestamp
+    ROCKET_RUN_ID=$(date +%Y%m%d_%H%M%S)
     echo "============================================================"
-    echo "STARTING MINIROCKET RUN -> MODE: $mode"
+    echo "STARTING MINIROCKET RUN -> MODE: $mode | RUN_ID: $ROCKET_RUN_ID"
     echo "============================================================"
-    TRAINING_MODE=$mode poetry run python train_rocket.py
-    # (Evaluation is built-in, but you can run eval_rocket.py separately if needed)
+    RUN_ID=$ROCKET_RUN_ID TRAINING_MODE=$mode poetry run python train_rocket.py
 done
+"""
+
+# use this syntax in bash to evaluate a single historical model
+"""
+RUN_ID="20260308_203200" TRAINING_MODE="detection" MODEL_NAME="DetectionCNN" poetry run python eval.py
 """

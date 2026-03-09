@@ -137,8 +137,10 @@ def main():
     device = config.DEVICE
     print("Using device:", device)
 
-    # Ensure save directory exists
-    os.makedirs(os.path.dirname(config.MODEL_SAVE_PATH), exist_ok=True)
+    # --- NEW: Create Directory and Save Config Snapshot ---
+    print(f"Starting Run ID: {config.RUN_ID}")
+    print(f"Saving to: {config.RUN_DIR}")
+    config.save_config_snapshot()
 
     # ------------------------------------------------------------
     # Datasets and loaders

@@ -52,6 +52,10 @@ def main():
     config.MODEL_NAME = "ClassificationMiniRocket"
     config.USE_MEL = False
 
+    # --- NEW: Create Directory and Save Config Snapshot ---
+    print(f"Starting MiniRocket Run ID: {config.RUN_ID}")
+    config.save_config_snapshot()
+
     # 2. Datasets & Loaders
     train_ds = VehicleDataset(split="train")
     test_ds = VehicleDataset(split="test")
