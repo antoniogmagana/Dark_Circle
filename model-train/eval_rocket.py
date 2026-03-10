@@ -4,6 +4,7 @@ import torch
 import numpy as np
 import joblib
 from torch.utils.data import DataLoader
+from scipy.special import softmax
 from sklearn.metrics import (
     precision_score,
     recall_score,
@@ -34,24 +35,27 @@ def gather_test_data(loader, device, channel_maxs):
     return np.concatenate(X_all, axis=0), np.concatenate(y_all, axis=0)
 
 def main():
-    print(f"DEBUG: Run Dir is resolving to -> {os.path.abspath(config.RUN_DIR)}")
-    print(f"DEBUG: Model path is resolving to -> {os.path.abspath(config.MODEL_SAVE_PATH)}")
-
     device = config.DEVICE
     print(f"Using device for preprocessing: {device}")
 
     if not os.path.exists(config.META_SAVE_PATH):
-        raise FileNotFoundError(f"Metadata {config.META_SAVE_PATH} not found.")
+        raise FileNotFoundError(f"Metadata {config.META_SAVE_PATH} not found. Please run train_rocket.py first.")
 
     meta = torch.load(config.META_SAVE_PATH, map_location=device)
     channel_maxs = meta["channel_maxs"]
     print(f"Loaded normalization stats: {channel_maxs.tolist()}")
 
-    # 1. Initialize Test Dataset ONLY
+    # 1. Initialize Test Dataset ONLY (Aligned with eval.py)
     test_ds = VehicleDataset(split="test")
     test_loader = DataLoader(
-        test_ds, batch_size=config.BATCH_SIZE, shuffle=False,
-        num_workers=config.NUM_WORKERS, worker_init_fn=db_worker_init
+        test_ds, 
+        batch_size=config.BATCH_SIZE, 
+        shuffle=False,
+        num_workers=config.NUM_WORKERS, 
+        worker_init_fn=db_worker_init,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2
     )
 
     # 2. Load Model
@@ -78,12 +82,16 @@ def main():
 
     accuracy = accuracy_score(y_test, all_preds)
     mcc = matthews_corrcoef(y_test, all_preds)
-    latency_ms = ((end_time - start_time) / len(y_test)) * 1000
+    
+    total_samples = len(y_test)
+    latency_ms = ((end_time - start_time) / total_samples) * 1000
 
+    # --- FIX: Convert raw decision scores to probabilities for multiclass ---
     if config.NUM_CLASSES == 2:
         auc = roc_auc_score(y_test, scores)
     else:
-        auc = roc_auc_score(y_test, scores, multi_class='ovr')
+        prob_scores = softmax(scores, axis=1)
+        auc = roc_auc_score(y_test, prob_scores, multi_class='ovr')
 
     cm = confusion_matrix(y_test, all_preds)
     if config.TRAINING_MODE == "detection" and cm.shape == (2, 2):

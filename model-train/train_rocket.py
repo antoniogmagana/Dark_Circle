@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from torch.utils.data import DataLoader
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import accuracy_score
 
 import config
 from models import MODEL_REGISTRY
@@ -38,14 +38,13 @@ def gather_data_into_ram(loader, device, channel_maxs, max_samples=None):
     return X_final, y_final
 
 def main():
-    print(f"DEBUG: Run Dir is resolving to -> {os.path.abspath(config.RUN_DIR)}")
-    print(f"DEBUG: Model path is resolving to -> {os.path.abspath(config.MODEL_SAVE_PATH)}")
-
     device = config.DEVICE
     print(f"Using device: {device} for preprocessing.")
-    print(f"Starting MiniRocket Run ID: {config.RUN_ID}")
 
-    os.makedirs(config.RUN_DIR, exist_ok=True)
+    # --- ALIGNMENT FIX 1: Create Directory and Save Config Snapshot ---
+    print(f"Starting MiniRocket Run ID: {config.RUN_ID}")
+    print(f"Saving to: {config.RUN_DIR}")
+    config.save_config_snapshot()
 
     # 1. Compute or Load Metadata
     if os.path.exists(config.META_SAVE_PATH):
@@ -55,21 +54,42 @@ def main():
     else:
         print("Computing global maximums from training set (GPU Accelerated)...")
         temp_ds = VehicleDataset(split="train")
-        temp_loader = DataLoader(temp_ds, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=config.NUM_WORKERS)
+        temp_loader = DataLoader(
+            temp_ds, 
+            batch_size=config.BATCH_SIZE, 
+            shuffle=False, 
+            num_workers=config.NUM_WORKERS,
+            worker_init_fn=db_worker_init,
+            persistent_workers=True,
+            pin_memory=True,
+            prefetch_factor=2
+        )
         channel_maxs = compute_global_maxs(temp_loader, device)
         torch.save({"channel_maxs": channel_maxs}, config.META_SAVE_PATH)
 
-    # 2. Initialize Training and Validation Datasets ONLY
+    # 2. Initialize Training and Validation Datasets (Aligned with train.py)
     train_ds = VehicleDataset(split="train")
     train_loader = DataLoader(
-        train_ds, batch_size=config.BATCH_SIZE, shuffle=True, 
-        num_workers=config.NUM_WORKERS, worker_init_fn=db_worker_init
+        train_ds, 
+        batch_size=config.BATCH_SIZE, 
+        shuffle=True, 
+        num_workers=config.NUM_WORKERS, 
+        worker_init_fn=db_worker_init,
+        persistent_workers=True,
+        pin_memory=True,
+        prefetch_factor=2
     )
 
     val_ds = VehicleDataset(split="val")
     val_loader = DataLoader(
-        val_ds, batch_size=config.BATCH_SIZE, shuffle=False, 
-        num_workers=config.NUM_WORKERS, worker_init_fn=db_worker_init
+        val_ds, 
+        batch_size=config.BATCH_SIZE, 
+        shuffle=False, 
+        num_workers=config.NUM_WORKERS, 
+        worker_init_fn=db_worker_init,
+        persistent_workers=True,
+        pin_memory=True,
+        prefetch_factor=2
     )
 
     # 3. Extract Data into RAM
