@@ -36,8 +36,8 @@ def run_evaluation():
         )
 
     meta = torch.load(config.META_SAVE_PATH, map_location=device)
-    channel_maxs = meta["channel_maxs"]
-    print(f"Loaded normalization stats from metadata: {channel_maxs.tolist()}")
+    mu, sigma, epsilon = meta["mu"], meta["sigma"], meta["epsilon"]
+    print(f"Loaded normalization stats from metadata: {meta}")
 
     # 2. Initialize the Test Dataset
     test_ds = VehicleDataset(split="test")
@@ -81,7 +81,7 @@ def run_evaluation():
             x, y = x.to(device), y.to(device)
 
             # Apply the SAME preprocessing used in training
-            x = preprocess_for_training(x, channel_maxs, use_mel=config.USE_MEL)
+            x = preprocess_for_training(x, mu, sigma, epsilon, use_mel=config.USE_MEL)
 
             logits = model(x)
             probs = torch.softmax(logits, dim=1)
@@ -91,8 +91,8 @@ def run_evaluation():
             all_labels.extend(y.cpu().numpy())
             all_probs.extend(probs.cpu().numpy())
 
-            if (i + 1) % config.LOG_INTERVAL == 0:
-                print(f"Eval Progress: Batch {i+1}/{len(test_loader)}")
+            # if (i + 1) % config.LOG_INTERVAL == 0:
+            #     print(f"Eval Progress: Batch {i+1}/{len(test_loader)}")
 
     # --- END TIMING ---
     end_time = time.perf_counter()

@@ -30,7 +30,7 @@ def db_worker_init(worker_id):
 
 
 def train_one_epoch(
-    model, loader, optimizer, criterion, device, channel_maxs, use_mel, epoch
+    model, loader, optimizer, criterion, device, mu, sigma, epsilon, use_mel, epoch
 ):
     model.train()
     total_loss = 0
@@ -50,7 +50,7 @@ def train_one_epoch(
         # -----------------------------------------------------------------
 
         # Preprocessing on the GPU
-        x = preprocess_for_training(x, channel_maxs, use_mel=use_mel)
+        x = preprocess_for_training(x, mu, sigma, epsilon, use_mel)        
 
         optimizer.zero_grad()
         logits = model(x)
@@ -74,7 +74,7 @@ def train_one_epoch(
     return total_loss / total_samples, total_correct / total_samples
 
 
-def evaluate(model, loader, criterion, device, channel_maxs, use_mel):
+def evaluate(model, loader, criterion, device, mu, sigma, epsilon, use_mel):
     model.eval()
     total_loss = 0
     total_correct = 0
@@ -85,7 +85,7 @@ def evaluate(model, loader, criterion, device, channel_maxs, use_mel):
             x, y = x.to(device), y.to(device)
 
             # Preprocessing on the GPU (Same scaling as training!)
-            x = preprocess_for_training(x, channel_maxs, use_mel=use_mel)
+            x = preprocess_for_training(x, mu, sigma, epsilon, use_mel=use_mel)
 
             logits = model(x)
             loss = criterion(logits, y)
@@ -97,41 +97,27 @@ def evaluate(model, loader, criterion, device, channel_maxs, use_mel):
     return total_loss / total_samples, total_correct / total_samples
 
 
-def compute_global_maxs(train_loader, device):
+def compute_stats(train_loader):
     """
-    Runs a single pass over the training data to find the absolute maximum
-    amplitude per channel, AFTER zero-centering the windows.
-    Returns a tensor of shape [C] containing the max values.
+    Compute mean and standard deviation of training data.
+    Assumes 3-channel data. 
     """
-    print("Computing global maximums from training set (GPU Accelerated)...")
-    channel_maxs = None
-    total_batches = len(train_loader)
+    channels_sum = torch.zeros(config.IN_CHANNELS) 
+    channels_sq_sum = torch.zeros(config.IN_CHANNELS)
+    num_batches = len(train_loader)
+    
+    for x, y in train_loader:
+        # leaving stats per channel
+        channels_sum += torch.mean(x, dim=[0, 2])
+        channels_sq_sum += torch.mean(x**2, dim=[0, 2])
+    
+    # Divide by the total number of batches, not the size of the last batch
+    mean = channels_sum / num_batches
+    std = (channels_sq_sum / num_batches - mean**2).sqrt()
+    epsilon = 1e-8
+    
+    return mean, std, epsilon
 
-    with torch.no_grad():
-        for i, (x, y) in enumerate(train_loader):
-            x = x.to(device)
-
-            # 1. Zero-center the windows first (subtract mean along the time dimension)
-            x_centered = x - x.mean(dim=-1, keepdim=True)
-
-            # 2. Find the max absolute value for each channel in this batch
-            # amax(dim=(0, 2)) checks across the Batch and Time dimensions, leaving just Channels
-            batch_maxs = x_centered.abs().amax(dim=(0, 2))
-
-            # 3. Keep the running maximums
-            if channel_maxs is None:
-                channel_maxs = batch_maxs
-            else:
-                channel_maxs = torch.maximum(channel_maxs, batch_maxs)
-
-            # # NEW: Print progress on batches
-            # if (i + 1) % config.LOG_INTERVAL == 0 or i == total_batches - 1:
-            #     print(
-            #         f"Max Computation Progress: Batch {i+1}/{total_batches}", flush=True
-            #     )
-
-    print(f"Global Channel Maxs found: {channel_maxs.cpu().tolist()}")
-    return channel_maxs
 
 
 def main():
@@ -172,19 +158,23 @@ def main():
     )
 
     # ------------------------------------------------------------
-    # Calculate Global Maxes for Scaling & Save Metadata
+    # Calculate Scaling & Save Metadata
     # ------------------------------------------------------------
-    channel_maxs = compute_global_maxs(train_loader, device)
-
-    torch.save(
-        {
-            "channel_maxs": channel_maxs,
-            "model_name": config.MODEL_NAME,
-            "use_mel": config.USE_MEL,
-        },
-        config.META_SAVE_PATH,
-    )
-    print(f"Metadata saved to {config.META_SAVE_PATH}")
+    print("Computing normalization statistics from training data...")
+    mu, sigma, epsilon = compute_stats(train_loader)
+    print(f"Computed Mean: {mu}")
+    print(f"Computed Std: {sigma}")
+    
+    # Save to the run directory
+    torch.save({
+        "model_name": config.MODEL_NAME,
+        "use_mel": config.USE_MEL,
+        "mu": mu,
+        "sigma": sigma,
+        "epsilon": epsilon
+    }, config.META_SAVE_PATH)
+    
+    print(f"Saved normalization stats to: {config.META_SAVE_PATH}")
 
     # ------------------------------------------------------------
     # Model, optimizer, loss
@@ -200,7 +190,7 @@ def main():
         for x_dummy, _ in train_loader:
             x_dummy = x_dummy.to(device)
             x_dummy = preprocess_for_training(
-                x_dummy, channel_maxs, use_mel=config.USE_MEL
+                x_dummy, mu, sigma, epsilon, use_mel=config.USE_MEL
             )
             model(x_dummy)
             break
@@ -216,7 +206,7 @@ def main():
         criterion = nn.CrossEntropyLoss()
 
     # Optimizer must be defined AFTER the dummy pass
-    optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
+    optimizer = model.get_optimizer()
 
 # ------------------------------------------------------------
     # Training loop
@@ -235,7 +225,9 @@ def main():
             optimizer,
             criterion,
             device,
-            channel_maxs,
+            mu,
+            sigma,
+            epsilon,
             config.USE_MEL,
             epoch,
         )
@@ -245,7 +237,7 @@ def main():
             val_loader,
             criterion,
             device,
-            channel_maxs,
+            mu, sigma, epsilon,
             config.USE_MEL,
         )
 

@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 import numpy as np
 
+
 # ===========================================================
 # Globals
 # ===========================================================
@@ -236,58 +237,55 @@ BASE_LR = 1e-3
 BASE_DROPOUT = 0.3
 
 # --- Detection CNN ---
-DET_CNN_LR = 1e-3
-DET_CNN_CHANNELS = [16, 32]
-DET_CNN_KERNELS = [5, 3]
-DET_CNN_STRIDES = [2, 1]
-DET_CNN_PADS = [2, 1]
-DET_CNN_HIDDEN = 64
+if MODEL_NAME == "DetectionCNN":
+    LEARNING_RATE = 1e-3
+    CHANNELS = [16, 32]
+    KERNELS = [5, 3]
+    STRIDES = [2, 1]
+    PADS = [2, 1]
+    HIDDEN = 64
 
 # --- Classification CNN ---
-CLASS_CNN_LR = 5e-4
-CLASS_CNN_CHANNELS = [32, 64, 128, 256]
-CLASS_CNN_KERNEL = 3
-CLASS_CNN_PAD = 1
-CLASS_CNN_HIDDEN = 512
-CLASS_CNN_DROPOUT = 0.4
+if MODEL_NAME == "ClassificationCNN":
+    LEARNING_RATE = 5e-4
+    CHANNELS = [32, 64, 128, 256]
+    KERNEL = 3
+    PADS = 1
+    HIDDEN = 512
+    DROPOUT = 0.4
 
 # --- Waveform 1D CNN ---
-WAVE_CNN_LR = 1e-3
-WAVE_CNN_CHANNELS = [32, 64, 128]
-WAVE_CNN_KERNELS = [64, 32, 16]
-WAVE_CNN_STRIDES = [8, 4, 2]
-WAVE_CNN_HIDDEN = 256
+if MODEL_NAME == "WaveformClassificationCNN":
+    LEARNING_RATE = 1e-3
+    CHANNELS = [32, 64, 128]
+    KERNELS = [64, 32, 16]
+    STRIDES = [8, 4, 2]
+    HIDDEN = 256
+    DROPOUT = 0.3
 
 # --- LSTM Networks ---
-LSTM_LR = 1e-3
-LSTM_CNN_CHANNELS = [16, 32]
-LSTM_CNN_KERNELS = [32, 16]
-LSTM_CNN_STRIDES = [8, 4]
-LSTM_CNN_POOLS = [4, 2]
-LSTM_HIDDEN = 128
-LSTM_LAYERS = 3
-LSTM_FC_DIM = 64
-LSTM_DROPOUT = BASE_DROPOUT
+if MODEL_NAME == "ClassificationLSTM":
+    LEARNING_RATE = 1e-3
+    CHANNELS = [16, 32]
+    KERNELS = [32, 16]
+    STRIDES = [8, 4]
+    POOLS = [4, 2]
+    HIDDEN = 128
+    LAYERS = 3
+    DIM = 64
+    DROPOUT = 0.3
 
 # --- miniROCKET ---
-ROCKET_NUM_KERNELS = 10000
-ROCKET_ALPHAS = np.logspace(-3, 3, 10)
-ROCKET_MAX_SAMPLES = 50000  
-ROCKET_CV_FOLDS = 5         
+if MODEL_NAME == "ClassificationMiniRocket":
+    KERNELS = 10000
+    ALPHAS = np.logspace(-3, 3, 10)
+    MAX_SAMPLES = 50000  
+    CV_FOLDS = 5  
 
 # =====================================================================
 # 9. ROUTING LOGIC (Replacing Circular Dependencies)
 # =====================================================================
 
-# Map the current model to its specific learning rate
-LR_MAP = {
-    "DetectionCNN": DET_CNN_LR,
-    "ClassificationCNN": CLASS_CNN_LR,
-    "WaveformClassificationCNN": WAVE_CNN_LR,
-    "ClassificationLSTM": LSTM_LR,
-    "ClassificationMiniRocket": None,  # Non-gradient
-}
-LEARNING_RATE = LR_MAP.get(MODEL_NAME, BASE_LR)
 
 # Map the current model to its required input shape
 SHAPE_MAP = {

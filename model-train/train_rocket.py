@@ -12,10 +12,10 @@ from sklearn.metrics import accuracy_score
 import config
 from models import MODEL_REGISTRY
 from dataset import VehicleDataset
-from train import db_worker_init, compute_global_maxs
+from train import db_worker_init, compute_stats
 from preprocess import preprocess_for_training
 
-def gather_data_into_ram(loader, device, channel_maxs, max_samples=None):
+def gather_data_into_ram(loader, device, mu, sigma, epsilon, max_samples=None):
     """Rapidly extracts preprocessed 1D waveforms into RAM."""
     X_all, y_all = [], []
     total_samples = 0
@@ -24,12 +24,12 @@ def gather_data_into_ram(loader, device, channel_maxs, max_samples=None):
             if max_samples and total_samples >= max_samples:
                 break
             x = x.to(device)
-            x = preprocess_for_training(x, channel_maxs, use_mel=False)
+            x = preprocess_for_training(x, mu, sigma, epsilon, use_mel=False)
             X_all.append(x.cpu().numpy())
             y_all.append(y.numpy())
             total_samples += x.size(0)
-            if (i + 1) % config.LOG_INTERVAL == 0:
-                print(f"Data Extraction Progress: {total_samples} samples extracted...")
+            # if (i + 1) % config.LOG_INTERVAL == 0:
+            #     print(f"Data Extraction Progress: {total_samples} samples extracted...")
     
     X_final = np.concatenate(X_all, axis=0)
     y_final = np.concatenate(y_all, axis=0)
@@ -46,28 +46,7 @@ def main():
     print(f"Saving to: {config.RUN_DIR}")
     config.save_config_snapshot()
 
-    # 1. Compute or Load Metadata
-    if os.path.exists(config.META_SAVE_PATH):
-        meta = torch.load(config.META_SAVE_PATH, map_location=device)
-        channel_maxs = meta["channel_maxs"]
-        print(f"Loaded normalization stats: {channel_maxs.tolist()}")
-    else:
-        print("Computing global maximums from training set (GPU Accelerated)...")
-        temp_ds = VehicleDataset(split="train")
-        temp_loader = DataLoader(
-            temp_ds, 
-            batch_size=config.BATCH_SIZE, 
-            shuffle=False, 
-            num_workers=config.NUM_WORKERS,
-            worker_init_fn=db_worker_init,
-            persistent_workers=True,
-            pin_memory=True,
-            prefetch_factor=2
-        )
-        channel_maxs = compute_global_maxs(temp_loader, device)
-        torch.save({"channel_maxs": channel_maxs}, config.META_SAVE_PATH)
-
-    # 2. Initialize Training and Validation Datasets (Aligned with train.py)
+    # 1. build data loaders
     train_ds = VehicleDataset(split="train")
     train_loader = DataLoader(
         train_ds, 
@@ -91,13 +70,32 @@ def main():
         pin_memory=True,
         prefetch_factor=2
     )
+    # ------------------------------------------------------------
+    # 2. Calculate Scaling & Save Metadata
+    # ------------------------------------------------------------
+    print("Computing normalization statistics from training data...")
+    mu, sigma, epsilon = compute_stats(train_loader)
+    print(f"Computed Mean: {mu}")
+    print(f"Computed Std: {sigma}")
+    
+    # Save to the run directory
+    torch.save({
+        "model_name": config.MODEL_NAME,
+        "use_mel": config.USE_MEL,
+        "mu": mu,
+        "sigma": sigma,
+        "epsilon": epsilon
+    }, config.META_SAVE_PATH)
+    
+    print(f"Saved normalization stats to: {config.META_SAVE_PATH}")
+
 
     # 3. Extract Data into RAM
-    print(f"\n--- Extracting Training Data (Capped at {config.ROCKET_MAX_SAMPLES}) ---")
-    X_train, y_train = gather_data_into_ram(train_loader, device, channel_maxs, max_samples=config.ROCKET_MAX_SAMPLES)
+    print(f"\n--- Extracting Training Data (Capped at {config.MAX_SAMPLES}) ---")
+    X_train, y_train = gather_data_into_ram(train_loader, device, mu, sigma, epsilon, max_samples=config.MAX_SAMPLES)
 
-    print(f"\n--- Extracting Validation Data (Capped at {config.ROCKET_MAX_SAMPLES}) ---")
-    X_val, y_val = gather_data_into_ram(val_loader, device, channel_maxs, max_samples=config.ROCKET_MAX_SAMPLES)
+    print(f"\n--- Extracting Validation Data (Capped at {config.MAX_SAMPLES}) ---")
+    X_val, y_val = gather_data_into_ram(val_loader, device, mu, sigma, epsilon, max_samples=config.MAX_SAMPLES)
 
     # 4. Train Model
     print(f"\nTraining ClassificationMiniRocket on shape {X_train.shape}...")

@@ -2,30 +2,10 @@ import torch
 import torchaudio
 import config
 
-# ============================================================
-# 1. True Standardization (Z-Score)
-# ============================================================
-
-
-def standardize_batch(batch_tensor, channel_maxs, eps=1e-8):
-    # 1. Window-level Mean Subtraction (Fixes sensor hardware drift/DC offset)
-    mean = batch_tensor.mean(dim=-1, keepdim=True)
-    centered = batch_tensor - mean
-
-    # 2. Dynamic Scaling based on Pipeline Stage
-    if config.TRAINING_MODE == "detection":
-        # Global Scaling (Keeps background quiet)
-        scaled = centered / (channel_maxs.view(1, -1, 1) + eps)
-    else:
-        # Per-Window Scaling (Distance Invariance for Classification)
-        window_maxs = centered.abs().amax(dim=-1, keepdim=True)
-        scaled = centered / (window_maxs + eps)
-
-    return scaled
 
 
 # ============================================================
-# 2. Vectorized Mel Spectrogram Extraction
+# 1. Vectorized Mel Spectrogram Extraction
 # ============================================================
 
 _mel_transform = None
@@ -73,16 +53,29 @@ def extract_mel_spectrogram(batch_tensor):
 
 
 # ============================================================
-# 3. Main Training Wrapper
+# 2. Main Training Wrapper
 # ============================================================
 
 
-def preprocess_for_training(batch_tensor, channel_maxs, use_mel=True):
+def preprocess_for_training(batch_tensor, mu, sigma, epsilon, use_mel=True):
     """
     Full preprocessing pipeline for training and evaluation.
     """
     # 1. Standardize using our Train set stats
-    batch_tensor = standardize_batch(batch_tensor, channel_maxs)
+    # Ensure mu and sigma are on the same device as batch_tensor
+    mu = mu.to(batch_tensor.device)
+    sigma = sigma.to(batch_tensor.device)
+
+    # Reshape from [Channel] to [1, Channel, 1] for broadcasting
+    mu = mu.view(1, -1, 1)
+    sigma = sigma.view(1, -1, 1)
+
+    # Now this will execute perfectly
+    batch_tensor = (batch_tensor - mu) / (sigma + epsilon)
+    # Normalize each window
+    window_mean = batch_tensor.mean(dim=-1, keepdim=True)
+    window_std = batch_tensor.std(dim=-1, keepdim=True)
+    batch_tensor = (batch_tensor - window_mean) / (window_std + epsilon)
 
     # 2. Convert to frequency domain
     if use_mel:
