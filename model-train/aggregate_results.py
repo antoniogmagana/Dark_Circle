@@ -2,6 +2,7 @@ import os
 import glob
 import pandas as pd
 import re
+from datetime import datetime
 
 def parse_report_file(filepath):
     """
@@ -86,13 +87,13 @@ def main():
     df = df[columns]
     
     # Save to a master CSV in the root directory
-    output_csv = "master_evaluation_results.csv"
+    output_csv = f"./saved_models/master_evaluation_results_{datetime.now()}.csv"
     df.to_csv(output_csv, index=False)
     
     # --- CONSOLE OUTPUT ---
-    print("\n" + "="*95)
+    print("\n" + "="*110)
     print(" " * 35 + "MASTER RESULTS LEADERBOARD")
-    print("="*95)
+    print("="*110)
     
     current_mode = ""
     for index, row in df.iterrows():
@@ -100,15 +101,15 @@ def main():
         if row['Mode'] != current_mode:
             current_mode = row['Mode']
             print(f"\n--- {current_mode.upper()} MODE ---")
-            print(f"{'Model':<30} | {'Accuracy':<10} | {'MCC':<8} | {'AUC':<8} | {'Latency':<12} | {'FAR':<8}")
+            print(f"{'Model':<30} | {'Accuracy':<10} | {'MCC':<8} | {'AUC':<8} | {'Latency':<12} | {'FAR':<8} | {'Timestamp':<30}")
             print("-" * 88)
             
         far_str = f"{row['FAR']:.2%}" if pd.notna(row['FAR']) else "N/A"
         latency_str = f"{row['Latency_ms']:.2f} ms" if pd.notna(row['Latency_ms']) else "N/A"
         
-        print(f"{row['Model']:<30} | {row['Accuracy']:<10.4f} | {row['MCC']:<8.4f} | {row['ROC-AUC']:<8.4f} | {latency_str:<12} | {far_str:<8}")
+        print(f"{row['Model']:<30} | {row['Accuracy']:<10.4f} | {row['MCC']:<8.4f} | {row['ROC-AUC']:<8.4f} | {latency_str:<12} | {far_str:<8} | {row['Timestamp']:<30}")
         
-    print("="*95)
+    print("="*110)
     print(f"\nSaved full results to: {output_csv}\n")
 
 if __name__ == "__main__":
