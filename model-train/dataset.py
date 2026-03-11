@@ -251,6 +251,7 @@ class VehicleDataset(Dataset):
 
             parts = table.split("_")
             dataset = parts[0]
+            signal = parts[1]
             instance = "_".join(parts[2:-1])
             sensor_node = parts[-1]
 
@@ -295,6 +296,16 @@ class VehicleDataset(Dataset):
             except ValueError:
                 # Fallback for recordings too short to split: assign entirely to train
                 train_blocks, test_blocks, val_blocks = block_indices, [], []
+
+            # --- START DIAGNOSTIC PRINT ---
+            if self.split == "train": # Only print once so it doesn't spam your terminal 3 times
+                print(f"DEBUG: [{dataset}] {signal} {instance:<20} (Class {label}) | "
+                      f"Total Blocks: {num_blocks:<3} -> "
+                      f"Train: {len(train_blocks):<3} | Val: {len(val_blocks):<3} | Test: {len(test_blocks):<3}")
+            # --- END DIAGNOSTIC PRINT ---
+
+            # 5. Route the correct blocks to the current dataset instance
+            target_blocks = {"train": train_blocks, "test": test_blocks, "val": val_blocks}.get(self.split, [])
 
             # 5. Route the correct blocks to the current dataset instance
             target_blocks = {"train": train_blocks, "test": test_blocks, "val": val_blocks}.get(self.split, [])

@@ -112,7 +112,7 @@ def run_evaluation():
     if config.NUM_CLASSES == 2:
         auc = roc_auc_score(all_labels, all_probs[:, 1])
     else:
-        auc = roc_auc_score(all_labels, all_probs, multi_class='ovr')
+        auc = roc_auc_score(all_labels, all_probs, multi_class='ovr', labels=list(range(config.NUM_CLASSES)))
 
     # False Alarm Rate (Specific to Detection mode)
     cm = confusion_matrix(all_labels, all_preds)
@@ -133,9 +133,13 @@ def run_evaluation():
     else:
         class_names = [str(i) for i in range(config.NUM_CLASSES)]
 
-    precision = precision_score(all_labels, all_preds, average=None, zero_division=0)
-    recall = recall_score(all_labels, all_preds, average=None, zero_division=0)
-    f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
+    # Define the expected labels based on NUM_CLASSES (e.g., [0, 1, 2])
+    target_labels = list(range(config.NUM_CLASSES))
+
+    # Pass the labels argument to force sklearn to output an array of size NUM_CLASSES
+    precision = precision_score(all_labels, all_preds, labels=target_labels, average=None, zero_division=0)
+    recall = recall_score(all_labels, all_preds, labels=target_labels, average=None, zero_division=0)
+    f1 = f1_score(all_labels, all_preds, labels=target_labels, average=None, zero_division=0)
 
     # 5. Console Output
     print("\n" + "=" * 60)

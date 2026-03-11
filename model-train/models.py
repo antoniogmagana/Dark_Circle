@@ -6,10 +6,7 @@ import time
 import numpy as np
 
 from tsai.models.MINIROCKET_Pytorch import MiniRocketFeatures, get_minirocket_features
-from sklearn.linear_model import RidgeClassifierCV
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import make_pipeline
-from sklearn.feature_selection import VarianceThreshold
+
 
 import config
 

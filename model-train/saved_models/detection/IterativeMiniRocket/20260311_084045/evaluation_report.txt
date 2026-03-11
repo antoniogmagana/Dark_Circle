@@ -1,0 +1,9 @@
+MODEL PERFORMANCE REPORT
+Timestamp: 20260311_084045
+Mode: detection | Model: IterativeMiniRocket
+----------------------------------------
+Accuracy:  0.9738
+MCC:       0.7896
+ROC-AUC:   0.9995
+Latency:   2.9283 ms/sample
+False Alarm Rate: 0.1058%
