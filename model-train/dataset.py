@@ -272,55 +272,32 @@ class VehicleDataset(Dataset):
 
             # 3. Block Splitting Logic with Guard Bands
             num_blocks = math.ceil(times / block)
-            block_indices = list(range(num_blocks))
 
-            # 4. Handle small-dataset exceptions safely
-            try:
-                train_blocks, test_blocks = train_test_split(
-                    block_indices,
-                    test_size=config.SPLIT_TEST + config.SPLIT_VAL,
-                    random_state=42,
-                )
+            for b_idx in range(num_blocks):
+                
+                # assign blocks to key
+                seed_key = f"{dataset}_{instance}_{sensor_node}_{run_id}_block_{b_idx}"
+                rng = random.Random(seed_key)
+                rand_val = rng.random()
 
-                val_ratio = config.SPLIT_VAL / (config.SPLIT_TEST + config.SPLIT_VAL)
-
-                # Ensure we have enough test blocks to split into val/test
-                if len(test_blocks) > 1:
-                    val_blocks, test_blocks = train_test_split(
-                        test_blocks, test_size=1.0 - val_ratio, random_state=42
-                    )
+                if rand_val < config.SPLIT_TRAIN:
+                    assigned_split = "train"
+                elif rand_val < (config.SPLIT_TRAIN + config.SPLIT_VAL):
+                    assigned_split = "val"
                 else:
-                    val_blocks = test_blocks
-                    test_blocks = []
+                    assigned_split = "test"
+
+                # Index the seconds for the block and assign to respective set
+                if assigned_split == self.split:
+                    start_sec = b_idx * block
                     
-            except ValueError:
-                # Fallback for recordings too short to split: assign entirely to train
-                train_blocks, test_blocks, val_blocks = block_indices, [], []
-
-            # --- START DIAGNOSTIC PRINT ---
-            if self.split == "train": # Only print once so it doesn't spam your terminal 3 times
-                print(f"DEBUG: [{dataset}] {signal} {instance:<20} (Class {label}) | "
-                      f"Total Blocks: {num_blocks:<3} -> "
-                      f"Train: {len(train_blocks):<3} | Val: {len(val_blocks):<3} | Test: {len(test_blocks):<3}")
-            # --- END DIAGNOSTIC PRINT ---
-
-            # 5. Route the correct blocks to the current dataset instance
-            target_blocks = {"train": train_blocks, "test": test_blocks, "val": val_blocks}.get(self.split, [])
-
-            # 5. Route the correct blocks to the current dataset instance
-            target_blocks = {"train": train_blocks, "test": test_blocks, "val": val_blocks}.get(self.split, [])
-
-            # 6. Extract the 1-second indices (with guard band enforcement)
-            for b_idx in target_blocks:
-                start_sec = b_idx * block
-                
-                # The guard band is enforced here by capping the end_sec
-                end_sec = min(start_sec + usable, times) 
-                
-                for time_idx in range(start_sec, end_sec):
-                    unique_samples.add(
-                        (dataset, instance, sensor_node, run_id, time_idx, label)
-                    )
+                    # Guard bands applied here to ensure time integrity
+                    end_sec = min(start_sec + usable, times)
+                    
+                    for time_idx in range(start_sec, end_sec):
+                        unique_samples.add(
+                            (dataset, instance, sensor_node, run_id, time_idx, label)
+                        )
 
         self.samples = sorted(list(unique_samples))
 
@@ -338,7 +315,6 @@ class VehicleDataset(Dataset):
             shortfall = len(vehicle_samples) - len(background_samples)
 
             if shortfall > 0:
-                import random
                 extra_backgrounds = random.choices(background_samples, k=shortfall)
                 self.samples.extend(extra_backgrounds)
                 random.shuffle(self.samples)
