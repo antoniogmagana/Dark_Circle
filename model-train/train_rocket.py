@@ -12,10 +12,10 @@ from sklearn.metrics import accuracy_score
 import config
 from models import MODEL_REGISTRY
 from dataset import VehicleDataset
-from train import db_worker_init, compute_stats
+from train import db_worker_init, compute_stats, compute_noise_floor
 from preprocess import preprocess_for_training
 
-def gather_data_into_ram(loader, device, mu, sigma, epsilon, max_samples=None):
+def gather_data_into_ram(loader, device, sigma, epsilon, max_samples=None):
     """Rapidly extracts preprocessed 1D waveforms into RAM."""
     X_all, y_all = [], []
     total_samples = 0
@@ -24,7 +24,7 @@ def gather_data_into_ram(loader, device, mu, sigma, epsilon, max_samples=None):
             if max_samples and total_samples >= max_samples:
                 break
             x = x.to(device)
-            x = preprocess_for_training(x, mu, sigma, epsilon, use_mel=False)
+            x = preprocess_for_training(x, sigma, epsilon, use_mel=False)
             X_all.append(x.cpu().numpy())
             y_all.append(y.numpy())
             total_samples += x.size(0)
@@ -46,43 +46,64 @@ def main():
     print(f"Saving to: {config.RUN_DIR}")
     config.save_config_snapshot()
 
-    # 1. build data loaders
+    # ------------------------------------------------------------
+    # Datasets and loaders
+    # ------------------------------------------------------------
     train_ds = VehicleDataset(split="train")
+    val_ds = VehicleDataset(split="val")
+
+    # Estimate sample statistics from 10% sample using law of large numbers
+    print(f"Total training samples: {len(train_ds)}")
+
+    calib_size = max(1, int(len(train_ds) * 0.10))
+    subset_indices = torch.randperm(len(train_ds))[:calib_size].tolist()
+    calib_ds = torch.utils.data.Subset(train_ds, subset_indices)
+
+    # build temp loader to get samples from training set
+    calib_loader = DataLoader(calib_ds, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=0)
+    print(f"Estimating stats and noise floor from a {calib_size}-sample calibration subset...")
+
+    # Compute global mean/std on the subset
+    sigma, epsilon = compute_stats(calib_loader)
+    
+    # Compute the noise floor (the bottom 5% of amplitudes) on the subset
+    noise_floor = compute_noise_floor(calib_loader)
+
+    # store noise floor to training set (val and test sets do not use)
+    train_ds.noise_floor = noise_floor
+
+    print(f"Computed Std: {sigma}")
+    print(f"Computed Noise Floor (Bottom 5% AC Energy): {noise_floor}")
+
     train_loader = DataLoader(
-        train_ds, 
-        batch_size=config.BATCH_SIZE, 
-        shuffle=True, 
-        num_workers=config.NUM_WORKERS, 
+        train_ds,
+        batch_size=config.BATCH_SIZE,
+        shuffle=True,
+        num_workers=config.NUM_WORKERS,
         worker_init_fn=db_worker_init,
         persistent_workers=True,
         pin_memory=True,
-        prefetch_factor=2
+        prefetch_factor=2,
     )
 
-    val_ds = VehicleDataset(split="val")
     val_loader = DataLoader(
-        val_ds, 
-        batch_size=config.BATCH_SIZE, 
-        shuffle=False, 
-        num_workers=config.NUM_WORKERS, 
+        val_ds,
+        batch_size=config.BATCH_SIZE,
+        shuffle=False,
+        num_workers=config.NUM_WORKERS,
         worker_init_fn=db_worker_init,
         persistent_workers=True,
         pin_memory=True,
-        prefetch_factor=2
+        prefetch_factor=2,
     )
     # ------------------------------------------------------------
     # 2. Calculate Scaling & Save Metadata
     # ------------------------------------------------------------
-    print("Computing normalization statistics from training data...")
-    mu, sigma, epsilon = compute_stats(train_loader)
-    print(f"Computed Mean: {mu}")
-    print(f"Computed Std: {sigma}")
-    
+        
     # Save to the run directory
     torch.save({
         "model_name": config.MODEL_NAME,
         "use_mel": config.USE_MEL,
-        "mu": mu,
         "sigma": sigma,
         "epsilon": epsilon
     }, config.META_SAVE_PATH)
@@ -92,10 +113,10 @@ def main():
 
     # 3. Extract Data into RAM
     print(f"\n--- Extracting Training Data (Capped at {config.MAX_SAMPLES}) ---")
-    X_train, y_train = gather_data_into_ram(train_loader, device, mu, sigma, epsilon, max_samples=config.MAX_SAMPLES)
+    X_train, y_train = gather_data_into_ram(train_loader, device, sigma, epsilon, max_samples=config.MAX_SAMPLES)
 
     print(f"\n--- Extracting Validation Data (Capped at {config.MAX_SAMPLES}) ---")
-    X_val, y_val = gather_data_into_ram(val_loader, device, mu, sigma, epsilon, max_samples=config.MAX_SAMPLES)
+    X_val, y_val = gather_data_into_ram(val_loader, device, sigma, epsilon, max_samples=config.MAX_SAMPLES)
 
     # 4. Train Model
     print(f"\nTraining ClassificationMiniRocket on shape {X_train.shape}...")

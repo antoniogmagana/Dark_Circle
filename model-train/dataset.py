@@ -20,6 +20,7 @@ class VehicleDataset(Dataset):
         self.resamplers = {}
         self.conn = None
         self.cursor = None
+        self.noise_floor = 0.01
 
         self._get_tables()
         self._get_table_max_time()
@@ -43,14 +44,15 @@ class VehicleDataset(Dataset):
             and self.split == "train"
         ):
             if random.random() < getattr(config, "SYNTHESIZE_PROBABILITY", 0.5):
-                # Lazy import prevents circular dependency issues at load time
                 from data_generator import generate_no_vehicle_sample
 
-                # Generate a purely synthetic background tensor [C, T] directly on CPU
-                X = generate_no_vehicle_sample(noise_profile="environmental")
+                # Use estimated noise floor to create synthetic background samples
+                X = generate_no_vehicle_sample(
+                    noise_profile="environmental", 
+                    amplitude=self.noise_floor
+                )
                 y = torch.tensor(label, dtype=torch.long)
                 return X, y
-        # -----------------------------------------------------------------
 
         sensor_tensors = []
 
@@ -240,9 +242,11 @@ class VehicleDataset(Dataset):
     def _get_samples(self):
         unique_samples = set()
 
+        block = config.BLOCK_SIZE
+        usable = config.USABLE_SIZE
+
         for (table, run_id), times in self.table_run_max_time.items():
-            indices = list(range(times))
-            if not indices:
+            if times <= 0:
                 continue
 
             parts = table.split("_")
@@ -265,27 +269,47 @@ class VehicleDataset(Dataset):
             else:
                 raise ValueError(f"Unknown TRAINING_MODE: {config.TRAINING_MODE}")
 
-            # 3. Handle small-dataset exceptions safely
+            # 3. Block Splitting Logic with Guard Bands
+            num_blocks = math.ceil(times / block)
+            block_indices = list(range(num_blocks))
+
+            # 4. Handle small-dataset exceptions safely
             try:
-                train, test = train_test_split(
-                    indices,
+                train_blocks, test_blocks = train_test_split(
+                    block_indices,
                     test_size=config.SPLIT_TEST + config.SPLIT_VAL,
                     random_state=42,
                 )
 
                 val_ratio = config.SPLIT_VAL / (config.SPLIT_TEST + config.SPLIT_VAL)
-                val, test = train_test_split(
-                    test, test_size=1.0 - val_ratio, random_state=42
-                )
+
+                # Ensure we have enough test blocks to split into val/test
+                if len(test_blocks) > 1:
+                    val_blocks, test_blocks = train_test_split(
+                        test_blocks, test_size=1.0 - val_ratio, random_state=42
+                    )
+                else:
+                    val_blocks = test_blocks
+                    test_blocks = []
+                    
             except ValueError:
-                train, test, val = indices, [], []
+                # Fallback for recordings too short to split: assign entirely to train
+                train_blocks, test_blocks, val_blocks = block_indices, [], []
 
-            target_idx = {"train": train, "test": test, "val": val}.get(self.split, [])
+            # 5. Route the correct blocks to the current dataset instance
+            target_blocks = {"train": train_blocks, "test": test_blocks, "val": val_blocks}.get(self.split, [])
 
-            for time in target_idx:
-                unique_samples.add(
-                    (dataset, instance, sensor_node, run_id, time, label)
-                )
+            # 6. Extract the 1-second indices (with guard band enforcement)
+            for b_idx in target_blocks:
+                start_sec = b_idx * block
+                
+                # The guard band is enforced here by capping the end_sec
+                end_sec = min(start_sec + usable, times) 
+                
+                for time_idx in range(start_sec, end_sec):
+                    unique_samples.add(
+                        (dataset, instance, sensor_node, run_id, time_idx, label)
+                    )
 
         self.samples = sorted(list(unique_samples))
 
@@ -297,24 +321,16 @@ class VehicleDataset(Dataset):
             and self.split == "train"
             and getattr(config, "OVERSAMPLE_BACKGROUNDS", False)
         ):
-            background_samples = [
-                s for s in self.samples if s[5] == 0
-            ]  # Label is index 5
+            background_samples = [s for s in self.samples if s[5] == 0] 
             vehicle_samples = [s for s in self.samples if s[5] == 1]
 
-            # Calculate how many background samples we need to match vehicle count
             shortfall = len(vehicle_samples) - len(background_samples)
 
             if shortfall > 0:
                 import random
-
-                # Duplicate background metadata entries to make up the difference
                 extra_backgrounds = random.choices(background_samples, k=shortfall)
                 self.samples.extend(extra_backgrounds)
-
-                # Shuffle the dataset so all the new backgrounds aren't just at the end
                 random.shuffle(self.samples)
-        # -----------------------------------------------------------------
 
     def close_connection(self):
         if getattr(self, "cursor", None) and not self.cursor.closed:

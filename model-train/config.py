@@ -19,6 +19,8 @@ BATCH_SIZE = 128
 EPOCHS = 10
 NUM_WORKERS = 32
 LOG_INTERVAL = 10
+BLOCK_SIZE = 60
+USABLE_SIZE = 45
 
 # Checkpoint + evaluation output directories
 CHECKPOINT_DIR = "./checkpoints"

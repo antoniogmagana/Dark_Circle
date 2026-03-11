@@ -22,14 +22,14 @@ from dataset import VehicleDataset
 from train import db_worker_init
 from preprocess import preprocess_for_training
 
-def gather_test_data(loader, device, mu, sigma, epsilon):
+def gather_test_data(loader, device, sigma, epsilon):
     """Extracts only the test set for final evaluation."""
     X_all, y_all = [], []
     print(f"Extracting test features for {len(loader.dataset)} samples...")
     with torch.inference_mode():
         for i, (x, y) in enumerate(loader):
             x = x.to(device)
-            x = preprocess_for_training(x, mu, sigma, epsilon, use_mel=False)
+            x = preprocess_for_training(x, sigma, epsilon, use_mel=False)
             X_all.append(x.cpu().numpy())
             y_all.append(y.numpy())
     return np.concatenate(X_all, axis=0), np.concatenate(y_all, axis=0)
@@ -42,7 +42,7 @@ def main():
         raise FileNotFoundError(f"Metadata {config.META_SAVE_PATH} not found. Please run train_rocket.py first.")
 
     meta = torch.load(config.META_SAVE_PATH, map_location=device)
-    mu, sigma, epsilon = meta["mu"], meta["sigma"], meta["epsilon"]
+    sigma, epsilon = meta["sigma"], meta["epsilon"]
     print(f"Loaded normalization stats from metadata: {meta}")
 
     # 1. Initialize Test Dataset ONLY (Aligned with eval.py)
@@ -67,7 +67,7 @@ def main():
         raise FileNotFoundError(f"Could not find {save_path}.")
 
     # 3. Extract Test Data into RAM
-    X_test, y_test = gather_test_data(test_loader, device, mu, sigma, epsilon)
+    X_test, y_test = gather_test_data(test_loader, device, sigma, epsilon)
 
     # 4. Evaluate
     print("Running MiniRocket Prediction on Test Set...")

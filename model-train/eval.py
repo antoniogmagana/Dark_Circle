@@ -36,7 +36,7 @@ def run_evaluation():
         )
 
     meta = torch.load(config.META_SAVE_PATH, map_location=device)
-    mu, sigma, epsilon = meta["mu"], meta["sigma"], meta["epsilon"]
+    sigma, epsilon = meta["sigma"], meta["epsilon"]
     print(f"Loaded normalization stats from metadata: {meta}")
 
     # 2. Initialize the Test Dataset
@@ -81,7 +81,7 @@ def run_evaluation():
             x, y = x.to(device), y.to(device)
 
             # Apply the SAME preprocessing used in training
-            x = preprocess_for_training(x, mu, sigma, epsilon, use_mel=config.USE_MEL)
+            x = preprocess_for_training(x, sigma, epsilon, use_mel=config.USE_MEL)
 
             logits = model(x)
             probs = torch.softmax(logits, dim=1)

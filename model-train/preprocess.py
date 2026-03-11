@@ -57,27 +57,23 @@ def extract_mel_spectrogram(batch_tensor):
 # ============================================================
 
 
-def preprocess_for_training(batch_tensor, mu, sigma, epsilon, use_mel=True):
+def preprocess_for_training(batch_tensor, sigma, epsilon, use_mel=True):
     """
-    Full preprocessing pipeline for training and evaluation.
+    Robust preprocessing pipeline for deployment environments.
+    Handles DC drift, preserves physical amplitude, and limits transient spikes.
     """
-    # 1. Standardize using our Train set stats
-    # Ensure mu and sigma are on the same device as batch_tensor
-    mu = mu.to(batch_tensor.device)
-    sigma = sigma.to(batch_tensor.device)
-
-    # Reshape from [Channel] to [1, Channel, 1] for broadcasting
-    mu = mu.view(1, -1, 1)
-    sigma = sigma.view(1, -1, 1)
-
-    # Now this will execute perfectly
-    batch_tensor = (batch_tensor - mu) / (sigma + epsilon)
-    # Normalize each window
+    # 1. LOCAL DC OFFSET REMOVAL
     window_mean = batch_tensor.mean(dim=-1, keepdim=True)
-    window_std = batch_tensor.std(dim=-1, keepdim=True)
-    batch_tensor = (batch_tensor - window_mean) / (window_std + epsilon)
+    batch_tensor = batch_tensor - window_mean
 
-    # 2. Convert to frequency domain
+    # 2. GLOBAL AMPLITUDE SCALING
+    sigma = sigma.to(batch_tensor.device).view(1, -1, 1)
+    batch_tensor = batch_tensor / (sigma + epsilon)
+
+    # 3. TRANSIENT SPIKE CLIPPING
+    batch_tensor = torch.clamp(batch_tensor, min=-10.0, max=10.0)
+
+    # 4. Convert to frequency domain
     if use_mel:
         batch_tensor = extract_mel_spectrogram(batch_tensor)
 

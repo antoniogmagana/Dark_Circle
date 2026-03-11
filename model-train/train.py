@@ -30,7 +30,7 @@ def db_worker_init(worker_id):
 
 
 def train_one_epoch(
-    model, loader, optimizer, criterion, device, mu, sigma, epsilon, use_mel, epoch
+    model, loader, optimizer, criterion, device, sigma, epsilon, use_mel, epoch
 ):
     model.train()
     total_loss = 0
@@ -50,7 +50,7 @@ def train_one_epoch(
         # -----------------------------------------------------------------
 
         # Preprocessing on the GPU
-        x = preprocess_for_training(x, mu, sigma, epsilon, use_mel)        
+        x = preprocess_for_training(x, sigma, epsilon, use_mel)        
 
         optimizer.zero_grad()
         logits = model(x)
@@ -74,7 +74,7 @@ def train_one_epoch(
     return total_loss / total_samples, total_correct / total_samples
 
 
-def evaluate(model, loader, criterion, device, mu, sigma, epsilon, use_mel):
+def evaluate(model, loader, criterion, device, sigma, epsilon, use_mel):
     model.eval()
     total_loss = 0
     total_correct = 0
@@ -85,7 +85,7 @@ def evaluate(model, loader, criterion, device, mu, sigma, epsilon, use_mel):
             x, y = x.to(device), y.to(device)
 
             # Preprocessing on the GPU (Same scaling as training!)
-            x = preprocess_for_training(x, mu, sigma, epsilon, use_mel=use_mel)
+            x = preprocess_for_training(x, sigma, epsilon, use_mel=use_mel)
 
             logits = model(x)
             loss = criterion(logits, y)
@@ -97,27 +97,53 @@ def evaluate(model, loader, criterion, device, mu, sigma, epsilon, use_mel):
     return total_loss / total_samples, total_correct / total_samples
 
 
-def compute_stats(train_loader):
+def compute_stats(calib_loader):
     """
-    Compute mean and standard deviation of training data.
-    Assumes 3-channel data. 
+    Compute the global standard deviation of the AC-coupled training data.
+    Global mean is ignored since DC offset is handled at window level.
     """
-    channels_sum = torch.zeros(config.IN_CHANNELS) 
     channels_sq_sum = torch.zeros(config.IN_CHANNELS)
-    num_batches = len(train_loader)
+    total_samples = 0
     
-    for x, y in train_loader:
-        # leaving stats per channel
-        channels_sum += torch.mean(x, dim=[0, 2])
-        channels_sq_sum += torch.mean(x**2, dim=[0, 2])
-    
-    # Divide by the total number of batches, not the size of the last batch
-    mean = channels_sum / num_batches
-    std = (channels_sq_sum / num_batches - mean**2).sqrt()
+    with torch.no_grad():
+        for x, _ in calib_loader:
+            # 1. AC-couple the batch
+            window_mean = x.mean(dim=-1, keepdim=True)
+            x_ac = x - window_mean
+            
+            # 2. Accumulate the variance of the AC signal
+            channels_sq_sum += torch.sum(x_ac**2, dim=[0, 2])
+            total_samples += x.shape[0] * x.shape[2]
+            
+    # Calculate global standard deviation
+    sigma = torch.sqrt(channels_sq_sum / total_samples)
     epsilon = 1e-8
     
-    return mean, std, epsilon
+    return sigma, epsilon
 
+
+def compute_noise_floor(calib_loader):
+    """
+    Estimates the natural background amplitude (noise floor) per channel
+    by finding the 5th percentile (bottom 5%) of quietest windows in the training subset.
+    """
+    all_stds = []
+    
+    with torch.no_grad():
+        for x, _ in calib_loader:
+            # x shape: [Batch, Channels, Time]
+            # Calculate standard deviation (AC amplitude) across the time dimension
+            window_stds = torch.std(x, dim=2)  # Shape: [Batch, Channels]
+            all_stds.append(window_stds)
+            
+    # Concatenate all batches: [Total_Subset_Samples, Channels]
+    all_stds = torch.cat(all_stds, dim=0)
+    
+    # Find the 5th percentile of amplitude for each channel.
+    # This represents the bottom 5% of the acoustic/seismic energy.
+    noise_floor = torch.quantile(all_stds, q=0.05, dim=0)  # Shape: [Channels]
+    
+    return noise_floor
 
 
 def main():
@@ -134,6 +160,29 @@ def main():
     # ------------------------------------------------------------
     train_ds = VehicleDataset(split="train")
     val_ds = VehicleDataset(split="val")
+
+    # Estimate sample statistics from 10% sample using law of large numbers
+    print(f"Total training samples: {len(train_ds)}")
+
+    calib_size = max(1, int(len(train_ds) * 0.10))
+    subset_indices = torch.randperm(len(train_ds))[:calib_size].tolist()
+    calib_ds = torch.utils.data.Subset(train_ds, subset_indices)
+
+    # build temp loader to get samples from training set
+    calib_loader = DataLoader(calib_ds, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=0)
+    print(f"Estimating stats and noise floor from a {calib_size}-sample calibration subset...")
+
+    # Compute global mean/std on the subset
+    sigma, epsilon = compute_stats(calib_loader)
+    
+    # Compute the noise floor (the bottom 5% of amplitudes) on the subset
+    noise_floor = compute_noise_floor(calib_loader)
+
+    # store noise floor to training set (val and test sets do not use)
+    train_ds.noise_floor = noise_floor
+
+    print(f"Computed Std: {sigma}")
+    print(f"Computed Noise Floor (Bottom 5% AC Energy): {noise_floor}")
 
     train_loader = DataLoader(
         train_ds,
@@ -158,20 +207,19 @@ def main():
     )
 
     # ------------------------------------------------------------
-    # Calculate Scaling & Save Metadata
+    # Save Metadata
     # ------------------------------------------------------------
-    print("Computing normalization statistics from training data...")
-    mu, sigma, epsilon = compute_stats(train_loader)
-    print(f"Computed Mean: {mu}")
+    
     print(f"Computed Std: {sigma}")
+    print(f"Computed Noise Floor: {noise_floor}")
     
     # Save to the run directory
     torch.save({
         "model_name": config.MODEL_NAME,
         "use_mel": config.USE_MEL,
-        "mu": mu,
         "sigma": sigma,
-        "epsilon": epsilon
+        "epsilon": epsilon,
+        "noise_floor": noise_floor 
     }, config.META_SAVE_PATH)
     
     print(f"Saved normalization stats to: {config.META_SAVE_PATH}")
@@ -183,19 +231,19 @@ def main():
         input_channels=config.IN_CHANNELS, num_classes=config.NUM_CLASSES
     ).to(device)
 
-    # 1. Robust Fix: Dummy pass to initialize PyTorch Lazy modules before optimizer binding
+    # 1. Dummy pass to initialize PyTorch Lazy modules before optimizer binding
     print("Performing dummy pass to initialize Lazy modules...")
     model.eval()
     with torch.no_grad():
         for x_dummy, _ in train_loader:
             x_dummy = x_dummy.to(device)
             x_dummy = preprocess_for_training(
-                x_dummy, mu, sigma, epsilon, use_mel=config.USE_MEL
+                x_dummy, sigma, epsilon, use_mel=config.USE_MEL
             )
             model(x_dummy)
             break
 
-    # 2. Robust Fix: Dynamic weight allocation check
+    # 2. Dynamic weight allocation check
     if len(config.CLASS_WEIGHTS) == config.NUM_CLASSES:
         weights = torch.tensor(config.CLASS_WEIGHTS, device=device)
         criterion = nn.CrossEntropyLoss(weight=weights)
@@ -225,7 +273,6 @@ def main():
             optimizer,
             criterion,
             device,
-            mu,
             sigma,
             epsilon,
             config.USE_MEL,
@@ -237,7 +284,7 @@ def main():
             val_loader,
             criterion,
             device,
-            mu, sigma, epsilon,
+            sigma, epsilon,
             config.USE_MEL,
         )
 
