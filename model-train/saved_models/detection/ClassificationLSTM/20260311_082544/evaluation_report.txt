@@ -1,9 +1,0 @@
-MODEL PERFORMANCE REPORT
-Timestamp: 20260311_082544
-Mode: detection | Model: ClassificationLSTM
-----------------------------------------
-Accuracy:  0.9991
-MCC:       0.9901
-ROC-AUC:   1.0000
-Latency:   0.2782 ms/sample
-False Alarm Rate: 0.2646%
