@@ -1,0 +1,8 @@
+MODEL PERFORMANCE REPORT
+Timestamp: 20260311_152901
+Mode: category | Model: WaveformClassificationCNN
+----------------------------------------
+Accuracy:  0.9910
+MCC:       0.9095
+ROC-AUC:   0.9983
+Latency:   0.3411 ms/sample

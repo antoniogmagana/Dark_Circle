@@ -1,0 +1,8 @@
+MODEL PERFORMANCE REPORT
+Timestamp: 20260311_151934
+Mode: category | Model: DetectionCNN
+----------------------------------------
+Accuracy:  0.9542
+MCC:       0.3902
+ROC-AUC:   0.9442
+Latency:   0.3389 ms/sample

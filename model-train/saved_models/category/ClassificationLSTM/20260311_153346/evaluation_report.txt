@@ -1,0 +1,8 @@
+MODEL PERFORMANCE REPORT
+Timestamp: 20260311_153346
+Mode: category | Model: ClassificationLSTM
+----------------------------------------
+Accuracy:  0.9903
+MCC:       0.9020
+ROC-AUC:   0.9523
+Latency:   0.3478 ms/sample
