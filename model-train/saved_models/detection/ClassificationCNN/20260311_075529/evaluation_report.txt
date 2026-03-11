@@ -1,0 +1,9 @@
+MODEL PERFORMANCE REPORT
+Timestamp: 20260311_075529
+Mode: detection | Model: ClassificationCNN
+----------------------------------------
+Accuracy:  0.9611
+MCC:       0.7230
+ROC-AUC:   0.9793
+Latency:   0.2764 ms/sample
+False Alarm Rate: 0.2646%

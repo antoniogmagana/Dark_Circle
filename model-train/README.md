@@ -1,15 +1,15 @@
 ## Configuration Guide (`config.py`)
 
-The `config.py` file acts as the central nervous system for the vehicle detection pipeline. It controls database connections, signal processing parameters, model selection, dynamic label routing, and experiment tracking. Adjusting these parameters will automatically propagate changes across `train.py`, `eval.py`, `train_rocket.py`, `eval_rocket.py`, `dataset.py`, and `preprocess.py`.
+The `config.py` file acts as the central nervous system for the vehicle detection pipeline. It controls database connections, signal processing parameters, model selection, dynamic label routing, and experiment tracking. Adjusting these parameters will automatically propagate changes across `train.py`, `eval.py`, `dataset.py`, and `preprocess.py`.
 
 ### 1. Model Selection & Checkpointing
 The pipeline dynamically routes inputs and automatically generates unique output directories for every training run.
 
-* **`MODEL_NAME`**: The exact class name of the model you want to train (e.g., `"ClassificationCNN"`, `"WaveformClassificationCNN"`, `"ClassificationMiniRocket"`). This must match a key in `MODEL_REGISTRY` inside `models.py`.
+* **`MODEL_NAME`**: The exact class name of the model you want to train (e.g., `"ClassificationCNN"`, `"WaveformClassificationCNN"`, `"IterativeMiniRocket"`). This must match a key in `MODEL_REGISTRY` inside `models.py`.
 * **`RUN_ID`**: A unique timestamp string (e.g., `20260308_2032`) generated at runtime to prevent files from being overwritten.
 * **`RUN_DIR`**: The master directory for a specific experiment, structured as `saved_models/[TRAINING_MODE]/[MODEL_NAME]/[RUN_ID]`.
-* **`MODEL_SAVE_PATH`**: The output filepath for the best-performing model weights (`best_model.pth` or `.joblib`).
-* **`META_SAVE_PATH`**: The output filepath for the `channel_maxs` tensor used for dynamic Z-score normalization (`meta.pt`).
+* **`MODEL_SAVE_PATH`**: The output filepath for the best-performing model weights (`best_model.pth`).
+* **`META_SAVE_PATH`**: The output filepath for the global `sigma`, `epsilon`, and dynamic `noise_floor` tensors used for AC-coupled amplitude scaling and synthetic noise generation (`meta.pt`). 
 * **`IMG_SAVE_PATH`**: The output filepath where the evaluation script saves the confusion matrix plot (`conf_matrix.png`).
 * **`JSON_LOG_PATH`**: The output filepath for the automated hyperparameter snapshot (`hyperparameters.json`).
 * **`METRICS_LOG_PATH`**: The output CSV file tracking epoch-by-epoch loss and accuracy (`metrics.csv`).
@@ -37,6 +37,8 @@ The pipeline supports dynamic label routing. Changing `TRAINING_MODE` automatica
 * **`TRAIN_SENSORS`**: List of sensor modalities to extract (e.g., `["audio", "seismic"]`).
 * **`IN_CHANNELS`**: (Auto-computed) The total number of input channels fed to the model, derived from `TRAIN_SENSORS`.
 * **`SPLIT_TRAIN`** / **`SPLIT_VAL`** / **`SPLIT_TEST`**: Fractions of time-windows allocated to the respective dataloaders (e.g., `0.70`, `0.15`, `0.15`).
+* **`BLOCK_SIZE`**: The duration (in seconds) of the macro-blocks used to split continuous recordings to prevent temporal data leaks (e.g., `60`).
+* **`USABLE_SIZE`**: The active duration (in seconds) extracted from the block, with the remainder acting as a firewall/guard band (e.g., `45`).
 * **`NATIVE_SR`**: Dictionary detailing the hardware sample rates of the sensors for each individual dataset.
 * **`REF_SAMPLE_RATE`**: (Auto-computed) The highest native sample rate across all selected datasets and sensors.
 
@@ -72,17 +74,16 @@ Hyperparameters are now explicitly defined per architecture.
 
 * **Base Settings**: `BASE_LR`, `BASE_DROPOUT`.
 * **CNN/LSTM Architectures**: Unique channel lists, kernel sizes, strides, paddings, and hidden dimensions for `DET_CNN_*`, `CLASS_CNN_*`, `WAVE_CNN_*`, and `LSTM_*`.
-* **MiniRocket**: Uses `ROCKET_NUM_KERNELS`, `ROCKET_ALPHAS`, and `ROCKET_MAX_SAMPLES` to control the scikit-learn Ridge Classifier integration.
+* **MiniRocket**: `IterativeMiniRocket` uses `LEARNING_RATE` and `DROPOUT` for its end-to-end PyTorch trainable linear head, completely replacing the legacy scikit-learn implementation.
 
 ### 8. Routing Logic & Experiment Tracking
 
 To prevent circular imports and manual errors, `config.py` uses mapping dictionaries to dictate pipeline behavior based on the chosen `MODEL_NAME`:
 
-* **`LR_MAP`**: Automatically assigns the correct learning rate for the chosen model. Maps to the global `LEARNING_RATE` variable.
 * **`SHAPE_MAP`**: Automatically detects if the model requires a `"1D"` (waveform) or `"2D"` (spectrogram) input. This controls the `USE_MEL` boolean passed to the preprocessing engine.
 * **`save_config_snapshot()`**: An experiment tracking utility that scans the configuration namespace and dumps all active hyperparameters into a JSON file inside the `RUN_DIR`.
 
-***
+---
 
 ## Adding New Datasets (PostgreSQL Schema Guide)
 
