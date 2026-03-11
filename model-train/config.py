@@ -198,7 +198,6 @@ SPLIT_TEST = 0.15
 
 # Time-scale knobs
 SAMPLE_SECONDS = 1
-CHUNK_SECONDS = 15
 
 # Mel spectrogram parameters
 MEL_BINS = 64
@@ -278,11 +277,10 @@ if MODEL_NAME == "ClassificationLSTM":
     DROPOUT = 0.3
 
 # --- miniROCKET ---
-if MODEL_NAME == "ClassificationMiniRocket":
-    KERNELS = 10000
-    ALPHAS = np.logspace(-3, 3, 10)
-    MAX_SAMPLES = 50000  
-    CV_FOLDS = 5  
+if MODEL_NAME == "IterativeMiniRocket":
+    LEARNING_RATE = 1e-3
+    DROPOUT = 0.3
+    # The tsai extractor defaults to 10,000 kernels automatically 
 
 # =====================================================================
 # 9. ROUTING LOGIC (Replacing Circular Dependencies)
@@ -295,7 +293,7 @@ SHAPE_MAP = {
     "ClassificationCNN": "2D",
     "WaveformClassificationCNN": "1D",
     "ClassificationLSTM": "1D",
-    "ClassificationMiniRocket": "1D",
+    "IterativeMiniRocket": "1D",
 }
 USE_MEL = SHAPE_MAP.get(MODEL_NAME, "1D") == "2D"
 
@@ -340,9 +338,12 @@ def save_config_snapshot():
 
 # copy this into terminal to loop over all models in one go!
 """
+#!/bin/bash
+set -e 
+
 for mode in detection category instance; do
-    # --- Deep Learning Models ---
-    for model in DetectionCNN ClassificationCNN WaveformClassificationCNN ClassificationLSTM; do
+    # --- Unified Model Training Pipeline ---
+    for model in DetectionCNN ClassificationCNN WaveformClassificationCNN ClassificationLSTM IterativeMiniRocket; do
         CURRENT_RUN_ID=$(date +%Y%m%d_%H%M%S)
         
         echo "============================================================"
@@ -351,27 +352,19 @@ for mode in detection category instance; do
         
         RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode MODEL_NAME=$model poetry run python train.py
         
+        # Check if training succeeded before evaluating
         if [ $? -eq 0 ]; then
             RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode MODEL_NAME=$model poetry run python eval.py
         else
             echo "Training failed for $model in $mode mode. Skipping eval."
         fi
+        
+        # Force a 1-second delay to guarantee unique RUN_IDs
+        sleep 1 
     done
-    
-    # --- MiniRocket Model ---
-    ROCKET_RUN_ID=$(date +%Y%m%d_%H%M%S)
-    echo "============================================================"
-    echo "STARTING MINIROCKET RUN -> MODE: $mode | RUN_ID: $ROCKET_RUN_ID"
-    echo "============================================================"
-    
-    # FIX: Added MODEL_NAME=ClassificationMiniRocket here
-    RUN_ID=$ROCKET_RUN_ID TRAINING_MODE=$mode MODEL_NAME=ClassificationMiniRocket poetry run python train_rocket.py
-    
-    if [ $? -eq 0 ]; then
-        # FIX: Added MODEL_NAME=ClassificationMiniRocket here as well
-        RUN_ID=$ROCKET_RUN_ID TRAINING_MODE=$mode MODEL_NAME=ClassificationMiniRocket poetry run python eval_rocket.py
-    else
-        echo "Training failed for MiniRocket in $mode mode. Skipping eval."
-    fi
 done
+
+echo "============================================================"
+echo "ALL PIPELINES COMPLETE."
+echo "============================================================"
 """

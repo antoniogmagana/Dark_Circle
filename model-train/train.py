@@ -178,7 +178,8 @@ def main():
         shuffle=True, 
         num_workers=config.NUM_WORKERS,
         worker_init_fn=db_worker_init,
-    )    print(f"Estimating stats and noise floor from a {calib_size}-sample calibration subset...")
+    )    
+    print(f"Estimating stats and noise floor from a {calib_size}-sample calibration subset...")
 
     # Compute global mean/std on the subset
     sigma, epsilon = compute_stats(calib_loader)
@@ -242,12 +243,17 @@ def main():
     # 1. Dummy pass to initialize PyTorch Lazy modules before optimizer binding
     print("Performing dummy pass to initialize Lazy modules...")
     model.eval()
+
     with torch.no_grad():
         for x_dummy, _ in train_loader:
             x_dummy = x_dummy.to(device)
             x_dummy = preprocess_for_training(
                 x_dummy, sigma, epsilon, use_mel=config.USE_MEL
             )
+
+            if hasattr(model, 'fit_extractor'):
+                model.fit_extractor(x_dummy)
+
             model(x_dummy)
             break
 

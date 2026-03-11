@@ -199,100 +199,54 @@ class ClassificationLSTM(nn.Module):
 # 3. NON-PYTORCH MODELS
 # =====================================================================
 
-class MRFWrapper:
-    """Wrapper to make tsai's PyTorch MiniRocket look identical to sktime for eval_rocket.py"""
-    
-    # 1. Update the signature to accept the fitted mrf and device
-    def __init__(self, mrf, device):
-        self.device = device
-        self.mrf = mrf
-        
-        # We completely removed the redundant Ridge pipeline that was crashing!
-        
-    def transform(self, X):
-        if isinstance(X, np.ndarray):
-            X = torch.tensor(X, dtype=torch.float32, device=self.device)
-        else:
-            X = X.to(self.device)
-            
-        # Ensure the trained MRF module is on the correct device
-        self.mrf = self.mrf.to(self.device)
-        
-        X_feat = get_minirocket_features(X, self.mrf, chunksize=10, to_np=True)
-        
-        # FIX: Squeeze out the trailing dimension from tsai's output
-        if X_feat.ndim == 3:
-            X_feat = X_feat.squeeze(-1)
-            
-        return X_feat
-
-class ClassificationMiniRocket:
-    """GPU-Accelerated MiniRocket + RidgeClassifier"""
-    def __init__(self, in_channels=None, num_classes=None, use_mel=False):
-        self.c_in = config.IN_CHANNELS
+# Iterative adaptation of Mini Rocket wrapped in pytorch model architecture courtesy of tsai
+class IterativeMiniRocket(nn.Module):
+    """
+    End-to-End PyTorch MiniRocket.
+    Extracts features batch-by-batch on the GPU and trains a linear head iteratively.
+    Expects 1D Waveform: [B, C, T]
+    """
+    def __init__(self, in_channels, num_classes, use_mel=False):
+        super().__init__()
+        self.c_in = in_channels
         self.seq_len = int(config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS)
-        self.device = config.DEVICE  
-        self.mrf = MiniRocketFeatures(c_in=self.c_in, seq_len=self.seq_len).to(self.device)
-        # Define a logarithmic search space for the regularization strength
-        alpha_space = np.logspace(-3, 3, 7)
-        self.classifier = make_pipeline(
-            VarianceThreshold(threshold=1e-5),
-            RidgeClassifierCV(alphas=alpha_space, class_weight="balanced")
-        )
+        
+        # 1. The feature extractor (will be frozen)
+        self.mrf = MiniRocketFeatures(c_in=self.c_in, seq_len=self.seq_len)
+        
+        # 2. The Trainable Classification Head
+        self.fc = nn.LazyLinear(num_classes)
+        self.dropout = nn.Dropout(config.DROPOUT if hasattr(config, 'DROPOUT') else 0.3)
+        
         self.is_fitted = False
 
-    def fit(self, X_train, y_train):
-        print("\n  -> [Diagnostics] Starting tsai GPU Feature Transformation...", flush=True)
-        t0 = time.time()
-        
-        if isinstance(X_train, np.ndarray):
-            X_train = torch.tensor(X_train, dtype=torch.float32, device=self.device)
-        else:
-            X_train = X_train.to(self.device)
-            
-        print("  -> [Diagnostics] Fitting MRF biases...", flush=True)
-        self.mrf.fit(X_train[:10])
-        
-        print("  -> [Diagnostics] Extracting features in safe chunks...", flush=True)
-        # Assumes get_minirocket_features is imported from tsai
-        X_feat = get_minirocket_features(X_train, self.mrf, chunksize=10, to_np=True)
-        
-        # FIX: Squeeze out the trailing dimension from tsai's output
-        if X_feat.ndim == 3:
-            X_feat = X_feat.squeeze(-1)
-        
-        t1 = time.time()
-        print(f"  -> [Diagnostics] GPU Transformation complete in {t1 - t0:.2f} seconds.", flush=True)
-        print(f"  -> [Diagnostics] New Feature Matrix Shape: {X_feat.shape}", flush=True)
-        print("  -> [Diagnostics] Starting scikit-learn RidgeCV Fitting...", flush=True)
-        
-        # This single call now fits the VarianceThreshold AND the RidgeCV
-        self.classifier.fit(X_feat, y_train)
-        
-        # Extract the optimal alpha chosen by RidgeCV for your logs
-        best_alpha = self.classifier.named_steps['ridgeclassifiercv'].alpha_
-        
-        t2 = time.time()
-        print(f"  -> [Diagnostics] RidgeCV fit complete in {t2 - t1:.2f} seconds.", flush=True)
-        print(f"  -> [Diagnostics] Optimal alpha selected: {best_alpha}", flush=True)
-        
-        self.is_fitted = True
-        
-        # Free up GPU memory
-        self.mrf = self.mrf.cpu()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-    def predict(self, X_test):
+    def fit_extractor(self, dummy_batch):
+        """Calculates random dilations and biases from a small data sample."""
         if not self.is_fitted:
-            raise RuntimeError("Model must be fitted before prediction.")
-        
-        X_feat = self.transformer.transform(X_test)
-        return self.classifier.predict(X_feat)
-        
-    @property
-    def transformer(self):
-        return MRFWrapper(self.mrf, self.device)
+            print("  -> [MiniRocket] Initializing random convolution kernels...", flush=True)
+            self.mrf.fit(dummy_batch)
+            self.is_fitted = True
+            
+            # Freeze the MRF convolutions so we ONLY train the Linear head
+            for param in self.mrf.parameters():
+                param.requires_grad = False
+
+    def forward(self, x):
+        # 1. Extract MiniRocket features (no gradients needed here)
+        with torch.no_grad():
+            features = self.mrf(x)
+            # tsai MRF outputs [B, Features, 1], we need to flatten the trailing dimension
+            if features.ndim == 3:
+                features = features.squeeze(-1)
+                
+        # 2. Pass through the trainable head
+        x = self.dropout(features)
+        return self.fc(x)
+
+    def get_optimizer(self):
+        # Crucial: We only pass the linear layer parameters to the optimizer!
+        self.optimizer = optim.Adam
+        return self.optimizer(self.fc.parameters(), lr=1e-3, weight_decay=1e-3)
 
 
 # =====================================================================
@@ -304,7 +258,7 @@ MODEL_REGISTRY = {
     "ClassificationCNN": ClassificationCNN,
     "WaveformClassificationCNN": WaveformClassificationCNN,
     "ClassificationLSTM": ClassificationLSTM,
-    "ClassificationMiniRocket": ClassificationMiniRocket,
+    "IterativeMiniRocket": IterativeMiniRocket,
 }
 
 
@@ -315,9 +269,6 @@ def build_model(input_channels, num_classes):
         raise ValueError(f"Unknown model: {model_name}")
 
     ModelClass = MODEL_REGISTRY[model_name]
-
-    if model_name == "ClassificationMiniRocket":
-        return ModelClass()
 
     return ModelClass(
         in_channels=input_channels, num_classes=num_classes, use_mel=config.USE_MEL

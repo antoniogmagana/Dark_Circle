@@ -60,7 +60,15 @@ def main():
     calib_ds = torch.utils.data.Subset(train_ds, subset_indices)
 
     # build temp loader to get samples from training set
-    calib_loader = DataLoader(calib_ds, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=0)
+    # build temp loader to get samples from training set
+    calib_loader = DataLoader(
+        calib_ds, 
+        batch_size=config.BATCH_SIZE, 
+        shuffle=True, 
+        num_workers=config.NUM_WORKERS,
+        worker_init_fn=db_worker_init,
+    )
+    
     print(f"Estimating stats and noise floor from a {calib_size}-sample calibration subset...")
 
     # Compute global mean/std on the subset
