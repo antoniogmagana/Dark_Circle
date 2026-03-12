@@ -7,19 +7,20 @@ import numpy as np
 
 from tsai.models.MINIROCKET_Pytorch import MiniRocketFeatures, get_minirocket_features
 
+# NOTICE: global 'config' is no longer imported
 
-import config
 
 # =====================================================================
 # 1. 2D MODELS (Mel-Spectrogram Input)
 # =====================================================================
 
-
 class DetectionCNN(nn.Module):
     """Expects 2D Spectrogram: [B, C, MEL_BINS, FRAMES]"""
 
-    def __init__(self, in_channels, num_classes, use_mel=True):
+    def __init__(self, in_channels, num_classes, config, use_mel=True):
         super().__init__()
+        self.config = config
+        
         self.conv1 = nn.Conv2d(
             in_channels,
             config.CHANNELS[0],
@@ -47,15 +48,16 @@ class DetectionCNN(nn.Module):
         return self.fc2(x)
     
     def get_optimizer(self):
-        self.optimizer = optim.Adam
-        return self.optimizer(self.parameters(), lr=config.LEARNING_RATE)
+        return optim.Adam(self.parameters(), lr=self.config.LEARNING_RATE)
 
 
 class ClassificationCNN(nn.Module):
     """Expects 2D Spectrogram: [B, C, MEL_BINS, FRAMES]"""
 
-    def __init__(self, in_channels, num_classes, use_mel=True):
+    def __init__(self, in_channels, num_classes, config, use_mel=True):
         super().__init__()
+        self.config = config
+        
         self.conv1 = nn.Conv2d(
             in_channels,
             config.CHANNELS[0],
@@ -97,19 +99,20 @@ class ClassificationCNN(nn.Module):
         return self.fc2(x)
 
     def get_optimizer(self):
-        self.optimizer = optim.Adam
-        return self.optimizer(self.parameters(), lr=config.LEARNING_RATE)
+        return optim.Adam(self.parameters(), lr=self.config.LEARNING_RATE)
+
 
 # =====================================================================
 # 2. 1D MODELS (Raw Waveform Input)
 # =====================================================================
 
-
 class WaveformClassificationCNN(nn.Module):
     """Expects 1D Waveform: [B, C, T]"""
 
-    def __init__(self, in_channels, num_classes, use_mel=False):
+    def __init__(self, in_channels, num_classes, config, use_mel=False):
         super().__init__()
+        self.config = config
+        
         self.conv1 = nn.Conv1d(
             in_channels,
             config.CHANNELS[0],
@@ -143,15 +146,16 @@ class WaveformClassificationCNN(nn.Module):
         return self.fc2(x)
 
     def get_optimizer(self):
-        self.optimizer = optim.Adam
-        return self.optimizer(self.parameters(), lr=config.LEARNING_RATE)
+        return optim.Adam(self.parameters(), lr=self.config.LEARNING_RATE)
+
 
 class ClassificationLSTM(nn.Module):
     """Expects 1D Waveform: [B, C, T]"""
 
-    def __init__(self, in_channels, num_classes, use_mel=False):
+    def __init__(self, in_channels, num_classes, config, use_mel=False):
         super().__init__()
-        # self.optimizer = self._get_optimizer()
+        self.config = config
+        
         self.cnn_frontend = nn.Sequential(
             nn.Conv1d(
                 in_channels,
@@ -189,22 +193,22 @@ class ClassificationLSTM(nn.Module):
         return self.fc2(x)
 
     def get_optimizer(self):
-        self.optimizer = optim.Adam
-        return self.optimizer(self.parameters(), lr=config.LEARNING_RATE)
+        return optim.Adam(self.parameters(), lr=self.config.LEARNING_RATE)
+
 
 # =====================================================================
 # 3. NON-PYTORCH MODELS
 # =====================================================================
 
-# Iterative adaptation of Mini Rocket wrapped in pytorch model architecture courtesy of tsai
 class IterativeMiniRocket(nn.Module):
     """
     End-to-End PyTorch MiniRocket.
     Extracts features batch-by-batch on the GPU and trains a linear head iteratively.
     Expects 1D Waveform: [B, C, T]
     """
-    def __init__(self, in_channels, num_classes, use_mel=False):
+    def __init__(self, in_channels, num_classes, config, use_mel=False):
         super().__init__()
+        self.config = config
         self.c_in = in_channels
         self.seq_len = int(config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS)
         
@@ -213,7 +217,7 @@ class IterativeMiniRocket(nn.Module):
         
         # 2. The Trainable Classification Head
         self.fc = nn.LazyLinear(num_classes)
-        self.dropout = nn.Dropout(config.DROPOUT if hasattr(config, 'DROPOUT') else 0.3)
+        self.dropout = nn.Dropout(getattr(config, 'DROPOUT', 0.3))
         
         self.is_fitted = False
 
@@ -242,8 +246,7 @@ class IterativeMiniRocket(nn.Module):
 
     def get_optimizer(self):
         # Crucial: We only pass the linear layer parameters to the optimizer!
-        self.optimizer = optim.Adam
-        return self.optimizer(self.fc.parameters(), lr=1e-3, weight_decay=1e-3)
+        return optim.Adam(self.fc.parameters(), lr=1e-3, weight_decay=1e-3)
 
 
 # =====================================================================
@@ -258,8 +261,7 @@ MODEL_REGISTRY = {
     "IterativeMiniRocket": IterativeMiniRocket,
 }
 
-
-def build_model(input_channels, num_classes):
+def build_model(input_channels, num_classes, config):
     model_name = config.MODEL_NAME
 
     if model_name not in MODEL_REGISTRY:
@@ -268,5 +270,8 @@ def build_model(input_channels, num_classes):
     ModelClass = MODEL_REGISTRY[model_name]
 
     return ModelClass(
-        in_channels=input_channels, num_classes=num_classes, use_mel=config.USE_MEL
+        in_channels=input_channels, 
+        num_classes=num_classes, 
+        config=config,
+        use_mel=getattr(config, 'USE_MEL', True)
     )

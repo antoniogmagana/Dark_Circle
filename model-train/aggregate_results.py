@@ -25,7 +25,8 @@ def parse_report_file(filepath):
             
         for line in lines:
             line = line.strip()
-            if line.startswith("Timestamp:"):
+            # UPDATED: Matches the new output format from the refactored eval.py
+            if line.startswith("Run Directory:"):
                 data["Timestamp"] = line.split(":", 1)[1].strip()
             elif line.startswith("Mode:"):
                 # Matches "Mode: detection | Model: DetectionCNN"
@@ -87,7 +88,8 @@ def main():
     df = df[columns]
     
     # Save to a master CSV in the root directory
-    output_csv = f"./saved_models/master_evaluation_results_{datetime.now()}.csv"
+    output_csv = f"./saved_models/master_evaluation_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    os.makedirs("./saved_models", exist_ok=True) # Failsafe just in case it's the first run
     df.to_csv(output_csv, index=False)
     
     # --- CONSOLE OUTPUT ---

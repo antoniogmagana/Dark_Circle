@@ -5,35 +5,23 @@ import torch.nn as nn
 import torch.optim as optim
 import atexit
 import csv
+from functools import partial
 
 from data_generator import augment_batch
-from dataset import VehicleDataset
+from dataset import VehicleDataset, db_worker_init
 from models import build_model
 from preprocess import preprocess_for_training
 from db_utils import db_connect, db_close
+
+# train.py is the ONLY file that should import the global config directly
 import config
 
 
-def db_worker_init(worker_id):
-    """
-    This function runs once per worker when it is spawned.
-    It gives each worker its own dedicated PostgreSQL connection.
-    """
-    torch.set_num_threads(1)
-    worker_info = get_worker_info()
-    dataset = worker_info.dataset  # Get this worker's copy of the dataset
 
-    if isinstance(dataset, torch.utils.data.Subset):
-        dataset = dataset.dataset
-
-    # Open the connection and attach it directly to the dataset object
-    dataset.conn, dataset.cursor = db_connect()
-
-    atexit.register(dataset.close_connection)
 
 
 def train_one_epoch(
-    model, loader, optimizer, criterion, device, sigma, epsilon, use_mel, epoch
+    model, loader, optimizer, criterion, device, sigma, epsilon, config, epoch
 ):
     model.train()
     total_loss = 0
@@ -52,8 +40,8 @@ def train_one_epoch(
             x = augment_batch(x, snr_range=current_snr_range)
         # -----------------------------------------------------------------
 
-        # Preprocessing on the GPU
-        x = preprocess_for_training(x, sigma, epsilon, use_mel)        
+        # Preprocessing on the GPU (Injecting config)
+        x = preprocess_for_training(x, sigma, epsilon, config=config)        
 
         optimizer.zero_grad()
         logits = model(x)
@@ -77,7 +65,7 @@ def train_one_epoch(
     return total_loss / total_samples, total_correct / total_samples
 
 
-def evaluate(model, loader, criterion, device, sigma, epsilon, use_mel):
+def evaluate(model, loader, criterion, device, sigma, epsilon, config):
     model.eval()
     total_loss = 0
     total_correct = 0
@@ -87,8 +75,8 @@ def evaluate(model, loader, criterion, device, sigma, epsilon, use_mel):
         for x, y in loader:
             x, y = x.to(device), y.to(device)
 
-            # Preprocessing on the GPU (Same scaling as training!)
-            x = preprocess_for_training(x, sigma, epsilon, use_mel=use_mel)
+            # Preprocessing on the GPU (Injecting config)
+            x = preprocess_for_training(x, sigma, epsilon, config=config)
 
             logits = model(x)
             loss = criterion(logits, y)
@@ -100,7 +88,7 @@ def evaluate(model, loader, criterion, device, sigma, epsilon, use_mel):
     return total_loss / total_samples, total_correct / total_samples
 
 
-def compute_stats(calib_loader):
+def compute_stats(calib_loader, config):
     """
     Compute the global standard deviation of the AC-coupled training data.
     Global mean is ignored since DC offset is handled at window level.
@@ -153,52 +141,48 @@ def main():
     device = config.DEVICE
     print("Using device:", device)
 
-    # --- NEW: Create Directory and Save Config Snapshot ---
+    # --- Create Directory and Save Config Snapshot ---
     print(f"Starting Run ID: {config.RUN_ID}")
     print(f"Saving to: {config.RUN_DIR}")
     config.save_config_snapshot()
 
     # ------------------------------------------------------------
-    # Datasets and loaders
+    # Datasets and loaders (Injecting config)
     # ------------------------------------------------------------
-    train_ds = VehicleDataset(split="train")
-    val_ds = VehicleDataset(split="val")
+    train_ds = VehicleDataset(split="train", config=config)
+    val_ds = VehicleDataset(split="val", config=config)
 
-    # Estimate sample statistics from 10% sample using law of large numbers
+    # Create partial function for worker init
+    custom_worker_init = partial(db_worker_init, config=config)
+
     print(f"Total training samples: {len(train_ds)}")
 
     calib_size = max(1, int(len(train_ds) * 0.10))
     subset_indices = torch.randperm(len(train_ds))[:calib_size].tolist()
     calib_ds = torch.utils.data.Subset(train_ds, subset_indices)
 
-    # build temp loader to get samples from training set
     calib_loader = DataLoader(
         calib_ds, 
         batch_size=config.BATCH_SIZE, 
         shuffle=True, 
         num_workers=config.NUM_WORKERS,
-        worker_init_fn=db_worker_init,
+        worker_init_fn=custom_worker_init,
     )    
     print(f"Estimating stats and noise floor from a {calib_size}-sample calibration subset...")
 
-    # Compute global mean/std on the subset
-    sigma, epsilon = compute_stats(calib_loader)
-    
-    # Compute the noise floor (the bottom 5% of amplitudes) on the subset
+    # Pass config into compute_stats for IN_CHANNELS
+    sigma, epsilon = compute_stats(calib_loader, config=config)
     noise_floor = compute_noise_floor(calib_loader)
 
-    # store noise floor to training set (val and test sets do not use)
+    # store noise floor to training set
     train_ds.noise_floor = noise_floor
-
-    print(f"Computed Std: {sigma}")
-    print(f"Computed Noise Floor (Bottom 5% AC Energy): {noise_floor}")
 
     train_loader = DataLoader(
         train_ds,
         batch_size=config.BATCH_SIZE,
         shuffle=True,
         num_workers=config.NUM_WORKERS,
-        worker_init_fn=db_worker_init,
+        worker_init_fn=custom_worker_init,
         persistent_workers=True,
         pin_memory=True,
         prefetch_factor=2,
@@ -209,7 +193,7 @@ def main():
         batch_size=config.BATCH_SIZE,
         shuffle=False,
         num_workers=config.NUM_WORKERS,
-        worker_init_fn=db_worker_init,
+        worker_init_fn=custom_worker_init,
         persistent_workers=True,
         pin_memory=True,
         prefetch_factor=2,
@@ -218,11 +202,9 @@ def main():
     # ------------------------------------------------------------
     # Save Metadata
     # ------------------------------------------------------------
-    
     print(f"Computed Std: {sigma}")
     print(f"Computed Noise Floor: {noise_floor}")
     
-    # Save to the run directory
     torch.save({
         "model_name": config.MODEL_NAME,
         "use_mel": config.USE_MEL,
@@ -237,10 +219,9 @@ def main():
     # Model, optimizer, loss
     # ------------------------------------------------------------
     model = build_model(
-        input_channels=config.IN_CHANNELS, num_classes=config.NUM_CLASSES
+        input_channels=config.IN_CHANNELS, num_classes=config.NUM_CLASSES, config=config
     ).to(device)
 
-    # 1. Dummy pass to initialize PyTorch Lazy modules before optimizer binding
     print("Performing dummy pass to initialize Lazy modules...")
     model.eval()
 
@@ -248,7 +229,7 @@ def main():
         for x_dummy, _ in train_loader:
             x_dummy = x_dummy.to(device)
             x_dummy = preprocess_for_training(
-                x_dummy, sigma, epsilon, use_mel=config.USE_MEL
+                x_dummy, sigma, epsilon, config=config
             )
 
             if hasattr(model, 'fit_extractor'):
@@ -257,7 +238,6 @@ def main():
             model(x_dummy)
             break
 
-    # 2. Dynamic weight allocation check
     if len(config.CLASS_WEIGHTS) == config.NUM_CLASSES:
         weights = torch.tensor(config.CLASS_WEIGHTS, device=device)
         criterion = nn.CrossEntropyLoss(weight=weights)
@@ -267,13 +247,11 @@ def main():
         )
         criterion = nn.CrossEntropyLoss()
 
-    # Optimizer must be defined AFTER the dummy pass
     optimizer = model.get_optimizer()
 
-# ------------------------------------------------------------
+    # ------------------------------------------------------------
     # Training loop
     # ------------------------------------------------------------
-    # 1. Initialize the CSV file with headers
     with open(config.METRICS_LOG_PATH, mode='w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(["Epoch", "Train_Loss", "Train_Acc", "Val_Loss", "Val_Acc"])
@@ -289,7 +267,7 @@ def main():
             device,
             sigma,
             epsilon,
-            config.USE_MEL,
+            config,
             epoch,
         )
 
@@ -298,8 +276,9 @@ def main():
             val_loader,
             criterion,
             device,
-            sigma, epsilon,
-            config.USE_MEL,
+            sigma, 
+            epsilon,
+            config,
         )
 
         print(
@@ -309,7 +288,6 @@ def main():
             flush=True,
         )
 
-        # 2. Append the current epoch's metrics to the CSV
         with open(config.METRICS_LOG_PATH, mode='a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -320,9 +298,6 @@ def main():
                 f"{val_acc:.4f}"
             ])
 
-    # ------------------------------------------------------------
-    # Save final model
-    # ------------------------------------------------------------
     torch.save(
         model.state_dict(),
         config.MODEL_SAVE_PATH,

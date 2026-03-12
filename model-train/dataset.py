@@ -4,15 +4,36 @@ import torch
 import torchaudio.transforms
 from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
+import atexit
+from torch.utils.data import get_worker_info
 
 # Centralized imports
 from db_utils import db_connect, db_close, fetch_sensor_batch, get_time_bounds
-import config
+
+
+def db_worker_init(worker_id, config=None):
+    """
+    This function runs once per worker when it is spawned.
+    It gives each worker its own dedicated PostgreSQL connection.
+    """
+    torch.set_num_threads(1)
+    worker_info = get_worker_info()
+    dataset = worker_info.dataset  # Get this worker's copy of the dataset
+
+    if isinstance(dataset, torch.utils.data.Subset):
+        dataset = dataset.dataset
+
+    # Open the connection and attach it directly to the dataset object
+    dataset.conn, dataset.cursor = db_connect(config.DB_CONN_PARAMS)
+
+    atexit.register(dataset.close_connection)
+
 
 
 class VehicleDataset(Dataset):
-    def __init__(self, split):
+    def __init__(self, split, config):
         self.split = split
+        self.config = config  # Store the injected config
         self.tables = []
         self.table_max_time = {}
         self.split_idx = {}
@@ -39,15 +60,16 @@ class VehicleDataset(Dataset):
         # -----------------------------------------------------------------
         # If toggled ON, and the sample is a background class, flip a coin
         if (
-            getattr(config, "SYNTHESIZE_BACKGROUND", False)
+            getattr(self.config, "SYNTHESIZE_BACKGROUND", False)
             and label == 0
             and self.split == "train"
         ):
-            if random.random() < getattr(config, "SYNTHESIZE_PROBABILITY", 0.5):
+            if random.random() < getattr(self.config, "SYNTHESIZE_PROBABILITY", 0.5):
                 from data_generator import generate_no_vehicle_sample
 
                 # Use estimated noise floor to create synthetic background samples
                 X = generate_no_vehicle_sample(
+                    config=self.config,
                     noise_profile="environmental", 
                     amplitude=self.noise_floor
                 )
@@ -57,9 +79,9 @@ class VehicleDataset(Dataset):
         sensor_tensors = []
 
         # Lock to the Global Reference Rate!
-        max_time_steps = config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS
+        max_time_steps = self.config.REF_SAMPLE_RATE * self.config.SAMPLE_SECONDS
 
-        for signal in config.TRAIN_SENSORS:
+        for signal in self.config.TRAIN_SENSORS:
             exact_table = f"{dataset}_{signal}_{instance}_{sensor_node}"
 
             # Pass dataset and signal natively down to avoid dangerous string parsing
@@ -100,12 +122,12 @@ class VehicleDataset(Dataset):
     def _fetch_sensor_data(
         self, cursor, table, dataset, signal, run_id, time, max_time_steps
     ):
-        sample_rate = config.NATIVE_SR[dataset][signal]
-        expected_window = int(sample_rate * config.SAMPLE_SECONDS)
+        sample_rate = self.config.NATIVE_SR[dataset][signal]
+        expected_window = int(sample_rate * self.config.SAMPLE_SECONDS)
 
         # Calculate timestamp relative to the synchronized group start time
         min_t = self.table_run_min_time[(table, run_id)]
-        start_time_seconds = min_t + float(time * config.SAMPLE_SECONDS)
+        start_time_seconds = min_t + float(time * self.config.SAMPLE_SECONDS)
 
         # Use the Centralized DB utility!
         raw_data = fetch_sensor_batch(
@@ -132,7 +154,7 @@ class VehicleDataset(Dataset):
                 pad_amount = expected_window - sensor_data.shape[1]
                 sensor_data = torch.nn.functional.pad(sensor_data, (0, pad_amount))
 
-        target_freq = int(max_time_steps / config.SAMPLE_SECONDS)
+        target_freq = int(max_time_steps / self.config.SAMPLE_SECONDS)
         if sample_rate < target_freq:
             sensor_data = self._upsample_signal(sensor_data, sample_rate, target_freq)
 
@@ -155,8 +177,8 @@ class VehicleDataset(Dataset):
         return self.resamplers[resample_key](sensor_data)
 
     def _get_tables(self):
-        conn, cursor = db_connect()
-        for dataset in config.TRAIN_DATASETS:
+        conn, cursor = db_connect(self.config.DB_CONN_PARAMS)
+        for dataset in self.config.TRAIN_DATASETS:
             cursor.execute(
                 """
                 SELECT tablename
@@ -170,7 +192,7 @@ class VehicleDataset(Dataset):
         db_close(conn, cursor)
 
     def _get_table_max_time(self):
-        temp_conn, temp_cursor = db_connect()
+        temp_conn, temp_cursor = db_connect(self.config.DB_CONN_PARAMS)
 
         self.table_run_max_time = {}
         self.table_run_min_time = {}
@@ -214,7 +236,7 @@ class VehicleDataset(Dataset):
         for group_key, table_runs in groups.items():
             present_signals = [tr[0].split("_")[1] for tr in table_runs]
             has_all_signals = all(
-                signal in present_signals for signal in config.TRAIN_SENSORS
+                signal in present_signals for signal in self.config.TRAIN_SENSORS
             )
 
             if not has_all_signals:
@@ -230,7 +252,7 @@ class VehicleDataset(Dataset):
                     for tr in table_runs:
                         keys_to_delete.append(tr)
                 else:
-                    valid_windows = math.floor(valid_duration / config.SAMPLE_SECONDS)
+                    valid_windows = math.floor(valid_duration / self.config.SAMPLE_SECONDS)
                     for tr in table_runs:
                         self.table_run_min_time[tr] = group_min_t
                         self.table_run_max_time[tr] = valid_windows
@@ -242,8 +264,8 @@ class VehicleDataset(Dataset):
     def _get_samples(self):
         unique_samples = set()
 
-        block = config.BLOCK_SIZE
-        usable = config.USABLE_SIZE
+        block = self.config.BLOCK_SIZE
+        usable = self.config.USABLE_SIZE
 
         for (table, run_id), times in self.table_run_max_time.items():
             if times <= 0:
@@ -256,19 +278,19 @@ class VehicleDataset(Dataset):
             sensor_node = parts[-1]
 
             # 1. Fetch from mapping
-            category = config.DATASET_VEHICLE_MAP.get(dataset, {}).get(instance, None)
+            category = self.config.DATASET_VEHICLE_MAP.get(dataset, {}).get(instance, None)
             if category is None:
                 continue
 
             # 2. Assign dynamic label based on config
-            if config.TRAINING_MODE == "detection":
+            if self.config.TRAINING_MODE == "detection":
                 label = 1 if category > 0 else 0
-            elif config.TRAINING_MODE == "category":
+            elif self.config.TRAINING_MODE == "category":
                 label = category
-            elif config.TRAINING_MODE == "instance":
-                label = config.INSTANCE_TO_CLASS[instance]
+            elif self.config.TRAINING_MODE == "instance":
+                label = self.config.INSTANCE_TO_CLASS[instance]
             else:
-                raise ValueError(f"Unknown TRAINING_MODE: {config.TRAINING_MODE}")
+                raise ValueError(f"Unknown TRAINING_MODE: {self.config.TRAINING_MODE}")
 
             # 3. Block Splitting Logic with Guard Bands
             num_blocks = math.ceil(times / block)
@@ -280,9 +302,9 @@ class VehicleDataset(Dataset):
                 rng = random.Random(seed_key)
                 rand_val = rng.random()
 
-                if rand_val < config.SPLIT_TRAIN:
+                if rand_val < self.config.SPLIT_TRAIN:
                     assigned_split = "train"
-                elif rand_val < (config.SPLIT_TRAIN + config.SPLIT_VAL):
+                elif rand_val < (self.config.SPLIT_TRAIN + self.config.SPLIT_VAL):
                     assigned_split = "val"
                 else:
                     assigned_split = "test"
@@ -305,9 +327,9 @@ class VehicleDataset(Dataset):
         # CONTROLLED OVER-SAMPLING: Background Balancing
         # -----------------------------------------------------------------
         if (
-            config.TRAINING_MODE == "detection"
+            self.config.TRAINING_MODE == "detection"
             and self.split == "train"
-            and getattr(config, "OVERSAMPLE_BACKGROUNDS", False)
+            and getattr(self.config, "OVERSAMPLE_BACKGROUNDS", False)
         ):
             background_samples = [s for s in self.samples if s[5] == 0] 
             vehicle_samples = [s for s in self.samples if s[5] == 1]

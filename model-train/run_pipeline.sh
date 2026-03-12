@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Exit immediately if a pipeline fails entirely (optional but safe)
+# Exit immediately if a pipeline fails entirely
 set -e 
 
 for mode in detection category instance; do
@@ -12,14 +12,8 @@ for mode in detection category instance; do
         echo "STARTING RUN -> MODE: $mode | MODEL: $model | RUN_ID: $CURRENT_RUN_ID"
         echo "============================================================"
         
+        # We only need to run train.py in the loop now
         RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode MODEL_NAME=$model poetry run python train.py
-        
-        # Check if training succeeded before evaluating
-        if [ $? -eq 0 ]; then
-            RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode MODEL_NAME=$model poetry run python eval.py
-        else
-            echo "Training failed for $model in $mode mode. Skipping eval."
-        fi
         
         # Force a 1-second delay to guarantee unique RUN_IDs if a run fails instantly
         sleep 1 
@@ -27,5 +21,14 @@ for mode in detection category instance; do
 done
 
 echo "============================================================"
-echo "ALL PIPELINES COMPLETE."
+echo "ALL TRAINING COMPLETE. COMMENCING BATCH EVALUATION..."
+echo "============================================================"
+
+# Run eval.py and aggregate_results.py once at the very end. 
+# It will automatically find and process all 15 models we just trained.
+poetry run python eval.py
+poetry run python aggregate_results.py
+
+echo "============================================================"
+echo "PIPELINE FULLY COMPLETE."
 echo "============================================================"

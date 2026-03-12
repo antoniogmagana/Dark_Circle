@@ -1,9 +1,10 @@
 import torch
-import config
+
+# NOTICE: global 'config' is no longer imported
 
 
-def generate_white_noise(window_length=None, num_channels=None, amplitude=0.01):
-    # Dynamic defaults synced with global configuration
+def generate_white_noise(config, window_length=None, num_channels=None, amplitude=0.01):
+    # Dynamic defaults synced with injected configuration
     if window_length is None:
         window_length = int(config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS)
     if num_channels is None:
@@ -15,7 +16,7 @@ def generate_white_noise(window_length=None, num_channels=None, amplitude=0.01):
 
 
 def generate_no_vehicle_sample(
-    window_length=None, num_channels=None, noise_profile="environmental", amplitude=None
+    config, window_length=None, num_channels=None, noise_profile="environmental", amplitude=None
 ):
     if window_length is None:
         window_length = int(config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS)

@@ -1,7 +1,8 @@
 import psycopg2
 from psycopg2 import sql
 import re
-from config import DB_CONN_PARAMS
+
+# NOTICE: global 'config' is no longer imported
 
 
 def sanitize_name(name, max_length=25):
@@ -15,12 +16,12 @@ def sanitize_name(name, max_length=25):
     return clean_name or "unknown_entity"
 
 
-def db_connect():
+def db_connect(db_conn_params):
     try:
-        conn = psycopg2.connect(**DB_CONN_PARAMS)
+        # Unpacks the passed dictionary 
+        conn = psycopg2.connect(**db_conn_params)
         conn.autocommit = True
         cursor = conn.cursor()
-        # print("Connected to PostgreSQL successfully.")
         return conn, cursor
     except Exception as e:
         print(f"Failed to connect: {e}")

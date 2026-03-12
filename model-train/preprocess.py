@@ -1,33 +1,42 @@
 import torch
 import torchaudio
-import config
 
+# NOTICE: global 'config' is no longer imported
 
 
 # ============================================================
 # 1. Vectorized Mel Spectrogram Extraction
 # ============================================================
 
-_mel_transform = None
+# Cache transforms to prevent re-initializing them every batch.
+# Keyed by device and hyperparameters to support dynamic configs
+# across multiple batch evaluation runs.
+_mel_transforms = {}
 
-
-def get_mel_transform(device):
-    global _mel_transform
-    if (
-        _mel_transform is None
-        or next(_mel_transform.parameters(), torch.tensor([], device=device)).device
-        != device
-    ):
-        _mel_transform = torchaudio.transforms.MelSpectrogram(
+def get_mel_transform(device, config):
+    global _mel_transforms
+    
+    # Create a unique key based on the parameters that define the transform
+    key = (
+        device, 
+        config.REF_SAMPLE_RATE, 
+        config.N_FFT, 
+        config.HOP_LENGTH, 
+        config.MEL_BINS
+    )
+    
+    if key not in _mel_transforms:
+        _mel_transforms[key] = torchaudio.transforms.MelSpectrogram(
             sample_rate=config.REF_SAMPLE_RATE,
             n_fft=config.N_FFT,
             hop_length=config.HOP_LENGTH,
             n_mels=config.MEL_BINS,
         ).to(device)
-    return _mel_transform
+        
+    return _mel_transforms[key]
 
 
-def extract_mel_spectrogram(batch_tensor):
+def extract_mel_spectrogram(batch_tensor, config):
     """
     Converts 1D waveforms to 2D Mel Spectrograms.
     Optimized to process all channels and batches simultaneously without for-loops.
@@ -35,7 +44,7 @@ def extract_mel_spectrogram(batch_tensor):
     Input: [B, C, T] -> Output: [B, C, MEL_BINS, FRAMES]
     """
     device = batch_tensor.device
-    mel_transform = get_mel_transform(device)
+    mel_transform = get_mel_transform(device, config)
 
     B, C, T = batch_tensor.shape
 
@@ -56,8 +65,7 @@ def extract_mel_spectrogram(batch_tensor):
 # 2. Main Training Wrapper
 # ============================================================
 
-
-def preprocess_for_training(batch_tensor, sigma, epsilon, use_mel=True):
+def preprocess_for_training(batch_tensor, sigma, epsilon, config):
     """
     Robust preprocessing pipeline for deployment environments.
     Handles DC drift, preserves physical amplitude, and limits transient spikes.
@@ -74,7 +82,7 @@ def preprocess_for_training(batch_tensor, sigma, epsilon, use_mel=True):
     batch_tensor = torch.clamp(batch_tensor, min=-10.0, max=10.0)
 
     # 4. Convert to frequency domain
-    if use_mel:
-        batch_tensor = extract_mel_spectrogram(batch_tensor)
+    if getattr(config, "USE_MEL", True):
+        batch_tensor = extract_mel_spectrogram(batch_tensor, config)
 
     return batch_tensor
