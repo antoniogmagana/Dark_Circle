@@ -45,10 +45,12 @@ else:
 DB_CONN_PARAMS = {
     "dbname": "lvc_db",
     "user": "lvc_toolkit",
-    "password": os.environ.get("DB_PASSWORD", "default_password"),
+    "password": os.environ.get("DB_PASSWORD"),
     "host": "localhost",
     "port": 5432,
 }
+if not DB_CONN_PARAMS["password"]:
+    DB_CONN_PARAMS["password"] = input("Enter Database Password: ")
 
 # =====================================================================
 # 3. TRAINING MODE (NEW)
@@ -67,7 +69,10 @@ INSTANCE_SEED = 0
 # =====================================================================
 # 4. DATASET, SENSOR & CLASS CONSTANTS
 # =====================================================================
+# "iobt" "focal" "m3nvc"
 TRAIN_DATASETS = ["iobt", "focal", "m3nvc"]
+
+# "audio" "seismic" "accel"
 TRAIN_SENSORS = ["audio", "seismic"]  # accel can be added later
 
 # Derived: audio=1, seismic=1, accel=3
@@ -87,48 +92,49 @@ NATIVE_SR = {
 REF_SAMPLE_RATE = max(NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_SENSORS)
 
 # Semantic category names (used for category-level classification)
-CLASS_MAP = {0: "background", 1: "light", 2: "heavy"}
+# if background used, always set to 0: "background"
+CLASS_MAP = {0: "background", 1: "pedestrian", 2: "light", 3: "sport", 4: "utility"}
 
 # Instance → category mapping (authoritative)
 DATASET_VEHICLE_MAP = {
     "iobt": {
-        "polaris0150pm": 1,
-        "polaris0215pm": 1,
-        "polaris0235pm_nolineofsig": 1,
-        "warhog1135am": 1,
-        "warhog1149am": 1,
-        "warhog_nolineofsight": 1,
-        "silverado0255pm": 2,
-        "silverado0315pm": 2,
+        "polaris0150pm": "light",
+        "polaris0215pm": "light",
+        "polaris0235pm_nolineofsig": "light",
+        "warhog1135am": "light",
+        "warhog1149am": "light",
+        "warhog_nolineofsight": "light",
+        "silverado0255pm": "utility",
+        "silverado0315pm": "utility",
     },
     "focal": {
-        "walk": 0,
-        "walk2": 0,
-        "bicycle": 1,
-        "bicycle2": 1,
-        "motor": 1,
-        "motor2": 1,
-        "scooter": 1,
-        "scooter2": 1,
-        "forester": 2,
-        "forester2": 2,
-        "mustang": 2,
-        "mustang0528": 2,
-        "mustang2": 2,
-        "pickup": 2,
-        "pickup2": 2,
-        "tesla": 2,
-        "tesla2": 2,
+        "walk": "pedestrian",
+        "walk2": "pedestrian",
+        "bicycle": "pedestrian",
+        "bicycle2": "pedestrian",
+        "motor": "light",
+        "motor2": "light",
+        "scooter": "light",
+        "scooter2": "light",
+        "forester": "utility",
+        "forester2": "utility",
+        "mustang": "sport",
+        "mustang0528": "sport",
+        "mustang2": "sport",
+        "pickup": "utility",
+        "pickup2": "utility",
+        "tesla": "sport",
+        "tesla2": "sport",
     },
     "m3nvc": {
-        "background": 0,
-        "cx30": 2,
-        "miata": 2,
-        "mustang": 2,
-        "cx30_miata": 2,
-        "cx30_mustang": 2,
-        "miata_mustang": 2,
-        "gle350": 2,
+        "background": "background",
+        "cx30": "utility",
+        "miata": "sport",
+        "mustang": "sport",
+        # "cx30_miata": 4,
+        # "cx30_mustang": 4,
+        "miata_mustang": "sport",
+        "gle350": "utility",
     },
 }
 
@@ -158,7 +164,7 @@ if TRAINING_MODE == "detection":
     CLASS_WEIGHTS = [1.0, 1.0]
 elif TRAINING_MODE == "category":
     NUM_CLASSES = len(CLASS_MAP)
-    CLASS_WEIGHTS = [1.0, 1.0, 1.0]
+    CLASS_WEIGHTS = [1.0, 1.0, 1.0, 1.0] # based on classification classes
 elif TRAINING_MODE == "instance":
     NUM_CLASSES = len(INSTANCE_TO_CLASS)
 else:

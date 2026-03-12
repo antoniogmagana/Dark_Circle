@@ -1,8 +1,0 @@
-MODEL PERFORMANCE REPORT
-Timestamp: 20260311_163115
-Mode: instance | Model: IterativeMiniRocket
-----------------------------------------
-Accuracy:  0.5045
-MCC:       0.4250
-ROC-AUC:   nan
-Latency:   2.9883 ms/sample

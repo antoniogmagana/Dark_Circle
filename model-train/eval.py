@@ -125,7 +125,9 @@ def evaluate_single_run(run_dir: Path):
     else:
         auc = roc_auc_score(all_labels, all_probs, multi_class='ovr', labels=list(range(run_config.NUM_CLASSES)))
 
-    cm = confusion_matrix(all_labels, all_preds)
+    target_labels = list(range(run_config.NUM_CLASSES))
+    cm = confusion_matrix(all_labels, all_preds, labels=target_labels)
+    
     far = None
     if run_config.TRAINING_MODE == "detection" and cm.shape == (2, 2):
         tn, fp, fn, tp = cm.ravel()
@@ -143,7 +145,6 @@ def evaluate_single_run(run_dir: Path):
     else:
         class_names = [str(i) for i in range(run_config.NUM_CLASSES)]
 
-    target_labels = list(range(run_config.NUM_CLASSES))
     precision = precision_score(all_labels, all_preds, labels=target_labels, average=None, zero_division=0)
     recall = recall_score(all_labels, all_preds, labels=target_labels, average=None, zero_division=0)
     f1 = f1_score(all_labels, all_preds, labels=target_labels, average=None, zero_division=0)

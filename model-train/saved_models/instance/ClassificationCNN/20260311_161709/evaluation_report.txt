@@ -1,8 +1,0 @@
-MODEL PERFORMANCE REPORT
-Timestamp: 20260311_161709
-Mode: instance | Model: ClassificationCNN
-----------------------------------------
-Accuracy:  0.4256
-MCC:       0.3259
-ROC-AUC:   nan
-Latency:   0.3332 ms/sample

@@ -18,7 +18,7 @@ def db_worker_init(worker_id, config=None):
     """
     torch.set_num_threads(1)
     worker_info = get_worker_info()
-    dataset = worker_info.dataset  # Get this worker's copy of the dataset
+    dataset = worker_info.dataset
 
     if isinstance(dataset, torch.utils.data.Subset):
         dataset = dataset.dataset
@@ -29,11 +29,10 @@ def db_worker_init(worker_id, config=None):
     atexit.register(dataset.close_connection)
 
 
-
 class VehicleDataset(Dataset):
     def __init__(self, split, config):
         self.split = split
-        self.config = config  # Store the injected config
+        self.config = config
         self.tables = []
         self.table_max_time = {}
         self.split_idx = {}
@@ -53,54 +52,63 @@ class VehicleDataset(Dataset):
 
     def __getitem__(self, idx):
         # Unpack the fully-defined sample tuple
-        dataset, instance, sensor_node, run_id, time, label = self.samples[idx]
+        # NOTE: 'label' here is now a STRING (e.g., "sport" or "background")
+        dataset, instance, sensor_node, run_id, time, label_str = self.samples[idx]
+        
+        # --- RESOLVE STRING TO INTEGER ---
+        # We must convert the string back to the correct integer based on the training mode.
+        if self.config.TRAINING_MODE == "detection":
+            label_int = 0 if label_str == "background" else 1
+            
+        elif self.config.TRAINING_MODE == "category":
+            # Create a reverse lookup to find the integer for this specific class
+            reverse_class_map = {v: k for k, v in self.config.CLASS_MAP.items()}
+            label_int = reverse_class_map.get(label_str, 0) # Default to 0 if missing
+            
+        elif self.config.TRAINING_MODE == "instance":
+            label_int = self.config.INSTANCE_TO_CLASS[instance]
+            
+        else:
+            raise ValueError(f"Unknown TRAINING_MODE: {self.config.TRAINING_MODE}")
 
         # -----------------------------------------------------------------
-        # DYNAMIC SYNTHESIS: Background Augmentation
+        # DYNAMIC SYNTHESIS: Background Augmentation & Pure Synthetic Trap
         # -----------------------------------------------------------------
-        # If toggled ON, and the sample is a background class, flip a coin
-        if (
+        is_pure_synthetic = (dataset == "synthetic")
+        
+        if is_pure_synthetic or (
             getattr(self.config, "SYNTHESIZE_BACKGROUND", False)
-            and label == 0
+            and label_int == 0
             and self.split == "train"
+            and random.random() < getattr(self.config, "SYNTHESIZE_PROBABILITY", 0.5)
         ):
-            if random.random() < getattr(self.config, "SYNTHESIZE_PROBABILITY", 0.5):
-                from data_generator import generate_no_vehicle_sample
+            from data_generator import generate_no_vehicle_sample
 
-                # Use estimated noise floor to create synthetic background samples
-                X = generate_no_vehicle_sample(
-                    config=self.config,
-                    noise_profile="environmental", 
-                    amplitude=self.noise_floor
-                )
-                y = torch.tensor(label, dtype=torch.long)
-                return X, y
+            X = generate_no_vehicle_sample(
+                config=self.config,
+                noise_profile="environmental", 
+                amplitude=self.noise_floor
+            )
+            y = torch.tensor(label_int, dtype=torch.long)
+            return X, y
 
         sensor_tensors = []
-
-        # Lock to the Global Reference Rate!
         max_time_steps = self.config.REF_SAMPLE_RATE * self.config.SAMPLE_SECONDS
 
         for signal in self.config.TRAIN_SENSORS:
             exact_table = f"{dataset}_{signal}_{instance}_{sensor_node}"
 
-            # Pass dataset and signal natively down to avoid dangerous string parsing
             sensor_data = self._fetch_sensor_data(
                 self.cursor, exact_table, dataset, signal, run_id, time, max_time_steps
             )
             sensor_tensors.append(sensor_data)
 
-        # Concatenate all channels along dim 0
         X = torch.cat(sensor_tensors, dim=0)
-        y = torch.tensor(label, dtype=torch.long)
+        y = torch.tensor(label_int, dtype=torch.long)
 
         return X, y
 
     def _fft_resample(self, signal, target_length):
-        """
-        Resamples a 1D signal to an exact target length using Fourier interpolation.
-        signal: [C, T_in]
-        """
         C, T_in = signal.shape
         if T_in == target_length:
             return signal
@@ -125,11 +133,9 @@ class VehicleDataset(Dataset):
         sample_rate = self.config.NATIVE_SR[dataset][signal]
         expected_window = int(sample_rate * self.config.SAMPLE_SECONDS)
 
-        # Calculate timestamp relative to the synchronized group start time
         min_t = self.table_run_min_time[(table, run_id)]
         start_time_seconds = min_t + float(time * self.config.SAMPLE_SECONDS)
 
-        # Use the Centralized DB utility!
         raw_data = fetch_sensor_batch(
             cursor=cursor,
             table_name=table,
@@ -205,7 +211,6 @@ class VehicleDataset(Dataset):
                     )
                     runs = [row[0] for row in temp_cursor.fetchall()]
                 except Exception:
-                    # Table exists but lacks a run_id column. Rollback and treat as standard table.
                     temp_conn.rollback()
                     runs = [None]
             else:
@@ -277,27 +282,20 @@ class VehicleDataset(Dataset):
             instance = "_".join(parts[2:-1])
             sensor_node = parts[-1]
 
-            # 1. Fetch from mapping
-            category = self.config.DATASET_VEHICLE_MAP.get(dataset, {}).get(instance, None)
-            if category is None:
+            # 1. Fetch category STRING from mapping (e.g., "sport")
+            category_str = self.config.DATASET_VEHICLE_MAP.get(dataset, {}).get(instance, None)
+            
+            # If the instance isn't in the map, or if we are in Category mode
+            # and the string isn't in our CLASS_MAP (like "background" being skipped), we skip it!
+            if category_str is None:
                 continue
-
-            # 2. Assign dynamic label based on config
-            if self.config.TRAINING_MODE == "detection":
-                label = 1 if category > 0 else 0
-            elif self.config.TRAINING_MODE == "category":
-                label = category
-            elif self.config.TRAINING_MODE == "instance":
-                label = self.config.INSTANCE_TO_CLASS[instance]
-            else:
-                raise ValueError(f"Unknown TRAINING_MODE: {self.config.TRAINING_MODE}")
+            if self.config.TRAINING_MODE == "category" and category_str not in self.config.CLASS_MAP.values():
+                continue
 
             # 3. Block Splitting Logic with Guard Bands
             num_blocks = math.ceil(times / block)
 
             for b_idx in range(num_blocks):
-                
-                # assign blocks to key
                 seed_key = f"{dataset}_{instance}_{sensor_node}_{run_id}_block_{b_idx}"
                 rng = random.Random(seed_key)
                 rand_val = rng.random()
@@ -309,16 +307,14 @@ class VehicleDataset(Dataset):
                 else:
                     assigned_split = "test"
 
-                # Index the seconds for the block and assign to respective set
                 if assigned_split == self.split:
                     start_sec = b_idx * block
-                    
-                    # Guard bands applied here to ensure time integrity
                     end_sec = min(start_sec + usable, times)
                     
                     for time_idx in range(start_sec, end_sec):
+                        # WE STORE THE STRING NOW, NOT THE INTEGER
                         unique_samples.add(
-                            (dataset, instance, sensor_node, run_id, time_idx, label)
+                            (dataset, instance, sensor_node, run_id, time_idx, category_str)
                         )
 
         self.samples = sorted(list(unique_samples))
@@ -331,14 +327,21 @@ class VehicleDataset(Dataset):
             and self.split == "train"
             and getattr(self.config, "OVERSAMPLE_BACKGROUNDS", False)
         ):
-            background_samples = [s for s in self.samples if s[5] == 0] 
-            vehicle_samples = [s for s in self.samples if s[5] == 1]
+            # Because we stored strings, we filter by "background"
+            background_samples = [s for s in self.samples if s[5] == "background"] 
+            vehicle_samples = [s for s in self.samples if s[5] != "background"]
 
             shortfall = len(vehicle_samples) - len(background_samples)
 
             if shortfall > 0:
-                extra_backgrounds = random.choices(background_samples, k=shortfall)
-                self.samples.extend(extra_backgrounds)
+                if len(background_samples) > 0:
+                    extra_backgrounds = random.choices(background_samples, k=shortfall)
+                    self.samples.extend(extra_backgrounds)
+                else:
+                    print(f"  [+] Injecting {shortfall} purely synthetic background samples to balance classes.")
+                    dummy_samples = [("synthetic", "noise", "none", None, i, "background") for i in range(shortfall)]
+                    self.samples.extend(dummy_samples)
+                    
                 random.shuffle(self.samples)
 
     def close_connection(self):
