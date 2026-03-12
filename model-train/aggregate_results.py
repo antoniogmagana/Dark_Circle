@@ -26,7 +26,7 @@ def parse_report_file(filepath):
         for line in lines:
             line = line.strip()
             # UPDATED: Matches the new output format from the refactored eval.py
-            if line.startswith("Run Directory:"):
+            if line.startswith("Run Directory:") or line.startswith("Timestamp:"):
                 data["Timestamp"] = line.split(":", 1)[1].strip()
             elif line.startswith("Mode:"):
                 # Matches "Mode: detection | Model: DetectionCNN"
@@ -104,10 +104,12 @@ def main():
             current_mode = row['Mode']
             print(f"\n--- {current_mode.upper()} MODE ---")
             print(f"{'Model':<30} | {'Accuracy':<10} | {'MCC':<8} | {'AUC':<8} | {'Latency':<12} | {'FAR':<8} | {'Timestamp':<30}")
-            print("-" * 88)
+            print("-" * 110)
             
         far_str = f"{row['FAR']:.2%}" if pd.notna(row['FAR']) else "N/A"
         latency_str = f"{row['Latency_ms']:.2f} ms" if pd.notna(row['Latency_ms']) else "N/A"
+
+        time_str = str(row['Timestamp']) if pd.notna(row['Timestamp']) else "Unknown"
         
         print(f"{row['Model']:<30} | {row['Accuracy']:<10.4f} | {row['MCC']:<8.4f} | {row['ROC-AUC']:<8.4f} | {latency_str:<12} | {far_str:<8} | {row['Timestamp']:<30}")
         
