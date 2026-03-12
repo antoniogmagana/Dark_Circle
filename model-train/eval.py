@@ -1,11 +1,13 @@
 import os
 import time
+import json
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 from functools import partial
+from types import SimpleNamespace
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from sklearn.metrics import (
@@ -23,7 +25,8 @@ import warnings
 from sklearn.exceptions import UndefinedMetricWarning
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
-import config
+# NOTICE: global 'config' is NO LONGER IMPORTED
+
 from dataset import VehicleDataset, db_worker_init
 from models import build_model
 from preprocess import preprocess_for_training
@@ -38,59 +41,64 @@ def evaluate_directory(run_dir_path):
         
     print(f"\nEvaluating: {run_dir_path}")
     
-    # 2. Reconstruct context from path
-    # Assuming path is saved_models/<mode>/<model_name>/<run_id>
-    parts = run_dir_path.parts
-    training_mode = parts[-3]
-    model_name = parts[-2]
-    
-    # Override config dynamically for this specific evaluation run
-    config.TRAINING_MODE = training_mode
-    config.MODEL_NAME = model_name
-    
-    # Re-trigger the dynamic class weighting/sizing logic based on the overridden mode
-    if training_mode == "detection":
-        config.NUM_CLASSES = 2
-    elif training_mode == "category":
-        config.NUM_CLASSES = len(config.CLASS_MAP)
-    elif training_mode == "instance":
-        config.NUM_CLASSES = len(config.INSTANCE_TO_CLASS)
+    # 2. Reconstruct the Run's Configuration from its JSON Snapshot
+    json_path = run_dir_path / "hyperparameters.json"
+    if not json_path.exists():
+        print(f"  [!] Missing hyperparameters.json in {run_dir_path}. Cannot reconstruct config.")
+        return
         
-    # 3. Load Metadata
+    with open(json_path, 'r') as f:
+        config_dict = json.load(f)
+        
+    # JSON converts integer dictionary keys into strings. 
+    # We must revert CLASS_MAP keys back to integers so the confusion matrix logic works.
+    if "CLASS_MAP" in config_dict:
+        config_dict["CLASS_MAP"] = {int(k): v for k, v in config_dict["CLASS_MAP"].items()}
+        
+    # Convert dictionary to a dot-accessible object that mimics the 'config' module
+    run_config = SimpleNamespace(**config_dict)
+    
+    device_str = getattr(run_config, "DEVICE", "cpu")
+    device = torch.device(device_str)
+    
+    # 3. Load Metadata Tensors
     meta_path = run_dir_path / "meta.pt"
     if not meta_path.exists():
         print(f"  [!] Missing meta.pt in {run_dir_path}")
         return
         
-    meta = torch.load(meta_path, map_location=config.DEVICE, weights_only=False)
-    sigma = meta["sigma"].to(config.DEVICE)
+    meta = torch.load(meta_path, map_location=device, weights_only=False)
+    sigma = meta["sigma"].to(device)
     epsilon = meta["epsilon"]
     
-    # 4. Build Dataset & DataLoader
-    test_ds = VehicleDataset(split="test", config=config)
+    # Force USE_MEL to whatever was saved in the metadata
+    run_config.USE_MEL = meta.get("use_mel", getattr(run_config, "USE_MEL", True))
+    
+    # 4. Build Dataset & DataLoader using the injected run_config
+    test_ds = VehicleDataset(split="test", config=run_config)
     
     if len(test_ds) == 0:
-        print(f"  [!] No test samples found for {training_mode}.")
+        print(f"  [!] No test samples found for {run_config.TRAINING_MODE}.")
         return
         
-    custom_worker_init = partial(db_worker_init, config=config)
+    custom_worker_init = partial(db_worker_init, config=run_config)
     test_loader = DataLoader(
         test_ds, 
-        batch_size=config.BATCH_SIZE, 
+        batch_size=run_config.BATCH_SIZE, 
         shuffle=False, 
-        num_workers=config.NUM_WORKERS,
+        num_workers=run_config.NUM_WORKERS,
         worker_init_fn=custom_worker_init
     )
     
     # 5. Load Model
     model = build_model(
-        input_channels=config.IN_CHANNELS, 
-        num_classes=config.NUM_CLASSES, 
-        config=config
-    ).to(config.DEVICE)
+        input_channels=run_config.IN_CHANNELS, 
+        num_classes=run_config.NUM_CLASSES, 
+        config=run_config
+    ).to(device)
     
     model_path = run_dir_path / "best_model.pth"
-    model.load_state_dict(torch.load(model_path, map_location=config.DEVICE, weights_only=True))
+    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
     model.eval()
     
     # 6. Inference Loop
@@ -102,8 +110,8 @@ def evaluate_directory(run_dir_path):
     
     with torch.inference_mode():
         for x, y in test_loader:
-            x = x.to(config.DEVICE)
-            x = preprocess_for_training(x, sigma, epsilon, config=config)
+            x = x.to(device)
+            x = preprocess_for_training(x, sigma, epsilon, config=run_config)
             
             logits = model(x)
             probs = F.softmax(logits, dim=1)
@@ -125,16 +133,14 @@ def evaluate_directory(run_dir_path):
     acc = accuracy_score(all_labels, all_preds)
     mcc = matthews_corrcoef(all_labels, all_preds)
     
-    # New Metrics
     precision = precision_score(all_labels, all_preds, average='weighted', zero_division=0)
     recall = recall_score(all_labels, all_preds, average='weighted', zero_division=0)
     f1 = f1_score(all_labels, all_preds, average='weighted', zero_division=0)
     
-    # Safe ROC-AUC (Fixes the UndefinedMetricWarning spam)
     unique_classes = len(np.unique(all_labels))
     if unique_classes > 1:
         try:
-            if config.NUM_CLASSES == 2:
+            if run_config.NUM_CLASSES == 2:
                 auc = roc_auc_score(all_labels, all_probs[:, 1])
             else:
                 auc = roc_auc_score(all_labels, all_probs, multi_class="ovr")
@@ -143,26 +149,22 @@ def evaluate_directory(run_dir_path):
     else:
         auc = float('nan')
         
-    # Confusion Matrix
-    target_labels = list(range(config.NUM_CLASSES))
+    target_labels = list(range(run_config.NUM_CLASSES))
     cm = confusion_matrix(all_labels, all_preds, labels=target_labels)
     
-    # Safe FAR
     far = None
-    if training_mode == "detection" and cm.shape == (2, 2):
+    if run_config.TRAINING_MODE == "detection" and cm.shape == (2, 2):
         tn, fp, fn, tp = cm.ravel()
         far = fp / (fp + tn) if (fp + tn) > 0 else 0.0
         
-    # Safe Per-Class Accuracy
     with np.errstate(divide='ignore', invalid='ignore'):
         per_class_acc = np.true_divide(cm.diagonal(), cm.sum(axis=1))
         per_class_acc[np.isnan(per_class_acc)] = 0.0 
         
     # 8. Save Artifacts
     with open(report_path, "w") as f:
-        # Keep exact formatting for aggregate_results.py parsing
         f.write(f"Run Directory: {run_dir_path.name}\n")
-        f.write(f"Mode: {training_mode} | Model: {model_name}\n")
+        f.write(f"Mode: {run_config.TRAINING_MODE} | Model: {run_config.MODEL_NAME}\n")
         f.write("-" * 40 + "\n")
         f.write(f"Accuracy: {acc:.4f}\n")
         f.write(f"MCC: {mcc:.4f}\n")
@@ -176,24 +178,69 @@ def evaluate_directory(run_dir_path):
             f.write(f"False Alarm Rate: {far * 100:.3f}%\n")
             
         f.write("\nPer-Class Accuracy:\n")
-        if training_mode == "detection":
+        if run_config.TRAINING_MODE == "detection":
             f.write(f"  Background (0): {per_class_acc[0]:.4f}\n")
             f.write(f"  Target (1): {per_class_acc[1]:.4f}\n")
-        elif training_mode == "category":
-            for k, v in config.CLASS_MAP.items():
+        elif run_config.TRAINING_MODE == "category":
+            for k, v in run_config.CLASS_MAP.items():
                 if k < len(per_class_acc):
                     f.write(f"  {v} ({k}): {per_class_acc[k]:.4f}\n")
+        elif run_config.TRAINING_MODE == "instance":
+            # Reverse the dictionary to look up names by their integer ID
+            inv_map = {v: k for k, v in run_config.INSTANCE_TO_CLASS.items()}
+            for k in range(run_config.NUM_CLASSES):
+                if k < len(per_class_acc):
+                    instance_name = inv_map.get(k, f"Class_{k}")
+                    f.write(f"  {instance_name} ({k}): {per_class_acc[k]:.4f}\n")
         
-    # Plot Heatmap
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
-    plt.title(f"Confusion Matrix: {model_name} ({training_mode})")
-    plt.ylabel("True Label")
-    plt.xlabel("Predicted Label")
-    plt.savefig(run_dir_path / "conf_matrix.png")
-    plt.close()
+    # ---------------------------------------------------------
+    # Generate human-readable labels for the axes
+    # ---------------------------------------------------------
+    axis_labels = []
+    if run_config.TRAINING_MODE == "detection":
+        axis_labels = ["background", "target"]
+    elif run_config.TRAINING_MODE == "category":
+        axis_labels = [run_config.CLASS_MAP.get(i, str(i)) for i in range(run_config.NUM_CLASSES)]
+    elif run_config.TRAINING_MODE == "instance":
+        inv_map = {v: k for k, v in getattr(run_config, "INSTANCE_TO_CLASS", {}).items()}
+        axis_labels = [inv_map.get(i, str(i)) for i in range(run_config.NUM_CLASSES)]
+    else:
+        axis_labels = [str(i) for i in range(run_config.NUM_CLASSES)]
+
+    # ---------------------------------------------------------
+    # Plot Heatmap with Dynamic Scaling & String Labels
+    # ---------------------------------------------------------
+    fig_size = max(8, run_config.NUM_CLASSES * 0.6)
+    annot_size = 10 if run_config.NUM_CLASSES < 15 else 8
     
-    print(f"  [+] Generated report and confusion matrix in {run_dir_path}")
+    plt.figure(figsize=(fig_size, fig_size * 0.8))
+    
+    sns.heatmap(
+        cm, 
+        annot=True, 
+        fmt='d', 
+        cmap='Blues', 
+        annot_kws={"size": annot_size},
+        cbar_kws={"shrink": 0.8},
+        xticklabels=axis_labels, 
+        yticklabels=axis_labels  
+    )
+    
+    plt.title(f"Confusion Matrix: {run_config.MODEL_NAME} ({run_config.TRAINING_MODE})", fontsize=14)
+    plt.ylabel("True Label", fontsize=12)
+    plt.xlabel("Predicted Label", fontsize=12)
+    
+    # Rotate the x-axis labels if there are a lot of them so they don't overlap
+    if run_config.NUM_CLASSES > 5:
+        plt.xticks(rotation=45, ha='right')
+    else:
+        plt.xticks(rotation=0)
+        
+    plt.yticks(rotation=0)
+    
+    plt.tight_layout() 
+    plt.savefig(run_dir_path / "conf_matrix.png", dpi=300) 
+    plt.close()
 
 
 def main():
