@@ -67,6 +67,12 @@ if not TRAINING_MODE:
 INSTANCE_SEED = 0
 
 # =====================================================================
+# MODEL SELECTION CRITERIA
+# =====================================================================
+# Options: "val_acc", "val_loss", "val_f1", "val_precision", "val_recall"
+BEST_MODEL_METRIC = "val_f1"
+
+# =====================================================================
 # 4. DATASET, SENSOR & CLASS CONSTANTS
 # =====================================================================
 # "iobt" "focal" "m3nvc"
@@ -164,7 +170,7 @@ if TRAINING_MODE == "detection":
     CLASS_WEIGHTS = [1.0, 1.0]
 elif TRAINING_MODE == "category":
     NUM_CLASSES = len(CLASS_MAP)
-    CLASS_WEIGHTS = [1.0, 1.0, 1.0, 1.0] # based on classification classes
+    CLASS_WEIGHTS = [1.0, 1.0, 1.0, 1.0, 1.0] # based on classification classes
 elif TRAINING_MODE == "instance":
     NUM_CLASSES = len(INSTANCE_TO_CLASS)
 else:
