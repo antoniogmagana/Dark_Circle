@@ -1,0 +1,17 @@
+Run Directory: 20260313_081418
+Mode: category | Model: ClassificationLSTM
+----------------------------------------
+Accuracy: 0.7211
+MCC: 0.5474
+ROC-AUC: 0.9327
+Precision: 0.7258
+Recall: 0.7211
+F1-Score: 0.7098
+Latency: 0.5127 ms/sample
+
+Per-Class Accuracy:
+  background (0): 0.9874
+  pedestrian (1): 0.3874
+  light (2): 0.2958
+  sport (3): 0.8528
+  utility (4): 0.6586

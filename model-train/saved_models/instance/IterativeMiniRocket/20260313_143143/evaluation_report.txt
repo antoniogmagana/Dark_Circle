@@ -1,0 +1,42 @@
+Run Directory: 20260313_143143
+Mode: instance | Model: IterativeMiniRocket
+----------------------------------------
+Accuracy: 0.3365
+MCC: 0.2571
+ROC-AUC: nan
+Precision: 0.3309
+Recall: 0.3365
+F1-Score: 0.3047
+Latency: 0.9301 ms/sample
+
+Per-Class Accuracy:
+  cx30 (0): 0.3787
+  motor2 (1): 0.0000
+  polaris0235pm_nolineofsig (2): 0.0000
+  polaris0215pm (3): 0.0000
+  forester2 (4): 0.0000
+  background (5): 0.9129
+  miata (6): 0.2520
+  walk2 (7): 0.1811
+  warhog_nolineofsight (8): 0.0000
+  pickup (9): 0.0000
+  scooter2 (10): 0.0000
+  walk (11): 0.0000
+  silverado0255pm (12): 0.0000
+  bicycle2 (13): 0.1393
+  scooter (14): 0.0000
+  forester (15): 0.4222
+  tesla (16): 0.0015
+  gle350 (17): 0.4715
+  mustang (18): 0.4726
+  silverado0315pm (19): 0.0000
+  motor (20): 0.3744
+  warhog1149am (21): 0.0000
+  pickup2 (22): 0.0000
+  polaris0150pm (23): 0.0000
+  miata_mustang (24): 0.6564
+  bicycle (25): 0.0000
+  mustang2 (26): 0.0000
+  tesla2 (27): 0.0000
+  mustang0528 (28): 0.0635
+  warhog1135am (29): 0.0000
