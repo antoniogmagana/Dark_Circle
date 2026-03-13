@@ -292,6 +292,7 @@ if MODEL_NAME == "ClassificationLSTM":
 if MODEL_NAME == "IterativeMiniRocket":
     LEARNING_RATE = 1e-3
     DROPOUT = 0.3
+    MINIROCKET_FEATURES = 1000
     # The tsai extractor defaults to 10,000 kernels automatically 
 
 # =====================================================================

@@ -211,9 +211,10 @@ class IterativeMiniRocket(nn.Module):
         self.config = config
         self.c_in = in_channels
         self.seq_len = int(config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS)
+        self.num_features = getattr(config, 'MINIROCKET_FEATURES', 10000)
         
         # 1. The feature extractor (will be frozen)
-        self.mrf = MiniRocketFeatures(c_in=self.c_in, seq_len=self.seq_len)
+        self.mrf = MiniRocketFeatures(c_in=self.c_in, seq_len=self.seq_len, num_features=self.num_features)
         
         # 2. The Trainable Classification Head
         self.fc = nn.LazyLinear(num_classes)
