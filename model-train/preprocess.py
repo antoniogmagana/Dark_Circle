@@ -75,7 +75,12 @@ def preprocess_for_training(batch_tensor, sigma, epsilon, config):
     batch_tensor = batch_tensor - window_mean
 
     # 2. GLOBAL AMPLITUDE SCALING
-    sigma = sigma.to(batch_tensor.device).view(1, -1, 1)
+    # Check dimensions: if it's an old 1D tensor, reshape it. Otherwise, use it as-is.
+    if sigma.dim() == 1:
+        sigma = sigma.to(batch_tensor.device).view(1, -1, 1)
+    else:
+        sigma = sigma.to(batch_tensor.device)
+        
     batch_tensor = batch_tensor / (sigma + epsilon)
 
     # 3. TRANSIENT SPIKE CLIPPING

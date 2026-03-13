@@ -5,27 +5,38 @@ import torch.nn as nn
 import numpy as np
 from functools import partial
 from torch.utils.data import DataLoader
-
-# New imports for advanced metrics
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import (precision_score, 
+                             recall_score, 
+                             f1_score, 
+                             confusion_matrix
+)
 
 from data_generator import augment_batch
-from dataset import VehicleDataset, db_worker_init
+from dataset import (VehicleDataset,
+                     db_worker_init
+)
 from models import build_model
 from preprocess import preprocess_for_training
 import config
 
 
 def train_one_epoch(
-    model, loader, optimizer, criterion, device, sigma, epsilon, config, epoch
+    model, loader, optimizer, criterion, device, sigmas, epsilon, config, epoch
 ):
     model.train()
     total_loss = 0
     total_correct = 0
     total_samples = 0
 
-    for batch_idx, (x, y) in enumerate(loader):
+    fallback_sigma = torch.stack(list(sigmas.values())).mean(dim=0).to(device)
+
+    for batch_idx, (x, y, dataset_names) in enumerate(loader):
         x, y = x.to(device), y.to(device)
+
+        # Build a batch-specific sigma tensor of shape [B, C, 1]
+        batch_sigma = torch.stack([
+            sigmas.get(ds, fallback_sigma) for ds in dataset_names
+        ]).to(device).view(-1, config.IN_CHANNELS, 1)
 
         # -----------------------------------------------------------------
         # DYNAMIC SYNTHESIS: SNR Augmentation (Controlled via config)
@@ -36,7 +47,7 @@ def train_one_epoch(
         # -----------------------------------------------------------------
 
         # Preprocessing on the GPU
-        x = preprocess_for_training(x, sigma, epsilon, config=config)        
+        x = preprocess_for_training(x, batch_sigma, epsilon, config=config)        
 
         optimizer.zero_grad()
         logits = model(x)
@@ -51,18 +62,24 @@ def train_one_epoch(
     return total_loss / total_samples, total_correct / total_samples
 
 
-def evaluate(model, loader, criterion, device, sigma, epsilon, config):
+def evaluate(model, loader, criterion, device, sigmas, epsilon, config):
     model.eval()
     total_loss = 0
     all_preds = []
     all_labels = []
 
+    fallback_sigma = torch.stack(list(sigmas.values())).mean(dim=0).to(device)
+
     with torch.inference_mode():
-        for x, y in loader:
+        for x, y, dataset_names in loader:
             x, y = x.to(device), y.to(device)
 
-            # Preprocessing on the GPU (Injecting config)
-            x = preprocess_for_training(x, sigma, epsilon, config=config)
+            batch_sigma = torch.stack([
+                sigmas.get(ds, fallback_sigma) for ds in dataset_names
+            ]).to(device).view(-1, config.IN_CHANNELS, 1)
+
+            # Preprocessing on the GPU
+            x = preprocess_for_training(x, batch_sigma, epsilon, config=config)
 
             logits = model(x)
             loss = criterion(logits, y)
@@ -88,39 +105,58 @@ def evaluate(model, loader, criterion, device, sigma, epsilon, config):
     
     with np.errstate(divide='ignore', invalid='ignore'):
         per_class_acc = np.true_divide(cm.diagonal(), cm.sum(axis=1))
-        # Handle NaN values for classes that might not appear in this specific validation batch
         per_class_acc[np.isnan(per_class_acc)] = 0.0 
 
     return avg_loss, accuracy, precision, recall, f1, per_class_acc
 
 
 def compute_stats(calib_loader, config):
-    channels_sq_sum = torch.zeros(config.IN_CHANNELS)
-    total_samples = 0
+    """Calculates standard deviation (sigma) per dataset."""
+    channels_sq_sum = {}
+    total_samples = {}
     
     with torch.no_grad():
-        for x, _ in calib_loader:
+        for x, _, dataset_names in calib_loader:
             window_mean = x.mean(dim=-1, keepdim=True)
             x_ac = x - window_mean
-            channels_sq_sum += torch.sum(x_ac**2, dim=[0, 2])
-            total_samples += x.shape[0] * x.shape[2]
+            x_sq = x_ac**2
             
-    sigma = torch.sqrt(channels_sq_sum / total_samples)
+            # Accumulate stats dynamically based on the dataset string
+            for i, ds in enumerate(dataset_names):
+                if ds not in channels_sq_sum:
+                    channels_sq_sum[ds] = torch.zeros(config.IN_CHANNELS)
+                    total_samples[ds] = 0
+                    
+                channels_sq_sum[ds] += torch.sum(x_sq[i], dim=1) # Sum over time
+                total_samples[ds] += x.shape[2]
+                
+    sigmas = {}
     epsilon = 1e-8
-    return sigma, epsilon
+    for ds in channels_sq_sum:
+        sigmas[ds] = torch.sqrt(channels_sq_sum[ds] / total_samples[ds])
+        
+    return sigmas, epsilon
 
 
 def compute_noise_floor(calib_loader):
-    all_stds = []
+    """Calculates the 5th percentile noise floor per dataset."""
+    all_stds = {}
     
     with torch.no_grad():
-        for x, _ in calib_loader:
+        for x, _, dataset_names in calib_loader:
             window_stds = torch.std(x, dim=2)
-            all_stds.append(window_stds)
             
-    all_stds = torch.cat(all_stds, dim=0)
-    noise_floor = torch.quantile(all_stds, q=0.05, dim=0)
-    return noise_floor
+            for i, ds in enumerate(dataset_names):
+                if ds not in all_stds:
+                    all_stds[ds] = []
+                all_stds[ds].append(window_stds[i].unsqueeze(0))
+                
+    noise_floors = {}
+    for ds, stds_list in all_stds.items():
+        stds_tensor = torch.cat(stds_list, dim=0) # [N, Channels]
+        noise_floors[ds] = torch.quantile(stds_tensor, q=0.05, dim=0)
+        
+    return noise_floors
 
 
 def main():
@@ -154,13 +190,14 @@ def main():
     )    
     print(f"Estimating stats and noise floor from a {calib_size}-sample calibration subset...")
 
-    sigma, epsilon = compute_stats(calib_loader, config=config)
-    noise_floor = compute_noise_floor(calib_loader)
+    sigmas, epsilon = compute_stats(calib_loader, config=config)
+    noise_floors = compute_noise_floor(calib_loader)
 
-    train_ds.noise_floor = noise_floor
+    # Pass the noise_floor dictionary to the dataset
+    train_ds.noise_floors = noise_floors
 
-    print(f"Computed Std: {sigma}")
-    print(f"Computed Noise Floor: {noise_floor}")
+    print(f"Computed Per-Dataset Sigmas: {sigmas}")
+    print(f"Computed Per-Dataset Noise Floors: {noise_floors}")
 
     train_loader = DataLoader(
         train_ds,
@@ -185,14 +222,14 @@ def main():
     )
 
     # ------------------------------------------------------------
-    # Save Metadata
+    # Save Metadata (Now storing dicts)
     # ------------------------------------------------------------
     torch.save({
         "model_name": config.MODEL_NAME,
         "use_mel": config.USE_MEL,
-        "sigma": sigma,
+        "sigmas": sigmas,
         "epsilon": epsilon,
-        "noise_floor": noise_floor 
+        "noise_floors": noise_floors 
     }, config.META_SAVE_PATH)
     
     print(f"Saved normalization stats to: {config.META_SAVE_PATH}")
@@ -207,9 +244,17 @@ def main():
     print("Performing dummy pass to initialize Lazy modules...")
     model.eval()
     with torch.no_grad():
-        for x_dummy, _ in train_loader:
+        for x_dummy, _, ds_names in train_loader:
             x_dummy = x_dummy.to(device)
-            x_dummy = preprocess_for_training(x_dummy, sigma, epsilon, config=config)
+            
+            # Map dummy sigma
+            fallback_sigma = torch.stack(list(sigmas.values())).mean(dim=0).to(device)
+            batch_sigma = torch.stack([
+                sigmas.get(ds, fallback_sigma) for ds in ds_names
+            ]).to(device).view(-1, config.IN_CHANNELS, 1)
+
+            x_dummy = preprocess_for_training(x_dummy, batch_sigma, epsilon, config=config)
+            
             if hasattr(model, 'fit_extractor'):
                 model.fit_extractor(x_dummy)
             model(x_dummy)
@@ -249,11 +294,8 @@ def main():
     # ------------------------------------------------------------
     # Training loop with Dynamic "Best Model" criteria
     # ------------------------------------------------------------
-    # Default to tracking accuracy if the config variable is missing
     target_metric_name = getattr(config, "BEST_MODEL_METRIC", "val_acc")
     
-    # If we are tracking loss, we want the LOWEST number. 
-    # For everything else (acc, f1, precision), we want the HIGHEST number.
     if target_metric_name == "val_loss":
         best_metric_value = float('inf') 
     else:
@@ -263,11 +305,11 @@ def main():
         print(f"\nEpoch {epoch}/{config.EPOCHS}")
 
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, optimizer, criterion, device, sigma, epsilon, config, epoch
+            model, train_loader, optimizer, criterion, device, sigmas, epsilon, config, epoch
         )
 
         val_loss, val_acc, val_prec, val_rec, val_f1, per_class_acc = evaluate(
-            model, val_loader, criterion, device, sigma, epsilon, config
+            model, val_loader, criterion, device, sigmas, epsilon, config
         )
 
         print(
@@ -277,7 +319,6 @@ def main():
             flush=True,
         )
 
-        # Convert the numpy array of per-class accuracies to formatted strings
         class_values = [f"{per_class_acc[i]:.4f}" for i in range(config.NUM_CLASSES)]
 
         with open(config.METRICS_LOG_PATH, mode='a', newline='') as f:
@@ -290,7 +331,6 @@ def main():
             ] + class_values
             writer.writerow(row_data)
 
-        # Map the string name from config to the actual variable we just calculated
         metrics_dict = {
             "val_loss": val_loss,
             "val_acc": val_acc,
@@ -301,7 +341,6 @@ def main():
         
         current_metric_value = metrics_dict.get(target_metric_name, val_acc)
 
-        # Determine if this epoch is the new "best"
         is_best = False
         if target_metric_name == "val_loss":
             if current_metric_value < best_metric_value:
@@ -310,7 +349,6 @@ def main():
             if current_metric_value > best_metric_value:
                 is_best = True
 
-        # Ensure we only save the model weights when our target metric hits a new peak
         if is_best:
             best_metric_value = current_metric_value
             torch.save(model.state_dict(), config.MODEL_SAVE_PATH)

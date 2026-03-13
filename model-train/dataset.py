@@ -52,18 +52,15 @@ class VehicleDataset(Dataset):
 
     def __getitem__(self, idx):
         # Unpack the fully-defined sample tuple
-        # NOTE: 'label' here is now a STRING (e.g., "sport" or "background")
         dataset, instance, sensor_node, run_id, time, label_str = self.samples[idx]
         
         # --- RESOLVE STRING TO INTEGER ---
-        # We must convert the string back to the correct integer based on the training mode.
         if self.config.TRAINING_MODE == "detection":
             label_int = 0 if label_str == "background" else 1
             
         elif self.config.TRAINING_MODE == "category":
-            # Create a reverse lookup to find the integer for this specific class
             reverse_class_map = {v: k for k, v in self.config.CLASS_MAP.items()}
-            label_int = reverse_class_map.get(label_str, 0) # Default to 0 if missing
+            label_int = reverse_class_map.get(label_str, 0) 
             
         elif self.config.TRAINING_MODE == "instance":
             label_int = self.config.INSTANCE_TO_CLASS[instance]
@@ -84,13 +81,26 @@ class VehicleDataset(Dataset):
         ):
             from data_generator import generate_no_vehicle_sample
 
+            # Dynamically select the correct noise floor
+            if hasattr(self, "noise_floors") and self.noise_floors:
+                # If pure synthetic, fallback to the average of all noise floors
+                if is_pure_synthetic or dataset not in self.noise_floors:
+                    current_amplitude = torch.stack(list(self.noise_floors.values())).mean(dim=0)
+                else:
+                    current_amplitude = self.noise_floors[dataset]
+            else:
+                # Fallback for early initialization before stats are computed
+                current_amplitude = getattr(self, "noise_floor", 0.01)
+
             X = generate_no_vehicle_sample(
                 config=self.config,
                 noise_profile="environmental", 
-                amplitude=self.noise_floor
+                amplitude=current_amplitude
             )
             y = torch.tensor(label_int, dtype=torch.long)
-            return X, y
+            
+            # CRITICAL: Return dataset string here
+            return X, y, dataset
 
         sensor_tensors = []
         max_time_steps = self.config.REF_SAMPLE_RATE * self.config.SAMPLE_SECONDS
@@ -106,7 +116,8 @@ class VehicleDataset(Dataset):
         X = torch.cat(sensor_tensors, dim=0)
         y = torch.tensor(label_int, dtype=torch.long)
 
-        return X, y
+        # CRITICAL: Return dataset string here
+        return X, y, dataset
 
     def _fft_resample(self, signal, target_length):
         C, T_in = signal.shape
