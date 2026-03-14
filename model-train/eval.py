@@ -232,36 +232,36 @@ def evaluate_directory(run_dir_path):
     # ---------------------------------------------------------
     # Plot Heatmap with Dynamic Scaling & String Labels
     # ---------------------------------------------------------
-    fig_size = max(8, run_config.NUM_CLASSES * 0.6)
-    annot_size = 10 if run_config.NUM_CLASSES < 15 else 8
-    
-    plt.figure(figsize=(fig_size, fig_size * 0.8))
-    
+    fig_size = max(12, run_config.NUM_CLASSES * 1.2)
+    annot_size = max(8, min(16, int(180 / run_config.NUM_CLASSES)))
+
+    plt.figure(figsize=(fig_size, fig_size))
+
     sns.heatmap(
         cm, 
         annot=True, 
         fmt='d', 
         cmap='Blues', 
-        annot_kws={"size": annot_size},
+        annot_kws={"size": annot_size, "weight": "bold"},
         cbar_kws={"shrink": 0.8},
         xticklabels=axis_labels, 
         yticklabels=axis_labels  
     )
-    
-    plt.title(f"Confusion Matrix: {run_config.MODEL_NAME} ({run_config.TRAINING_MODE})", fontsize=14)
-    plt.ylabel("True Label", fontsize=12)
-    plt.xlabel("Predicted Label", fontsize=12)
-    
+
+    plt.title(f"Confusion Matrix: {run_config.MODEL_NAME} ({run_config.TRAINING_MODE})", fontsize=18, pad=15)
+    plt.ylabel("True Label", fontsize=16, labelpad=10)
+    plt.xlabel("Predicted Label", fontsize=16, labelpad=10)
+
     # Rotate the x-axis labels if there are a lot of them so they don't overlap
     if run_config.NUM_CLASSES > 5:
-        plt.xticks(rotation=45, ha='right')
+        plt.xticks(rotation=45, ha='right', fontsize=13)
     else:
-        plt.xticks(rotation=0)
+        plt.xticks(rotation=0, fontsize=13)
         
-    plt.yticks(rotation=0)
-    
+    plt.yticks(rotation=0, fontsize=13)
+
     plt.tight_layout() 
-    plt.savefig(run_dir_path / "conf_matrix.png", dpi=300) 
+    plt.savefig(run_dir_path / "conf_matrix.png", dpi=300, bbox_inches='tight') 
     plt.close()
 
 
