@@ -1,0 +1,42 @@
+Run Directory: 20260314_121945
+Mode: instance | Model: WaveformClassificationCNN
+----------------------------------------
+Accuracy: 0.5715
+MCC: 0.5214
+ROC-AUC: nan
+Precision: 0.5709
+Recall: 0.5715
+F1-Score: 0.5617
+Latency: 0.5083 ms/sample
+
+Per-Class Accuracy:
+  cx30 (0): 0.6929
+  motor2 (1): 0.1150
+  polaris0235pm_nolineofsig (2): 0.1407
+  polaris0215pm (3): 0.0000
+  forester2 (4): 0.0370
+  background (5): 0.9976
+  miata (6): 0.6495
+  walk2 (7): 0.6722
+  warhog_nolineofsight (8): 0.0000
+  pickup (9): 0.3679
+  scooter2 (10): 0.1383
+  walk (11): 0.3907
+  silverado0255pm (12): 0.6778
+  bicycle2 (13): 0.1763
+  scooter (14): 0.0514
+  forester (15): 0.1848
+  tesla (16): 0.3985
+  gle350 (17): 0.6680
+  mustang (18): 0.6032
+  silverado0315pm (19): 0.1222
+  motor (20): 0.4881
+  warhog1149am (21): 0.6889
+  pickup2 (22): 0.0040
+  polaris0150pm (23): 0.7630
+  miata_mustang (24): 0.8750
+  bicycle (25): 0.0044
+  mustang2 (26): 0.0035
+  tesla2 (27): 0.0028
+  mustang0528 (28): 0.6968
+  warhog1135am (29): 0.0000

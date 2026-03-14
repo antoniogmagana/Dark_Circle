@@ -15,7 +15,7 @@ import numpy as np
 # ============================================================
 
 # Core training loop settings
-BATCH_SIZE = 1024
+BATCH_SIZE = 128
 EPOCHS = 5
 NUM_WORKERS = 32
 LOG_INTERVAL = 10
@@ -167,10 +167,10 @@ CLASS_WEIGHTS = []
 # Determine number of classes based on training mode
 if TRAINING_MODE == "detection":
     NUM_CLASSES = 2
-    CLASS_WEIGHTS = [1.0, 1.0]
+    CLASS_WEIGHTS = [25.5, 1.0]
 elif TRAINING_MODE == "category":
     NUM_CLASSES = len(CLASS_MAP)
-    CLASS_WEIGHTS = [1.0, 1.0, 1.0, 1.0, 1.0] # based on classification classes
+    CLASS_WEIGHTS = [28.0, 2.0, 13.0, 15.5] # based on classification classes
 elif TRAINING_MODE == "instance":
     NUM_CLASSES = len(INSTANCE_TO_CLASS)
 else:
@@ -200,7 +200,6 @@ IMG_SAVE_PATH = os.path.join(RUN_DIR, "conf_matrix.png")
 JSON_LOG_PATH = os.path.join(RUN_DIR, "hyperparameters.json")
 METRICS_LOG_PATH = os.path.join(RUN_DIR, "metrics.csv")
 
-BATCH_SIZE = 128
 TRAIN_STEPS_PER_EPOCH = 50
 VAL_STEPS_PER_EPOCH = 16
 
@@ -260,12 +259,12 @@ if MODEL_NAME == "DetectionCNN":
 
 # --- Classification CNN ---
 if MODEL_NAME == "ClassificationCNN":
-    LEARNING_RATE = 5e-4
+    LEARNING_RATE = 1e-3
     CHANNELS = [32, 64, 128, 256]
     KERNEL = 3
     PADS = 1
     HIDDEN = 512
-    DROPOUT = 0.4
+    DROPOUT = 0.3
 
 # --- Waveform 1D CNN ---
 if MODEL_NAME == "WaveformClassificationCNN":

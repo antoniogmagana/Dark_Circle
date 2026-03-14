@@ -1,0 +1,16 @@
+Run Directory: 20260314_110953
+Mode: category | Model: ClassificationCNN
+----------------------------------------
+Accuracy: 0.6048
+MCC: 0.4254
+ROC-AUC: 0.8077
+Precision: 0.7136
+Recall: 0.6048
+F1-Score: 0.6346
+Latency: 0.5306 ms/sample
+
+Per-Class Accuracy:
+  pedestrian (0): 0.4457
+  light (1): 0.2214
+  sport (2): 0.5844
+  utility (3): 0.7449

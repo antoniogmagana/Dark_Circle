@@ -90,7 +90,7 @@ class ClassificationCNN(nn.Module):
 
     def forward(self, x):
         x = self.pool(F.tanh(self.conv1(x)))
-        x = self.pool(F.tanh(self.conv2(x)))
+        x = self.pool(F.relu(self.conv2(x)))
         x = self.pool(F.tanh(self.conv3(x)))
         x = self.pool(F.relu(self.conv4(x)))
         x = torch.flatten(x, 1)
