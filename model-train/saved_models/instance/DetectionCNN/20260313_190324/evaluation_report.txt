@@ -1,0 +1,42 @@
+Run Directory: 20260313_190324
+Mode: instance | Model: DetectionCNN
+----------------------------------------
+Accuracy: 0.1882
+MCC: 0.0000
+ROC-AUC: nan
+Precision: 0.0354
+Recall: 0.1882
+F1-Score: 0.0596
+Latency: 0.5340 ms/sample
+
+Per-Class Accuracy:
+  cx30 (0): 0.0000
+  motor2 (1): 0.0000
+  polaris0235pm_nolineofsig (2): 0.0000
+  polaris0215pm (3): 0.0000
+  forester2 (4): 0.0000
+  background (5): 0.0000
+  miata (6): 1.0000
+  walk2 (7): 0.0000
+  warhog_nolineofsight (8): 0.0000
+  pickup (9): 0.0000
+  scooter2 (10): 0.0000
+  walk (11): 0.0000
+  silverado0255pm (12): 0.0000
+  bicycle2 (13): 0.0000
+  scooter (14): 0.0000
+  forester (15): 0.0000
+  tesla (16): 0.0000
+  gle350 (17): 0.0000
+  mustang (18): 0.0000
+  silverado0315pm (19): 0.0000
+  motor (20): 0.0000
+  warhog1149am (21): 0.0000
+  pickup2 (22): 0.0000
+  polaris0150pm (23): 0.0000
+  miata_mustang (24): 0.0000
+  bicycle (25): 0.0000
+  mustang2 (26): 0.0000
+  tesla2 (27): 0.0000
+  mustang0528 (28): 0.0000
+  warhog1135am (29): 0.0000
