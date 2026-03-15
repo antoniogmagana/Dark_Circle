@@ -1,0 +1,15 @@
+Run Directory: 20260314_202927
+Mode: detection | Model: ClassificationLSTM
+----------------------------------------
+Accuracy: 0.9965
+MCC: 0.9549
+ROC-AUC: 0.9998
+Precision: 0.9968
+Recall: 0.9965
+F1-Score: 0.9966
+Latency: 0.5055 ms/sample
+False Alarm Rate: 0.420%
+
+Per-Class Accuracy:
+  Background (0): 0.9958
+  Target (1): 0.9966

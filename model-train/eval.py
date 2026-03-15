@@ -233,7 +233,7 @@ def evaluate_directory(run_dir_path):
     # Plot Heatmap with Dynamic Scaling & String Labels
     # ---------------------------------------------------------
     fig_size = max(12, run_config.NUM_CLASSES * 1.2)
-    annot_size = max(8, min(16, int(180 / run_config.NUM_CLASSES)))
+    annot_size = max(18, min(26, int(240 / run_config.NUM_CLASSES)))
 
     plt.figure(figsize=(fig_size, fig_size))
 
@@ -248,17 +248,20 @@ def evaluate_directory(run_dir_path):
         yticklabels=axis_labels  
     )
 
-    plt.title(f"Confusion Matrix: {run_config.MODEL_NAME} ({run_config.TRAINING_MODE})", fontsize=18, pad=15)
-    plt.ylabel("True Label", fontsize=16, labelpad=10)
-    plt.xlabel("Predicted Label", fontsize=16, labelpad=10)
+    plt.title(f"Confusion Matrix: {run_config.MODEL_NAME} ({run_config.TRAINING_MODE})", fontsize=26, pad=20)
+    plt.ylabel("True Label", fontsize=22, labelpad=14)
+    plt.xlabel("Predicted Label", fontsize=22, labelpad=14)
 
     # Rotate the x-axis labels if there are a lot of them so they don't overlap
     if run_config.NUM_CLASSES > 5:
-        plt.xticks(rotation=45, ha='right', fontsize=13)
+        plt.xticks(rotation=45, ha='right', fontsize=20)
     else:
-        plt.xticks(rotation=0, fontsize=13)
+        plt.xticks(rotation=0, fontsize=20)
         
-    plt.yticks(rotation=0, fontsize=13)
+    plt.yticks(rotation=0, fontsize=20)
+
+    # Scale up the colorbar tick labels too
+    plt.gcf().axes[-1].tick_params(labelsize=16)
 
     plt.tight_layout() 
     plt.savefig(run_dir_path / "conf_matrix.png", dpi=300, bbox_inches='tight') 
