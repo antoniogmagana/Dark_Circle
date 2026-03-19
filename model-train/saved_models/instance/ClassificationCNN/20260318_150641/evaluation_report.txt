@@ -1,0 +1,42 @@
+Run Directory: 20260318_150641
+Mode: instance | Model: ClassificationCNN
+----------------------------------------
+Accuracy: 0.5665
+MCC: 0.5194
+ROC-AUC: nan
+Precision: 0.6054
+Recall: 0.5665
+F1-Score: 0.5607
+Latency: 0.2901 ms/sample
+
+Per-Class Accuracy:
+  cx30 (0): 0.5131
+  motor2 (1): 0.1007
+  polaris0235pm_nolineofsig (2): 0.7556
+  polaris0215pm (3): 0.0000
+  forester2 (4): 0.0210
+  background (5): 0.8769
+  miata (6): 0.6783
+  walk2 (7): 0.7956
+  warhog_nolineofsight (8): 0.0000
+  pickup (9): 0.2984
+  scooter2 (10): 0.1804
+  walk (11): 0.4717
+  silverado0255pm (12): 0.6444
+  bicycle2 (13): 0.1556
+  scooter (14): 0.0181
+  forester (15): 0.4725
+  tesla (16): 0.3970
+  gle350 (17): 0.7436
+  mustang (18): 0.6267
+  silverado0315pm (19): 0.0667
+  motor (20): 0.6505
+  warhog1149am (21): 0.6222
+  pickup2 (22): 0.0364
+  polaris0150pm (23): 0.7630
+  miata_mustang (24): 0.7191
+  bicycle (25): 0.0222
+  mustang2 (26): 0.0561
+  tesla2 (27): 0.0056
+  mustang0528 (28): 0.7079
+  warhog1135am (29): 0.0000

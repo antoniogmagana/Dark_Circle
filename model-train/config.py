@@ -79,7 +79,7 @@ BEST_MODEL_METRIC = "val_f1"
 TRAIN_DATASETS = ["iobt", "focal", "m3nvc"]
 
 # "audio" "seismic" "accel"
-TRAIN_SENSORS = ["audio", "seismic"]  # accel can be added later
+TRAIN_SENSORS = ["seismic"]  # accel can be added later
 
 # Derived: audio=1, seismic=1, accel=3
 IN_CHANNELS = len(TRAIN_SENSORS) + (2 if "accel" in TRAIN_SENSORS else 0)
