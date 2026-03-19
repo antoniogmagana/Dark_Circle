@@ -47,24 +47,26 @@ echo ""
 echo "============================================================"
 echo " SELECT MODELS"
 echo "============================================================"
-echo "  1) DetectionCNN"
-echo "  2) ClassificationCNN"
-echo "  3) WaveformClassificationCNN"
-echo "  4) ClassificationLSTM"
-echo "  5) IterativeMiniRocket"
-echo "  6) ALL MODELS"
+echo "  1) DetectionCNN          (2D spectrogram)"
+echo "  2) ClassificationCNN     (2D spectrogram)"
+echo "  3) WaveformClassificationCNN  (1D waveform)"
+echo "  4) ClassificationLSTM    (1D waveform)"
+echo "  5) ResNet1D              (1D waveform, residual)"
+echo "  6) IterativeMiniRocket   (1D waveform)"
+echo "  7) ALL MODELS"
 echo ""
 read -p "Models (space-separated) > " model_input
 
 selected_models=()
-if [[ "$model_input" == *"6"* ]] || [[ "${model_input,,}" == *"all"* ]]; then
-    selected_models=("DetectionCNN" "ClassificationCNN" "WaveformClassificationCNN" "ClassificationLSTM" "IterativeMiniRocket")
+if [[ "$model_input" == *"7"* ]] || [[ "${model_input,,}" == *"all"* ]]; then
+    selected_models=("DetectionCNN" "ClassificationCNN" "WaveformClassificationCNN" "ClassificationLSTM" "ResNet1D" "IterativeMiniRocket")
 else
     [[ "$model_input" == *"1"* ]] && selected_models+=("DetectionCNN")
     [[ "$model_input" == *"2"* ]] && selected_models+=("ClassificationCNN")
     [[ "$model_input" == *"3"* ]] && selected_models+=("WaveformClassificationCNN")
     [[ "$model_input" == *"4"* ]] && selected_models+=("ClassificationLSTM")
-    [[ "$model_input" == *"5"* ]] && selected_models+=("IterativeMiniRocket")
+    [[ "$model_input" == *"5"* ]] && selected_models+=("ResNet1D")
+    [[ "$model_input" == *"6"* ]] && selected_models+=("IterativeMiniRocket")
 fi
 
 # --- 4. Validate ---
@@ -108,7 +110,7 @@ for sensor in "${selected_sensors[@]}"; do
             MODEL_NAME=$model \
                 poetry run python train.py
 
-            sleep 1  # Guarantee unique RUN_IDs
+            sleep 1
         done
     done
 done
@@ -120,24 +122,15 @@ echo "TRAINING COMPLETE. RUNNING EVALUATION..."
 echo "============================================================"
 
 poetry run python eval.py
-
-# --- 7. Aggregate individual results ---
 poetry run python aggregate_results.py
 
-# --- 8. Build ensemble ---
+# --- 7. Build & evaluate ensemble ---
 echo ""
 echo "============================================================"
 echo "BUILDING SENSOR ENSEMBLE..."
 echo "============================================================"
 
 poetry run python ensemble.py build
-
-# --- 9. Evaluate ensemble ---
-echo ""
-echo "============================================================"
-echo "EVALUATING ENSEMBLE..."
-echo "============================================================"
-
 poetry run python ensemble.py eval
 
 echo ""

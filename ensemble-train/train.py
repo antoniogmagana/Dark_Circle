@@ -77,7 +77,6 @@ def train_one_epoch(model, loader, optimizer, criterion, device, cfg, grad_clip=
     for x, y, _dataset_names in loader:
         x, y = x.to(device), y.to(device)
 
-        # Optional SNR augmentation (before normalization)
         if getattr(cfg, "AUGMENT_SNR", False):
             x = augment_batch(x, snr_range=getattr(cfg, "AUGMENT_SNR_RANGE", (10, 30)))
 
@@ -139,7 +138,7 @@ def evaluate(model, loader, criterion, device, cfg):
 
 
 # =====================================================================
-# Calibration (noise floor only — used for synthetic background generation)
+# Calibration (noise floor only)
 # =====================================================================
 
 def compute_noise_floor(calib_loader):
@@ -167,7 +166,9 @@ def compute_noise_floor(calib_loader):
 def main():
     device = config.DEVICE
     print(f"Using device: {device}")
-    print(f"Starting Run ID: {config.RUN_ID}")
+    print(f"Sensor: {config.TRAIN_SENSOR} | Mode: {config.TRAINING_MODE} | Model: {config.MODEL_NAME}")
+    print(f"Signal: {config.REF_SAMPLE_RATE} Hz × {config.SAMPLE_SECONDS}s = {config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS} samples")
+    print(f"Run ID: {config.RUN_ID}")
     print(f"Saving to: {config.RUN_DIR}")
     config.save_config_snapshot()
 
@@ -180,7 +181,6 @@ def main():
 
     print(f"Total training samples: {len(train_ds)}")
 
-    # Calibration subset (10%) — only needed for noise floor estimation
     calib_size = max(1, int(len(train_ds) * 0.10))
     calib_indices = torch.randperm(len(train_ds))[:calib_size].tolist()
     calib_ds = torch.utils.data.Subset(train_ds, calib_indices)
@@ -196,7 +196,6 @@ def main():
     print(f"Estimating noise floor from a {calib_size}-sample calibration subset...")
     noise_floors = compute_noise_floor(calib_loader)
     train_ds.noise_floors = noise_floors
-
     print(f"Per-Dataset Noise Floors: {noise_floors}")
 
     loader_kwargs = dict(
@@ -212,11 +211,12 @@ def main():
     val_loader = DataLoader(val_ds, shuffle=False, **loader_kwargs)
 
     # ------------------------------------------------------------------
-    # Save metadata (noise floors for synthetic generation only)
+    # Save metadata
     # ------------------------------------------------------------------
     torch.save(
         {
             "model_name": config.MODEL_NAME,
+            "sensor": config.TRAIN_SENSOR,
             "use_mel": config.USE_MEL,
             "noise_floors": noise_floors,
         },
@@ -233,17 +233,27 @@ def main():
         config=config,
     ).to(device)
 
-    # Dummy forward pass to initialise LazyLinear dimensions
-    print("Performing dummy pass to initialize Lazy modules...")
-    model.eval()
-    with torch.no_grad():
-        for x_dummy, _, _ds_names in train_loader:
-            x_dummy = x_dummy.to(device)
-            x_dummy = preprocess(x_dummy, config=config)
-            if hasattr(model, "fit_extractor"):
-                model.fit_extractor(x_dummy)
-            model(x_dummy)
-            break
+    # Dummy forward pass — only needed for MiniRocket (fit_extractor)
+    # and any remaining LazyLinear modules.
+    needs_init = hasattr(model, "fit_extractor") or any(
+        isinstance(m, nn.LazyLinear) for m in model.modules()
+    )
+
+    if needs_init:
+        print("Performing dummy pass to initialize lazy modules...")
+        model.eval()
+        with torch.no_grad():
+            for x_dummy, _, _ds_names in train_loader:
+                x_dummy = x_dummy.to(device)
+                x_dummy = preprocess(x_dummy, config=config)
+                if hasattr(model, "fit_extractor"):
+                    model.fit_extractor(x_dummy)
+                model(x_dummy)
+                break
+
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Model parameters: {total_params:,} total, {trainable_params:,} trainable")
 
     # ------------------------------------------------------------------
     # Loss, optimizer, scheduler
@@ -265,7 +275,7 @@ def main():
     )
 
     # ------------------------------------------------------------------
-    # Early stopping setup
+    # Early stopping
     # ------------------------------------------------------------------
     target_metric_name = getattr(config, "BEST_MODEL_METRIC", "val_acc")
     es_mode = "min" if target_metric_name == "val_loss" else "max"
@@ -313,11 +323,9 @@ def main():
             flush=True,
         )
 
-        # Step the scheduler on the primary validation metric
         scheduler_metric = val_loss if target_metric_name == "val_loss" else val_f1
         scheduler.step(scheduler_metric)
 
-        # Log to CSV
         class_values = [f"{per_class_acc[i]:.4f}" for i in range(config.NUM_CLASSES)]
         with open(config.METRICS_LOG_PATH, "a", newline="") as f:
             csv.writer(f).writerow(
@@ -328,7 +336,6 @@ def main():
                 + class_values
             )
 
-        # Best model checkpoint
         metrics_dict = {
             "val_loss": val_loss,
             "val_acc": val_acc,
@@ -348,7 +355,6 @@ def main():
             torch.save(model.state_dict(), config.MODEL_SAVE_PATH)
             print(f"  --> Best model saved ({target_metric_name}: {best_metric_value:.4f})")
 
-        # Early stopping check
         if early_stopping(current_value):
             print(f"\nEarly stopping triggered after {epoch} epochs.")
             break
