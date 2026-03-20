@@ -26,6 +26,8 @@ import re
 import torch
 import torch.nn.functional as F
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -385,6 +387,69 @@ def _compute_f1_weights(ens, mode, mode_info):
     ens.weights[mode] = {s: float(w) for s, w in zip(available, weights)}
 
 
+def _build_axis_labels(mode, mode_config):
+    """Build human-readable labels for confusion matrix axes."""
+    if mode == "detection":
+        return ["background", "vehicle"]
+    elif mode == "category":
+        return [mode_config.CLASS_MAP.get(i, str(i))
+                for i in range(mode_config.NUM_CLASSES)]
+    elif mode == "instance":
+        inv_map = {v: k for k, v in getattr(mode_config, "INSTANCE_TO_CLASS", {}).items()}
+        return [inv_map.get(i, str(i)) for i in range(mode_config.NUM_CLASSES)]
+    return [str(i) for i in range(mode_config.NUM_CLASSES)]
+
+
+def _save_ensemble_confusion_matrix(labels, preds, mode, mode_config,
+                                     sensors, acc, f1_val):
+    """Generate and save a confusion matrix for a fused ensemble group."""
+    from sklearn.metrics import confusion_matrix
+
+    num_classes = mode_config.NUM_CLASSES
+    target_labels = list(range(num_classes))
+    cm = confusion_matrix(labels, preds, labels=target_labels)
+    axis_labels = _build_axis_labels(mode, mode_config)
+
+    fig_size = max(12, num_classes * 1.2)
+    annot_size = max(18, min(26, int(240 / num_classes)))
+
+    plt.figure(figsize=(fig_size, fig_size))
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        annot_kws={"size": annot_size, "weight": "bold"},
+        cbar_kws={"shrink": 0.8},
+        xticklabels=axis_labels,
+        yticklabels=axis_labels,
+    )
+
+    sensor_str = " + ".join(sensors)
+    plt.title(
+        f"Ensemble Confusion Matrix: {mode} [{sensor_str}]\n"
+        f"Acc: {acc:.4f}  F1: {f1_val:.4f}",
+        fontsize=22, pad=20,
+    )
+    plt.ylabel("True Label", fontsize=20, labelpad=14)
+    plt.xlabel("Predicted Label", fontsize=20, labelpad=14)
+
+    rotation = 45 if num_classes > 5 else 0
+    ha = "right" if rotation else "center"
+    plt.xticks(rotation=rotation, ha=ha, fontsize=18)
+    plt.yticks(rotation=0, fontsize=18)
+    plt.gcf().axes[-1].tick_params(labelsize=14)
+
+    plt.tight_layout()
+
+    filename = f"ensemble_conf_matrix_{mode}_{'_'.join(sensors)}.png"
+    save_path = DEFAULT_MODEL_DIR / filename
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+    print(f"      Saved: {save_path}")
+
+
 # =====================================================================
 # CLI
 # =====================================================================
@@ -425,6 +490,8 @@ def cmd_eval():
 
     ens = SensorEnsemble.load()
 
+    from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef, confusion_matrix
+
     print("\nEnsemble Evaluation (per-mode weighted fusion)")
     print("=" * 70)
 
@@ -436,9 +503,17 @@ def cmd_eval():
             print(f"\n  {mode.upper()}: (no models — skipping)")
             continue
 
+        # Load config from first available model for label info
+        first_info = next(iter(mode_info.values()))
+        with open(Path(first_info["run_dir"]) / "hyperparameters.json") as f:
+            mode_config = json.load(f)
+        if "CLASS_MAP" in mode_config:
+            mode_config["CLASS_MAP"] = {int(k): v for k, v in mode_config["CLASS_MAP"].items()}
+        mode_config = SimpleNamespace(**mode_config)
+
         # Load predictions from each sensor model
         sensor_preds = {}
-        common_labels = None
+        sensor_labels = {}
 
         for sensor, info in mode_info.items():
             pred_path = Path(info["run_dir"]) / "predictions.npz"
@@ -447,54 +522,63 @@ def cmd_eval():
                 continue
 
             data = np.load(pred_path)
-            labels = data["labels"]
-            probs = data["probs"]
+            sensor_labels[sensor] = data["labels"]
+            sensor_preds[sensor] = data["probs"]
 
-            # For fusion to work, all sensors need the same sample count.
-            # If counts differ (different test splits), we use the minimum
-            # intersection length as a rough alignment.
-            if common_labels is None:
-                common_labels = labels
-            elif len(labels) != len(common_labels):
-                min_len = min(len(labels), len(common_labels))
-                labels = labels[:min_len]
-                probs = probs[:min_len]
-                common_labels = common_labels[:min_len]
-                print(f"    [!] Sample count mismatch for {sensor} — truncating to {min_len}")
-
-            sensor_preds[sensor] = probs
-
-        if not sensor_preds or common_labels is None:
+        if not sensor_preds:
             print(f"\n  {mode.upper()}: (no predictions available)")
             continue
 
-        # Weighted fusion
         available = [s for s in sensor_preds if s in mode_weights]
-        w = np.array([mode_weights[s] for s in available])
-        w = w / w.sum()
 
-        fused = sum(w[i] * sensor_preds[s] for i, s in enumerate(available))
-        fused_preds = fused.argmax(axis=1)
-
-        from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef
-
-        acc = accuracy_score(common_labels, fused_preds)
-        f1 = f1_score(common_labels, fused_preds, average="weighted", zero_division=0)
-        mcc = matthews_corrcoef(common_labels, fused_preds)
+        counts = {s: len(sensor_labels[s]) for s in available}
 
         print(f"\n  {mode.upper()} ENSEMBLE:")
-        print(f"    Sensors:  {', '.join(available)}")
-        print(f"    Weights:  {', '.join(f'{s}={w[i]:.3f}' for i, s in enumerate(available))}")
-        print(f"    Accuracy: {acc:.4f}")
-        print(f"    F1:       {f1:.4f}")
-        print(f"    MCC:      {mcc:.4f}")
+        print(f"    Sensors: {', '.join(available)}")
+        print(f"    Samples: {', '.join(f'{s}={counts[s]:,}' for s in available)}")
 
-        # Compare against individual models
+        # Individual model scores (always shown)
         print(f"\n    Individual model scores:")
         for sensor in available:
             individual_preds = sensor_preds[sensor].argmax(axis=1)
-            ind_f1 = f1_score(common_labels, individual_preds, average="weighted", zero_division=0)
-            print(f"      {sensor:<12} F1: {ind_f1:.4f}")
+            ind_f1 = f1_score(sensor_labels[sensor], individual_preds,
+                              average="weighted", zero_division=0)
+            print(f"      {sensor:<12} F1: {ind_f1:.4f}  ({counts[sensor]:,} samples)")
+
+        # Group sensors by sample count — fuse each aligned group
+        from collections import defaultdict
+        count_groups = defaultdict(list)
+        for s in available:
+            count_groups[counts[s]].append(s)
+
+        for n_samples, group_sensors in sorted(count_groups.items(), key=lambda x: -len(x[1])):
+            if len(group_sensors) < 2:
+                print(f"\n    {group_sensors[0]} ({n_samples:,} samples): no fusion partner")
+                continue
+
+            w = np.array([mode_weights[s] for s in group_sensors])
+            w = w / w.sum()
+
+            common_labels = sensor_labels[group_sensors[0]]
+            fused = sum(w[i] * sensor_preds[s] for i, s in enumerate(group_sensors))
+            fused_preds = fused.argmax(axis=1)
+
+            acc = accuracy_score(common_labels, fused_preds)
+            f1_val = f1_score(common_labels, fused_preds, average="weighted", zero_division=0)
+            mcc = matthews_corrcoef(common_labels, fused_preds)
+
+            sensor_str = " + ".join(group_sensors)
+            print(f"\n    Fused [{sensor_str}] ({n_samples:,} samples):")
+            print(f"      Weights:  {', '.join(f'{s}={w[i]:.3f}' for i, s in enumerate(group_sensors))}")
+            print(f"      Accuracy: {acc:.4f}")
+            print(f"      F1:       {f1_val:.4f}")
+            print(f"      MCC:      {mcc:.4f}")
+
+            # Save confusion matrix
+            _save_ensemble_confusion_matrix(
+                common_labels, fused_preds, mode, mode_config,
+                group_sensors, acc, f1_val,
+            )
 
     print("\n" + "=" * 70)
 

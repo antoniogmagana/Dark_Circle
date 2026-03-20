@@ -1,7 +1,25 @@
 #!/bin/bash
 set -e
 
+# --- 0. Mode: Sweep vs Full ---
+echo "============================================================"
+echo " PIPELINE MODE"
+echo "============================================================"
+echo "  1) Full training (30 epochs, early stopping)"
+echo "  2) Quick sweep  (5 epochs, fast architecture comparison)"
+echo ""
+read -p "Mode > " pipeline_mode
+
+SWEEP_FLAG=""
+if [[ "$pipeline_mode" == "2" ]]; then
+    SWEEP_FLAG="SWEEP=5"
+    echo ""
+    echo "  Sweep mode: 5 epochs per run for fast comparison."
+    echo "  Re-run promising models in full mode afterwards."
+fi
+
 # --- 1. Sensor Selection ---
+echo ""
 echo "============================================================"
 echo " SELECT SENSORS"
 echo "============================================================"
@@ -75,43 +93,47 @@ if [ ${#selected_sensors[@]} -eq 0 ] || [ ${#selected_modes[@]} -eq 0 ] || [ ${#
     exit 1
 fi
 
-total_runs=$(( ${#selected_sensors[@]} * ${#selected_modes[@]} * ${#selected_models[@]} ))
+total_batches=$(( ${#selected_sensors[@]} * ${#selected_modes[@]} ))
+total_runs=$(( total_batches * ${#selected_models[@]} ))
 
 echo ""
 echo "============================================================"
 echo " RUN SUMMARY"
 echo "============================================================"
+if [[ -n "$SWEEP_FLAG" ]]; then
+    echo "Pipeline: QUICK SWEEP (5 epochs)"
+else
+    echo "Pipeline: FULL TRAINING (30 epochs + early stopping)"
+fi
 echo "Sensors: ${selected_sensors[*]}"
 echo "Modes:   ${selected_modes[*]}"
 echo "Models:  ${selected_models[*]}"
-echo "Total:   ${total_runs} training runs"
+echo ""
+echo "Data loads:   ${total_batches} (one per sensor × mode)"
+echo "Model trains: ${total_runs}"
 echo ""
 read -p "Proceed? (y/n) > " confirm
 [[ "${confirm,,}" != "y" ]] && echo "Aborted." && exit 0
 
-# --- 5. Train (sensor × mode × model) ---
+# --- 5. Train (sensor × mode → all models in one process) ---
 echo ""
-run_count=0
+batch_count=0
 for sensor in "${selected_sensors[@]}"; do
     for mode in "${selected_modes[@]}"; do
-        for model in "${selected_models[@]}"; do
-            run_count=$((run_count + 1))
-            CURRENT_RUN_ID=$(date +%Y%m%d_%H%M%S)
+        batch_count=$((batch_count + 1))
 
-            echo "============================================================"
-            echo "RUN ${run_count}/${total_runs}"
-            echo "SENSOR: $sensor | MODE: $mode | MODEL: $model"
-            echo "RUN_ID: $CURRENT_RUN_ID"
-            echo "============================================================"
+        echo ""
+        echo "============================================================"
+        echo "BATCH ${batch_count}/${total_batches}"
+        echo "SENSOR: $sensor | MODE: $mode"
+        echo "MODELS: ${selected_models[*]}"
+        echo "============================================================"
 
-            RUN_ID=$CURRENT_RUN_ID \
-            TRAIN_SENSOR=$sensor \
-            TRAINING_MODE=$mode \
-            MODEL_NAME=$model \
-                poetry run python train.py
-
-            sleep 1
-        done
+        env $SWEEP_FLAG \
+        TRAIN_SENSOR=$sensor \
+        TRAINING_MODE=$mode \
+        MODEL_NAME=${selected_models[0]} \
+            poetry run python train_batch.py "${selected_models[@]}"
     done
 done
 

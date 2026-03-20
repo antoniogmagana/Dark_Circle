@@ -49,6 +49,11 @@ if not TRAIN_SENSOR:
 TRAIN_SENSORS = [TRAIN_SENSOR]
 IN_CHANNELS = 3 if TRAIN_SENSOR == "accel" else 1
 
+# Sensors used for time-window alignment.  All sensors in this list
+# must be present for a group to be valid.  This ensures that training
+# audio alone and seismic alone produce identical sample lists.
+ALIGN_SENSORS = ["audio", "seismic"]
+
 INSTANCE_SEED = 0
 
 # =====================================================================
@@ -164,6 +169,18 @@ LOG_INTERVAL = 10
 BEST_MODEL_METRIC = "val_f1"
 EARLY_STOP_PATIENCE = 8
 GRAD_CLIP = 1.0
+
+# Cache all samples in RAM after the first DB pass.
+# Eliminates DB queries for epochs 2+.  Memory cost:
+#   seismic/accel: ~300 MB – 1 GB
+#   audio: ~25 GB (disable if RAM is limited)
+CACHE_SAMPLES = True
+
+# Quick sweep mode: set via SWEEP=1 env var to override EPOCHS
+# for fast architecture comparison before full training runs.
+_sweep = os.environ.get("SWEEP")
+if _sweep:
+    EPOCHS = int(_sweep) if _sweep.isdigit() else 5
 
 BLOCK_SIZE = 60
 USABLE_SIZE = 45

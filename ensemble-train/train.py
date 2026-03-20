@@ -13,7 +13,7 @@ from sklearn.metrics import (
 )
 
 from data_generator import augment_batch
-from dataset import VehicleDataset, db_worker_init
+from dataset import VehicleDataset, MemoryDataset, db_worker_init, preload_to_memory
 from models import build_model
 from preprocess import preprocess
 import config
@@ -196,16 +196,34 @@ def main():
     print(f"Estimating noise floor from a {calib_size}-sample calibration subset...")
     noise_floors = compute_noise_floor(calib_loader)
     train_ds.noise_floors = noise_floors
+    val_ds.noise_floors = noise_floors
     print(f"Per-Dataset Noise Floors: {noise_floors}")
 
-    loader_kwargs = dict(
-        batch_size=config.BATCH_SIZE,
-        num_workers=config.NUM_WORKERS,
-        worker_init_fn=custom_worker_init,
-        persistent_workers=True,
-        pin_memory=True,
-        prefetch_factor=2,
-    )
+    # ------------------------------------------------------------------
+    # Optional: cache all data in RAM/GPU (eliminates DB for epochs 2+)
+    # ------------------------------------------------------------------
+    if getattr(config, "CACHE_SAMPLES", False):
+        print("Pre-loading training data...")
+        train_ds = preload_to_memory(train_ds, config)
+        print("Pre-loading validation data...")
+        val_ds = preload_to_memory(val_ds, config)
+
+        # num_workers=0: data is already in memory (or on GPU),
+        # multiprocessing IPC would only add overhead.
+        # pin_memory=False: tensors are already pinned or on GPU.
+        loader_kwargs = dict(
+            batch_size=config.BATCH_SIZE,
+            num_workers=0,
+        )
+    else:
+        loader_kwargs = dict(
+            batch_size=config.BATCH_SIZE,
+            num_workers=config.NUM_WORKERS,
+            worker_init_fn=custom_worker_init,
+            persistent_workers=True,
+            pin_memory=True,
+            prefetch_factor=2,
+        )
 
     train_loader = DataLoader(train_ds, shuffle=True, **loader_kwargs)
     val_loader = DataLoader(val_ds, shuffle=False, **loader_kwargs)
@@ -271,7 +289,7 @@ def main():
     optimizer = model.get_optimizer()
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=3, verbose=True
+        optimizer, mode="max", factor=0.5, patience=3,
     )
 
     # ------------------------------------------------------------------
@@ -324,7 +342,11 @@ def main():
         )
 
         scheduler_metric = val_loss if target_metric_name == "val_loss" else val_f1
+        old_lr = optimizer.param_groups[0]["lr"]
         scheduler.step(scheduler_metric)
+        new_lr = optimizer.param_groups[0]["lr"]
+        if new_lr != old_lr:
+            print(f"  --> LR reduced: {old_lr:.2e} → {new_lr:.2e}")
 
         class_values = [f"{per_class_acc[i]:.4f}" for i in range(config.NUM_CLASSES)]
         with open(config.METRICS_LOG_PATH, "a", newline="") as f:

@@ -28,20 +28,42 @@ def db_close(conn, cursor):
     conn.close()
 
 
-def get_time_bounds(cursor, table_name, run_id=None):
-    """Return (min_timestamp, max_timestamp) for a table, optionally filtered by run_id."""
-    if run_id is None:
-        query = sql.SQL(
-            "SELECT MIN(time_stamp), MAX(time_stamp) FROM {table}"
-        ).format(table=sql.Identifier(table_name))
-    else:
-        query = sql.SQL(
-            "SELECT MIN(time_stamp), MAX(time_stamp) "
-            "FROM {table} WHERE run_id = {run_id}"
-        ).format(
-            table=sql.Identifier(table_name),
-            run_id=sql.Literal(run_id),
+def _build_where(start_time=None, run_id=None, scene_id=None):
+    """Build a WHERE clause from optional filters."""
+    conditions = []
+
+    if start_time is not None:
+        conditions.append(
+            sql.SQL("time_stamp >= {t}").format(t=sql.Literal(start_time))
         )
+    if run_id is not None:
+        conditions.append(
+            sql.SQL("run_id = {r}").format(r=sql.Literal(run_id))
+        )
+    if scene_id is not None:
+        conditions.append(
+            sql.SQL("scene_id = {s}").format(s=sql.Literal(scene_id))
+        )
+
+    if not conditions:
+        return sql.SQL("")
+
+    return sql.SQL(" WHERE ") + sql.SQL(" AND ").join(conditions)
+
+
+def get_time_bounds(cursor, table_name, run_id=None, scene_id=None):
+    """
+    Return (min_timestamp, max_timestamp) for a table,
+    optionally filtered by run_id and/or scene_id.
+    """
+    where = _build_where(run_id=run_id, scene_id=scene_id)
+
+    query = sql.SQL(
+        "SELECT MIN(time_stamp), MAX(time_stamp) FROM {table}{where}"
+    ).format(
+        table=sql.Identifier(table_name),
+        where=where,
+    )
 
     try:
         cursor.execute(query)
@@ -52,11 +74,13 @@ def get_time_bounds(cursor, table_name, run_id=None):
         return 0.0, 0.0
 
 
-def fetch_sensor_batch(cursor, table_name, sample_count, start_time, run_id=None):
+def fetch_sensor_batch(cursor, table_name, sample_count, start_time,
+                       run_id=None, scene_id=None):
     """
     Fetch ``sample_count`` rows starting at ``start_time``.
 
     Handles audio/seismic (amplitude) and accelerometer (3-axis) tables.
+    Optionally filters by run_id and/or scene_id.
     """
     target_cols = (
         sql.SQL("accel_x_ew, accel_y_ns, accel_z_ud")
@@ -64,16 +88,10 @@ def fetch_sensor_batch(cursor, table_name, sample_count, start_time, run_id=None
         else sql.SQL("amplitude")
     )
 
-    if run_id is None:
-        where = sql.SQL("time_stamp >= {t}").format(t=sql.Literal(start_time))
-    else:
-        where = sql.SQL("time_stamp >= {t} AND run_id = {r}").format(
-            t=sql.Literal(start_time),
-            r=sql.Literal(run_id),
-        )
+    where = _build_where(start_time=start_time, run_id=run_id, scene_id=scene_id)
 
     query = sql.SQL(
-        "SELECT {cols} FROM {table} WHERE {where} "
+        "SELECT {cols} FROM {table}{where} "
         "ORDER BY time_stamp ASC LIMIT {limit}"
     ).format(
         cols=target_cols,
