@@ -1,0 +1,15 @@
+Run Directory: 20260320_122651
+Mode: detection | Model: ResNet1D | Sensor: audio
+----------------------------------------
+Accuracy: 0.8857
+MCC: 0.5272
+ROC-AUC: 0.9463
+Precision: 0.9423
+Recall: 0.8857
+F1-Score: 0.9046
+Latency: 0.2647 ms/sample
+False Alarm Rate: 13.805%
+
+Per-Class Accuracy:
+  background (0): 0.8619
+  target (1): 0.8876

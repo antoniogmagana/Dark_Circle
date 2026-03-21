@@ -1,0 +1,42 @@
+Run Directory: 20260320_155923
+Mode: instance | Model: WaveformClassificationCNN | Sensor: audio
+----------------------------------------
+Accuracy: 0.5812
+MCC: 0.5297
+ROC-AUC: nan
+Precision: 0.6052
+Recall: 0.5812
+F1-Score: 0.5649
+Latency: 0.2744 ms/sample
+
+Per-Class Accuracy:
+  cx30 (0): 0.3525
+  motor2 (1): 0.3911
+  polaris0235pm_nolineofsig (2): 0.5556
+  polaris0215pm (3): 0.4667
+  forester2 (4): 0.0444
+  background (5): 0.8332
+  miata (6): 0.7204
+  walk2 (7): 0.7664
+  warhog_nolineofsight (8): 0.0000
+  pickup (9): 0.3450
+  scooter2 (10): 0.0661
+  walk (11): 0.1186
+  silverado0255pm (12): 0.5222
+  bicycle2 (13): 0.2848
+  scooter (14): 0.0844
+  forester (15): 0.3359
+  tesla (16): 0.2193
+  gle350 (17): 0.7785
+  mustang (18): 0.6491
+  silverado0315pm (19): 0.8222
+  motor (20): 0.5970
+  warhog1149am (21): 0.0000
+  pickup2 (22): 0.0262
+  polaris0150pm (23): 0.9222
+  miata_mustang (24): 0.8439
+  bicycle (25): 0.0085
+  mustang2 (26): 0.0397
+  tesla2 (27): 0.0178
+  mustang0528 (28): 0.7407
+  warhog1135am (29): 0.3684

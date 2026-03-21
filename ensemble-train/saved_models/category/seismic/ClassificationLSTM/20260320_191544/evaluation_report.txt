@@ -1,0 +1,16 @@
+Run Directory: 20260320_191544
+Mode: category | Model: ClassificationLSTM | Sensor: seismic
+----------------------------------------
+Accuracy: 0.6100
+MCC: 0.3158
+ROC-AUC: 0.8446
+Precision: 0.6266
+Recall: 0.6100
+F1-Score: 0.5914
+Latency: 0.0441 ms/sample
+
+Per-Class Accuracy:
+  pedestrian (0): 0.4452
+  light (1): 0.0083
+  sport (2): 0.6141
+  utility (3): 0.7143

@@ -1,0 +1,15 @@
+Run Directory: 20260320_184325
+Mode: detection | Model: IterativeMiniRocket | Sensor: seismic
+----------------------------------------
+Accuracy: 0.5849
+MCC: 0.2883
+ROC-AUC: 0.9370
+Precision: 0.9359
+Recall: 0.5849
+F1-Score: 0.6774
+Latency: 0.0628 ms/sample
+False Alarm Rate: 0.418%
+
+Per-Class Accuracy:
+  background (0): 0.9958
+  target (1): 0.5516

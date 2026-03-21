@@ -1,0 +1,42 @@
+Run Directory: 20260320_153427
+Mode: instance | Model: DetectionCNN | Sensor: audio
+----------------------------------------
+Accuracy: 0.4440
+MCC: 0.3746
+ROC-AUC: nan
+Precision: 0.4695
+Recall: 0.4440
+F1-Score: 0.4114
+Latency: 0.2731 ms/sample
+
+Per-Class Accuracy:
+  cx30 (0): 0.1579
+  motor2 (1): 0.2111
+  polaris0235pm_nolineofsig (2): 0.0444
+  polaris0215pm (3): 0.2000
+  forester2 (4): 0.0000
+  background (5): 0.8046
+  miata (6): 0.5013
+  walk2 (7): 0.6329
+  warhog_nolineofsight (8): 0.0000
+  pickup (9): 0.1254
+  scooter2 (10): 0.0068
+  walk (11): 0.0000
+  silverado0255pm (12): 0.6444
+  bicycle2 (13): 0.1576
+  scooter (14): 0.0356
+  forester (15): 0.2915
+  tesla (16): 0.0657
+  gle350 (17): 0.6044
+  mustang (18): 0.5850
+  silverado0315pm (19): 0.2667
+  motor (20): 0.5594
+  warhog1149am (21): 0.0000
+  pickup2 (22): 0.0000
+  polaris0150pm (23): 0.8000
+  miata_mustang (24): 0.6573
+  bicycle (25): 0.0000
+  mustang2 (26): 0.0000
+  tesla2 (27): 0.0000
+  mustang0528 (28): 0.6476
+  warhog1135am (29): 0.0175

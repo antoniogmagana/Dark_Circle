@@ -1,0 +1,15 @@
+Run Directory: 20260320_172921
+Mode: detection | Model: ClassificationCNN | Sensor: seismic
+----------------------------------------
+Accuracy: 0.9288
+MCC: 0.6607
+ROC-AUC: 0.9785
+Precision: 0.9580
+Recall: 0.9288
+F1-Score: 0.9378
+Latency: 0.0619 ms/sample
+False Alarm Rate: 6.868%
+
+Per-Class Accuracy:
+  background (0): 0.9313
+  target (1): 0.9285

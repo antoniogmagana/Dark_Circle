@@ -1,0 +1,15 @@
+Run Directory: 20260320_114313
+Mode: detection | Model: ClassificationLSTM | Sensor: audio
+----------------------------------------
+Accuracy: 0.9097
+MCC: 0.5809
+ROC-AUC: 0.9580
+Precision: 0.9474
+Recall: 0.9097
+F1-Score: 0.9223
+Latency: 0.2576 ms/sample
+False Alarm Rate: 13.735%
+
+Per-Class Accuracy:
+  background (0): 0.8626
+  target (1): 0.9135

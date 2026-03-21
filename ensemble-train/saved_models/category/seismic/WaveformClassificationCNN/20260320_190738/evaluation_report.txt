@@ -1,0 +1,16 @@
+Run Directory: 20260320_190738
+Mode: category | Model: WaveformClassificationCNN | Sensor: seismic
+----------------------------------------
+Accuracy: 0.6317
+MCC: 0.3555
+ROC-AUC: 0.8596
+Precision: 0.6664
+Recall: 0.6317
+F1-Score: 0.6119
+Latency: 0.0541 ms/sample
+
+Per-Class Accuracy:
+  pedestrian (0): 0.4678
+  light (1): 0.0003
+  sport (2): 0.6413
+  utility (3): 0.7337

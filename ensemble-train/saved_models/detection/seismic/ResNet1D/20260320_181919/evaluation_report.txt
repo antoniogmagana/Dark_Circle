@@ -1,0 +1,15 @@
+Run Directory: 20260320_181919
+Mode: detection | Model: ResNet1D | Sensor: seismic
+----------------------------------------
+Accuracy: 0.9528
+MCC: 0.7493
+ROC-AUC: 0.9911
+Precision: 0.9683
+Recall: 0.9528
+F1-Score: 0.9574
+Latency: 0.0599 ms/sample
+False Alarm Rate: 4.107%
+
+Per-Class Accuracy:
+  background (0): 0.9589
+  target (1): 0.9523

@@ -1,0 +1,42 @@
+Run Directory: 20260320_202155
+Mode: instance | Model: ResNet1D | Sensor: seismic
+----------------------------------------
+Accuracy: 0.4587
+MCC: 0.3937
+ROC-AUC: nan
+Precision: 0.5000
+Recall: 0.4587
+F1-Score: 0.4187
+Latency: 0.0544 ms/sample
+
+Per-Class Accuracy:
+  cx30 (0): 0.0366
+  motor2 (1): 0.0200
+  polaris0235pm_nolineofsig (2): 0.5333
+  polaris0215pm (3): 0.0444
+  forester2 (4): 0.0163
+  background (5): 0.8893
+  miata (6): 0.5427
+  walk2 (7): 0.9011
+  warhog_nolineofsight (8): 0.0000
+  pickup (9): 0.3921
+  scooter2 (10): 0.0627
+  walk (11): 0.4106
+  silverado0255pm (12): 0.8778
+  bicycle2 (13): 0.2889
+  scooter (14): 0.1733
+  forester (15): 0.4327
+  tesla (16): 0.3981
+  gle350 (17): 0.6209
+  mustang (18): 0.5022
+  silverado0315pm (19): 0.2000
+  motor (20): 0.1515
+  warhog1149am (21): 0.0000
+  pickup2 (22): 0.0213
+  polaris0150pm (23): 0.5667
+  miata_mustang (24): 0.7939
+  bicycle (25): 0.3453
+  mustang2 (26): 0.0023
+  tesla2 (27): 0.0237
+  mustang0528 (28): 0.9217
+  warhog1135am (29): 0.0000

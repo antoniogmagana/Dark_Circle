@@ -1,0 +1,54 @@
+{
+  "weights": {
+    "detection": {
+      "audio": 0.49922500062064523,
+      "seismic": 0.5007749993793548
+    },
+    "category": {
+      "audio": 0.5261012516391957,
+      "seismic": 0.4738987483608042
+    },
+    "instance": {
+      "audio": 0.5364850358718202,
+      "seismic": 0.46351496412817983
+    }
+  },
+  "model_info": {
+    "detection": {
+      "audio": {
+        "run_dir": "saved_models/detection/audio/WaveformClassificationCNN/20260320_110503",
+        "f1": 0.9543,
+        "model_name": "WaveformClassificationCNN"
+      },
+      "seismic": {
+        "run_dir": "saved_models/detection/seismic/ResNet1D/20260320_181919",
+        "f1": 0.9574,
+        "model_name": "ResNet1D"
+      }
+    },
+    "category": {
+      "audio": {
+        "run_dir": "saved_models/category/audio/WaveformClassificationCNN/20260320_143428",
+        "f1": 0.7164,
+        "model_name": "WaveformClassificationCNN"
+      },
+      "seismic": {
+        "run_dir": "saved_models/category/seismic/WaveformClassificationCNN/20260320_190738",
+        "f1": 0.6119,
+        "model_name": "WaveformClassificationCNN"
+      }
+    },
+    "instance": {
+      "audio": {
+        "run_dir": "saved_models/instance/audio/WaveformClassificationCNN/20260320_155923",
+        "f1": 0.5649,
+        "model_name": "WaveformClassificationCNN"
+      },
+      "seismic": {
+        "run_dir": "saved_models/instance/seismic/ResNet1D/20260320_202155",
+        "f1": 0.4187,
+        "model_name": "ResNet1D"
+      }
+    }
+  }
+}

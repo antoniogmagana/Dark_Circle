@@ -1,0 +1,15 @@
+Run Directory: 20260320_100617
+Mode: detection | Model: DetectionCNN | Sensor: audio
+----------------------------------------
+Accuracy: 0.8397
+MCC: 0.4771
+ROC-AUC: 0.9369
+Precision: 0.9412
+Recall: 0.8397
+F1-Score: 0.8726
+Latency: 0.2606 ms/sample
+False Alarm Rate: 7.819%
+
+Per-Class Accuracy:
+  background (0): 0.9218
+  target (1): 0.8331
