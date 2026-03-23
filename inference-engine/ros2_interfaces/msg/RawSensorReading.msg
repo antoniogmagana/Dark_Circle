@@ -1,8 +1,8 @@
 # Add the sensor id to make it scalable
-string sensor_label
+string sensor_id
 
 # timestamp for sensor reading in seconds
-builtin_interfaces/Time timestamp
+float64 start_time
 
 # sensor reading value
-float64 sensor_value
+float64[] amplitude_readings

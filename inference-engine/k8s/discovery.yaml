@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discovery
+  labels:
+    app: discovery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: discovery
+  template:
+    metadata:
+      labels:
+        app: discovery
+    spec:
+      serviceAccountName: discovery-sa
+      containers:
+        - name: discovery
+          image: your-registry/discovery:latest   # update with your registry
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: TEMPLATE_PATH
+              value: "/app/ingestor-template.yaml"

@@ -1,0 +1,19 @@
+[project]
+name = "discovery"
+version = "0.1.0"
+description = "Discovery Node"
+authors = [
+    {name = "Brandon Taylor",email = "btaylor9273@gmail.com"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "kubernetes (>=32.0.0,<33.0.0)",
+    "pyyaml (>=6.0.0,<7.0.0)",
+]
+
+# rclpy is provided by the ROS2 environment (ros:jazzy base image)
+# and is not available on PyPI — do not add via poetry
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,32 @@
+# ConfigMap: Ingestor Deployment Template
+# Used by the Discovery Node to instantiate per-sensor-array Ingestor pods
+# SENSOR_TOPICS and sensor array name are injected at runtime
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestor-<sensor_array_id>        # discovery node substitutes this
+  labels:
+    app: ingestor
+    sensor-array: <sensor_array_id>        # discovery node substitutes this
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingestor
+      sensor-array: <sensor_array_id>      # discovery node substitutes this
+  template:
+    metadata:
+      labels:
+        app: ingestor
+        sensor-array: <sensor_array_id>    # discovery node substitutes this
+    spec:
+      containers:
+        - name: ingestor
+          image: your-registry/ingestor:latest   # update with your registry
+          env:
+            - name: NATS_URL
+              value: "nats://nats-service:4222"
+            - name: SENSOR_ARRAY
+              value: "<sensor_array_id>"          # discovery node substitutes this
+            - name: SENSOR_TOPICS
+              value: "<comma,separated,topics>"   # discovery node substitutes this
