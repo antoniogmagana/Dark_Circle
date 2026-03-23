@@ -1,5 +1,5 @@
 import numpy as np
-from . import inference_pb2
+import inference_pb2
 
 
 class SensorBuffer():
@@ -38,9 +38,12 @@ class SensorBuffer():
             'accel_y' : [],
             'accel_z' : []
         }
-    
-    def _get_time(self, sec, nanosec):
-        return sec + (nanosec * 1e-9)
+        self.adc_scale = {
+            'acoustic': 2**15,
+            'seismic': 2**23,
+            'accel': 2**23,
+        }
+
     
     def _package_window(self):
         ts = inference_pb2.google_dot_protobuf_dot_timestamp__pb2.Timestamp()
@@ -53,20 +56,22 @@ class SensorBuffer():
         )
 
         if 'acoustic' in self.active_channels:
+            arr = self.buffers['acoustic'] / self.adc_scale['acoustic']
             payload.channels.append('acoustic')
             payload.acoustic_data.CopyFrom(
                 inference_pb2.Tensor(
-                    shape=list(self.buffers['acoustic'].shape),
-                    data=self.buffers['acoustic'].flatten().tolist()
+                    shape=list(arr.shape),
+                    data=arr.flatten().tolist()
                 )
             )
         
         if 'seismic' in self.active_channels:
+            arr = self.buffers['seismic'] / self.adc_scale['seismic']
             payload.channels.append('seismic')
             payload.seismic_data.CopyFrom(
                 inference_pb2.Tensor(
-                    shape=list(self.buffers['seismic'].shape),
-                    data=self.buffers['seismic'].flatten().tolist()
+                    shape=list(arr.shape),
+                    data=arr.flatten().tolist()
                 )
             )
 
@@ -76,7 +81,7 @@ class SensorBuffer():
                 self.buffers['accel_x'],
                 self.buffers['accel_y'],
                 self.buffers['accel_z']
-            ))
+            )) / self.adc_scale['accel']
             payload.accel_data.CopyFrom(
                 inference_pb2.Tensor(
                     shape=list(accel_matrix.shape),
@@ -106,16 +111,16 @@ class SensorBuffer():
         return None
 
     
-    def load_buffer(self, channel, data, sec, nanosec):
+    def load_buffer(self, channel, data, timestamp):
         
         rate = self.rates[channel]
         limit = self.limits[channel]
         buffer = self.buffers[channel]
         
         if self.start_time is None:
-            self.start_time = self._get_time(sec, nanosec)
+            self.start_time = timestamp
         
-        current_time = self._get_time(sec, nanosec)
+        current_time = timestamp
         time_diff = current_time - self.start_time
         
         if time_diff < 0:
@@ -126,7 +131,7 @@ class SensorBuffer():
                 ready_payload = self._package_window()
                 self._reset_buffers()
                 
-                self.load_buffer(channel, data, sec, nanosec)
+                self.load_buffer(channel, data, timestamp)
                 
                 return ready_payload
             else:
