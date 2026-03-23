@@ -12,6 +12,8 @@ dependencies = [
     "numpy (>=2.4.2,<3.0.0)",
 ]
 
+# rclpy is provided by the ROS2 environment (ros:jazzy base image)
+# and is not available on PyPI — do not add via poetry
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
