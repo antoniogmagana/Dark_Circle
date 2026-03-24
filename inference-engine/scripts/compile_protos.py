@@ -1,6 +1,7 @@
 import os
 import sys
 from grpc_tools import protoc
+import importlib.resources
 
 def build_protobufs():
     # Find the main project folder no matter where this script is run from
@@ -12,6 +13,7 @@ def build_protobufs():
 
     # Single output location — the shared inference-protos package
     target_folder = os.path.join(project_root, 'inference-protos', 'inference_protos')
+    proto_include = str(importlib.resources.files('grpc_tools') / '_proto')
 
     print(f"Translating data blueprints from {proto_file}...")
 
@@ -20,6 +22,7 @@ def build_protobufs():
     result = protoc.main([
         'grpc_tools.protoc',
         f'-I{protos_dir}',
+        f'-I{proto_include}',       # add this line
         f'--python_out={target_folder}',
         proto_file
     ])

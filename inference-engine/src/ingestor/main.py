@@ -89,8 +89,7 @@ def main():
     node = IngestorNode(nc, loop, topics, sensor_array)
     rclpy.spin(node)
     rclpy.shutdown()
-    loop.run_until_complete(nc.drain())
-
+    asyncio.run_coroutine_threadsafe(nc.drain(), loop).result()
 
 if __name__ == '__main__':
     main()

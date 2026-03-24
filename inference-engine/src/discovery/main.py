@@ -89,7 +89,7 @@ class DiscoveryNode(Node):
         for sensor_array in list(self.active_arrays):
             if sensor_array not in visible_arrays:
                 self.absent_counts[sensor_array] += 1
-                self.get_logger().warn(
+                self.get_logger().warning(
                     f"{sensor_array} absent for "
                     f"{self.absent_counts[sensor_array]}/{GRACE_POLLS} polls"
                 )

@@ -11,11 +11,8 @@ from ros2_interfaces.msg import InferenceResult
 
 
 class EgressNode(Node):
-    def __init__(self, nc, loop, sensor_array):
+    def __init__(self, sensor_array):
         super().__init__(f'egressor_{sensor_array}')
-        self.nc = nc
-        self.loop = loop
-        self.sensor_array = sensor_array
         self.publisher = self.create_publisher(InferenceResult, 'inference_result', 10)
 
     def _publish(self, payload):
@@ -56,18 +53,18 @@ def main():
     loop = asyncio.new_event_loop()
     nc = loop.run_until_complete(start_nats())
     sensor_array = os.environ["SENSOR_ARRAY"]
-    node = EgressNode(nc, loop, sensor_array)
+    rclpy.init()
+    node = EgressNode(sensor_array)
     loop.run_until_complete(nc.subscribe("detection.result", cb=node.on_detection))
     loop.run_until_complete(nc.subscribe("classification.result", cb=node.on_classification))
 
     thread = threading.Thread(target=loop.run_forever, daemon=True)
     thread.start()
 
-    rclpy.init()
     rclpy.spin(node)
 
     rclpy.shutdown()
-    loop.run_until_complete(nc.drain())
+    asyncio.run_coroutine_threadsafe(nc.drain(), loop).result()
 
 
 if __name__ == '__main__':
