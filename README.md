@@ -76,10 +76,27 @@ Our development process follows a structured experimental design for signal proc
 ## 7. Project Status & Roadmap
 
 ### Anticipated Tasks
-- [x] Requirements Gathering and Design
-- [ ] Data Engineering and Modeling
-- [ ] Deployment and Integration
-- [ ] Evaluation and Redeployment
+
+* [x] Requirements Gathering and Design
+* [x] Data Engineering and Modeling
+* [x] Inference Engine Architecture and Implementation
+* [ ] Deployment and Integration
+* [ ] Evaluation and Redeployment
+
+### Inference Engine Progress
+
+* [x] ROS2 interface definitions (`RawSensorReading`, `InferenceResult`)
+* [x] Protobuf schema (`inference.proto`) with shared `inference-protos` package
+* [x] Ingestor node — ROS2 subscriber, 1-second windowed buffer, ADC normalization, NATS publisher
+* [x] Discovery node — ROS2 graph polling, dynamic k8s Deployment spawning/teardown per sensor array
+* [x] Egress node — dual NATS subscriber, ROS2 publisher for inference results
+* [x] NATS message broker k8s configuration
+* [x] Dockerfiles for all nodes (`ros:jazzy` base)
+* [x] k8s Deployment manifests for all nodes
+* [x] RBAC configuration for Discovery node
+* [ ] Infer Detect node implementation (pending model integration)
+* [ ] Infer Classify node implementation (pending model integration)
+* [ ] Container registry setup and build pipeline (`build_containers.sh`)
 
 ---
 
