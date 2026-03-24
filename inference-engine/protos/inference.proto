@@ -34,8 +34,8 @@ message EgressPayload {
     google.protobuf.Timestamp time_stamp = 2;
     bool vehicle_detected = 3;
     float detection_confidence = 4;
-    optional string vehicle_class = 5;
-    optional float classification_confidence = 6;
+    string vehicle_class = 5;
+    float classification_confidence = 6;
 }
 
 // Packet receipt acknowledgement

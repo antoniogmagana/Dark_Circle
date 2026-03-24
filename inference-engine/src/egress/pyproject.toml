@@ -7,9 +7,14 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "inference-protos @ file:///${PROJECT_ROOT}/../../inference-protos",
     "nats-py (>=2.14.0,<3.0.0)",
 ]
+
+# rclpy is provided by the ROS2 environment (ros:jazzy base image)
+# and is not available on PyPI — do not add via poetry
+
+# inference-protos is installed directly via pip in the Dockerfile
+# from the local path ../../inference-protos — not available on PyPI
 
 
 [build-system]
