@@ -7,8 +7,10 @@ import sys
 import os
 from pathlib import Path
 
-# Set DB password before importing config to avoid input prompt
+# Set environment variables before importing config to avoid input prompts
 os.environ['DB_PASSWORD'] = 'test_password'
+os.environ['TRAINING_MODE'] = 'detection'
+os.environ['MODEL_NAME'] = 'test_model'
 
 # Add model-train to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "model-train"))

@@ -63,27 +63,39 @@ class TestSanitizeName:
 class TestDetermineDataset:
     """Test dataset determination from file paths."""
     
-    def test_determine_iobt_dataset(self):
+    def test_determine_iobt_dataset(self, mocker):
         """Test recognizing IoBT dataset."""
-        path = Path("/data/IoBT/audio/file.csv")
-        dataset = determine_dataset(path)
+        sensor_dir = Path("/data/IoBT/audio/sensor01")
         
-        # Function returns string, check if it contains expected value
-        assert dataset is not None
+        # Mock the exists() method for specific files
+        def mock_exists(self):
+            return str(self).endswith("aud16000.csv")
+        
+        mocker.patch.object(Path, 'exists', mock_exists)
+        dataset = determine_dataset(sensor_dir)
+        
+        assert dataset == "iobt"
     
-    def test_determine_focal_dataset(self):
+    def test_determine_focal_dataset(self, mocker):
         """Test recognizing FOCAL dataset."""
-        path = Path("/data/FOCAL/seismic/data.csv")
-        dataset = determine_dataset(path)
+        sensor_dir = Path("/data/FOCAL/seismic/sensor02")
         
-        assert dataset is not None
+        # Mock the exists() method for specific files
+        def mock_exists(self):
+            return str(self).endswith("aud.csv")
+        
+        mocker.patch.object(Path, 'exists', mock_exists)
+        dataset = determine_dataset(sensor_dir)
+        
+        assert dataset == "focal"
     
     def test_determine_m3nvc_dataset(self):
-        """Test recognizing M3NVC dataset."""
-        path = Path("/home/datasets/M3NVC/h08/audio.csv")
-        dataset = determine_dataset(path)
+        """Test that M3NVC dataset returns None (not detected by file pattern)."""
+        sensor_dir = Path("/home/datasets/M3NVC/h08/sensor")
+        dataset = determine_dataset(sensor_dir)
         
-        assert dataset is not None
+        # M3NVC is not detected by determine_dataset - it only detects iobt/focal
+        assert dataset is None
 
 
 class TestDatabaseConnection:

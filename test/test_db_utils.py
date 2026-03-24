@@ -8,8 +8,10 @@ import os
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
-# Set DB password to avoid input prompt
+# Set environment variables to avoid input prompts
 os.environ['DB_PASSWORD'] = 'test_password'
+os.environ['TRAINING_MODE'] = 'detection'
+os.environ['MODEL_NAME'] = 'test_model'
 
 # Add model-train to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "model-train"))

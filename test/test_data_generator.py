@@ -8,8 +8,10 @@ import sys
 import os
 from pathlib import Path
 
-# Set DB password to avoid input prompt
+# Set environment variables to avoid input prompts
 os.environ['DB_PASSWORD'] = 'test_password'
+os.environ['TRAINING_MODE'] = 'detection'
+os.environ['MODEL_NAME'] = 'test_model'
 
 # Add model-train to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "model-train"))
@@ -171,7 +173,8 @@ class TestInjectSNRNoise:
     
     def test_higher_snr_less_noise(self):
         """Test that higher SNR results in less noise."""
-        clean_signal = torch.ones(2, 1000)  # Constant signal
+        # Use a signal with AC component (varying signal)
+        clean_signal = torch.randn(2, 1000) + 5.0  # Random signal with DC offset
         
         noisy_low_snr = inject_snr_noise(clean_signal, target_snr_db=10)
         noisy_high_snr = inject_snr_noise(clean_signal, target_snr_db=30)
@@ -244,20 +247,22 @@ class TestAugmentBatch:
     
     def test_different_snr_per_sample(self):
         """Test that different samples get different SNR."""
-        # Use constant signal to see noise differences
-        batch = torch.ones(8, 2, 1000)
+        # Use random signal with variation (AC component)
+        batch = torch.randn(8, 2, 1000) + 1.0  # Add DC offset
         
         augmented = augment_batch(batch, snr_range=(10, 30))
         
         # Different samples should have different noise levels
-        sample_vars = augmented.var(dim=(1, 2))
+        # Calculate noise for each sample
+        noise = (augmented - batch).abs().mean(dim=(1, 2))
         
-        # At least some variance in the variances
-        assert sample_vars.std() > 0
+        # At least some variance in the noise levels
+        assert noise.std() > 0
     
     def test_snr_range_effect(self):
         """Test that SNR range affects output."""
-        batch = torch.ones(16, 2, 1000)
+        # Use signal with AC component
+        batch = torch.randn(16, 2, 1000) + 5.0  # Random signal with DC offset
         
         # Low SNR range (more noise)
         aug_low = augment_batch(batch, snr_range=(5, 10))

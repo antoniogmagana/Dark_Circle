@@ -8,8 +8,10 @@ import os
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
-# Set DB password to avoid input prompt
+# Set environment variables to avoid input prompts
 os.environ['DB_PASSWORD'] = 'test_password'
+os.environ['TRAINING_MODE'] = 'detection'
+os.environ['MODEL_NAME'] = 'test_model'
 
 # Mock torchaudio to avoid CUDA runtime library issues
 sys.modules['torchaudio'] = MagicMock()
@@ -105,7 +107,7 @@ class TestVehicleDatasetInit:
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_split_parameter(self, *mocks, mock_config):
+    def test_split_parameter(self, mock_config, *mocks):
         """Test dataset with different split parameters."""
         for split in ['train', 'val', 'test']:
             dataset = VehicleDataset(split=split, config=mock_config)
@@ -115,7 +117,7 @@ class TestVehicleDatasetInit:
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_attributes_initialized(self, *mocks, mock_config):
+    def test_attributes_initialized(self, mock_config, *mocks):
         """Test all required attributes are initialized."""
         dataset = VehicleDataset(split='train', config=mock_config)
         
@@ -136,7 +138,7 @@ class TestVehicleDatasetLength:
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_length(self, *mocks, mock_config):
+    def test_length(self, mock_config, *mocks):
         """Test dataset length."""
         dataset = VehicleDataset(split='train', config=mock_config)
         dataset.samples = [1, 2, 3, 4, 5]
@@ -147,7 +149,7 @@ class TestVehicleDatasetLength:
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_empty_dataset(self, *mocks, mock_config):
+    def test_empty_dataset(self, mock_config, *mocks):
         """Test empty dataset length."""
         dataset = VehicleDataset(split='train', config=mock_config)
         dataset.samples = []
@@ -158,12 +160,11 @@ class TestVehicleDatasetLength:
 class TestVehicleDatasetGetItem:
     """Test VehicleDataset __getitem__ method."""
     
-    @patch('dataset.generate_no_vehicle_sample')
     @patch.object(VehicleDataset, '_get_tables', return_value=None)
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_getitem_detection_mode(self, mock_gen, *mocks, mock_config):
+    def test_getitem_detection_mode(self, mock_config, *mocks):
         """Test __getitem__ in detection mode."""
         mock_config.TRAINING_MODE = "detection"
         
@@ -171,9 +172,6 @@ class TestVehicleDatasetGetItem:
         dataset.samples = [
             ("iobt", "mustang", "s1", 1, 0.0, "background")
         ]
-        
-        # Mock synthetic generation
-        mock_gen.return_value = torch.randn(2, 48000)
         
         # This would require more complex mocking of DB queries
         # For now, verify structure
@@ -183,7 +181,7 @@ class TestVehicleDatasetGetItem:
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_getitem_category_mode(self, *mocks, mock_config):
+    def test_getitem_category_mode(self, mock_config, *mocks):
         """Test __getitem__ in category mode."""
         mock_config.TRAINING_MODE = "category"
         mock_config.CLASS_MAP = {0: "background", 1: "light", 2: "heavy"}
@@ -199,7 +197,7 @@ class TestVehicleDatasetGetItem:
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_getitem_instance_mode(self, *mocks, mock_config):
+    def test_getitem_instance_mode(self, mock_config, *mocks):
         """Test __getitem__ in instance mode."""
         mock_config.TRAINING_MODE = "instance"
         mock_config.INSTANCE_TO_CLASS = {
@@ -219,15 +217,12 @@ class TestVehicleDatasetGetItem:
 class TestVehicleDatasetSynthesis:
     """Test synthetic sample generation in dataset."""
     
-    @patch('dataset.generate_no_vehicle_sample')
     @patch.object(VehicleDataset, '_get_tables', return_value=None)
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_pure_synthetic_sample(self, mock_gen, *mocks, mock_config):
+    def test_pure_synthetic_sample(self, mock_config, *mocks):
         """Test pure synthetic sample generation."""
-        mock_gen.return_value = torch.randn(2, 48000)
-        
         dataset = VehicleDataset(split='train', config=mock_config)
         dataset.samples = [
             ("synthetic", "background", None, None, None, "background")
@@ -241,7 +236,7 @@ class TestVehicleDatasetSynthesis:
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_synthesize_background_flag(self, *mocks, mock_config):
+    def test_synthesize_background_flag(self, mock_config, *mocks):
         """Test SYNTHESIZE_BACKGROUND configuration flag."""
         mock_config.SYNTHESIZE_BACKGROUND = True
         mock_config.SYNTHESIZE_PROBABILITY = 0.5
@@ -259,7 +254,7 @@ class TestDatasetIntegration:
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_dataset_for_dataloader(self, *mocks, mock_config):
+    def test_dataset_for_dataloader(self, mock_config, *mocks):
         """Test dataset is compatible with PyTorch DataLoader."""
         dataset = VehicleDataset(split='train', config=mock_config)
         dataset.samples = list(range(100))
@@ -275,7 +270,7 @@ class TestDatasetIntegration:
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_multiple_training_modes(self, *mocks, mock_config):
+    def test_multiple_training_modes(self, mock_config, *mocks):
         """Test dataset works with all training modes."""
         modes = ['detection', 'category', 'instance']
         
@@ -289,7 +284,7 @@ class TestDatasetIntegration:
     @patch.object(VehicleDataset, '_get_table_max_time', return_value=None)
     @patch.object(VehicleDataset, '_align_max_time', return_value=None)
     @patch.object(VehicleDataset, '_get_samples', return_value=None)
-    def test_split_variations(self, *mocks, mock_config):
+    def test_split_variations(self, mock_config, *mocks):
         """Test dataset with different splits."""
         splits = ['train', 'val', 'test']
         

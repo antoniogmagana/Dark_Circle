@@ -58,12 +58,12 @@ def mock_config():
     config.CLASS_MAP = {0: "background", 1: "light", 2: "heavy"}
     config.INSTANCE_TO_CLASS = {}
     
-    # Model architecture parameters
-    config.CHANNELS = [32, 64, 128, 256]
-    config.KERNELS = [(3, 3), (3, 3)]
-    config.STRIDES = [(1, 1), (1, 1)]
-    config.PADS = [(1, 1), (1, 1)]
-    config.KERNEL = (3, 3)
+    # Model architecture parameters (for both DetectionCNN and ClassificationCNN)
+    config.CHANNELS = [32, 64, 128, 256]  # Used by both models
+    config.KERNELS = [5, 3]  # DetectionCNN uses list of ints
+    config.STRIDES = [2, 1]  # DetectionCNN uses list of ints
+    config.PADS = [2, 1]  # DetectionCNN uses list of ints
+    config.KERNEL = 3  # ClassificationCNN uses single int
     config.HIDDEN = 128
     config.DROPOUT = 0.5
     
