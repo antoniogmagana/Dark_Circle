@@ -1,0 +1,21 @@
+{
+    "include": [
+        "test",
+        "model-train",
+        "ensemble-train",
+        "server-load",
+        "inference-engine"
+    ],
+    "extraPaths": [
+        "model-train",
+        "ensemble-train",
+        "server-load",
+        "inference-engine"
+    ],
+    "venvPath": "/home/lvc_toolkit",
+    "venv": "ai_env",
+    "pythonVersion": "3.12",
+    "typeCheckingMode": "basic",
+    "reportMissingImports": true,
+    "reportMissingTypeStubs": false
+}
