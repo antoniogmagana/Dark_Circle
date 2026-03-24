@@ -7,7 +7,8 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "protobuf (>=6.0.0,<7.0.0)"
+    "inference-protos @ file:///${PROJECT_ROOT}/../../inference-protos",
+    "nats-py (>=2.14.0,<3.0.0)",
 ]
 
 

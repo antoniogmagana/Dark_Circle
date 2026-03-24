@@ -1,0 +1,15 @@
+[project]
+name = "inference-protos"
+version = "1.0.0"
+description = "Shared protobuf definitions for inference pipeline nodes"
+authors = [
+    {name = "Brandon Taylor", email = "btaylor9273@gmail.com"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "protobuf (>=6.0.0,<7.0.0)"
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -1,5 +1,5 @@
 import numpy as np
-import inference_pb2
+from inference_protos import inference_pb2
 
 
 class SensorBuffer():

@@ -18,11 +18,13 @@ COPY pyproject.toml poetry.lock ./
 RUN poetry config virtualenvs.create false \
     && poetry install --no-root
 
-# Copy compiled protobuf
-COPY inference_pb2.py .
+# Copy and install shared proto package
+COPY ../../inference-protos /inference-protos
+RUN pip install /inference-protos --break-system-packages
 
 # Copy source
-COPY buffer.py main.py .
+COPY buffer.py ./
+COPY main.py ./
 
 # Source ROS2 and run
 CMD ["/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && python3 main.py"]

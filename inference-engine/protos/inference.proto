@@ -21,7 +21,7 @@ message SensorData {
     optional Tensor accel_data = 6;
 }
 
-// Sent from Detector to Classifier (if vehicle == true)
+// Sent from Detector to Classifier (if vehicle == true) and Egress Node
 message DetectionResult {
     SensorData sensor_data = 1;
     bool vehicle_detected = 2;
@@ -33,9 +33,9 @@ message EgressPayload {
     string sensor_id = 1;
     google.protobuf.Timestamp time_stamp = 2;
     bool vehicle_detected = 3;
-    string vehicle_class = 4;
-    float detection_confidence = 5;
-    float classification_confidence = 6;
+    float detection_confidence = 4;
+    optional string vehicle_class = 5;
+    optional float classification_confidence = 6;
 }
 
 // Packet receipt acknowledgement

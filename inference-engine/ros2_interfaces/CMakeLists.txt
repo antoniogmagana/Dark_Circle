@@ -17,6 +17,7 @@ find_package(rosidl_default_generators REQUIRED)
 # tell generator to compile custom message
 rosidl_default_generators(${PROJECT_NAME}
   "msg/RawSensorReading.msg"
+  "msg/InferenceResult.msg"
   DEPENDENCIES std_msgs sensor_msgs
 )
 
