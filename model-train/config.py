@@ -50,7 +50,9 @@ DB_CONN_PARAMS = {
     "port": 5432,
 }
 if not DB_CONN_PARAMS["password"]:
-    DB_CONN_PARAMS["password"] = input("Enter Database Password: ")
+    # Use environment variable for testing, fallback to input
+    import os
+    DB_CONN_PARAMS["password"] = os.getenv("DB_PASSWORD") or input("Enter Database Password: ")
 
 # =====================================================================
 # 3. TRAINING MODE (NEW)

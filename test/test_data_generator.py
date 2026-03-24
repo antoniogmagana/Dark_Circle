@@ -5,7 +5,11 @@ Tests data generation, noise injection, and augmentation functions.
 import pytest
 import torch
 import sys
+import os
 from pathlib import Path
+
+# Set DB password to avoid input prompt
+os.environ['DB_PASSWORD'] = 'test_password'
 
 # Add model-train to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "model-train"))

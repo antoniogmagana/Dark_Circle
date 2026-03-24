@@ -4,8 +4,12 @@ Tests database utility functions including connection, queries, and data fetchin
 """
 import pytest
 import sys
+import os
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
+
+# Set DB password to avoid input prompt
+os.environ['DB_PASSWORD'] = 'test_password'
 
 # Add model-train to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "model-train"))

@@ -36,7 +36,12 @@ pip install -r test_requirements.txt
 
 ```bash
 cd /path/to/Dark_Circle
+
+# Install test dependencies
 pip install -r test/test_requirements.txt
+
+# Set database password environment variable (required)
+export DB_PASSWORD=test_password
 ```
 
 ## Running Tests
@@ -44,12 +49,16 @@ pip install -r test/test_requirements.txt
 ### Run All Tests
 
 ```bash
-# From project root
+# From project root (activate environment and set password first)
+source /path/to/ai_env/bin/activate
+export DB_PASSWORD=test_password
 pytest test/
 
 # Or use the test runner script
 ./test/run_tests.sh
 ```
+
+**Note:** Some tests may fail due to missing CUDA libraries. See [Troubleshooting](#troubleshooting) section.
 
 ### Run Specific Test Module
 

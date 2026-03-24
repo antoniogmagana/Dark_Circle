@@ -6,10 +6,17 @@ import pytest
 import torch
 import torch.nn as nn
 import sys
+import os
 from pathlib import Path
 
-# Add model-train to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "model-train"))
+# Set DB password to avoid input prompt
+os.environ['DB_PASSWORD'] = 'test_password'
+
+# Add model-train to path FIRST, before any other imports
+model_train_path = str(Path(__file__).parent.parent / "model-train")
+if model_train_path in sys.path:
+    sys.path.remove(model_train_path)
+sys.path.insert(0, model_train_path)
 
 from models import DetectionCNN, ClassificationCNN
 

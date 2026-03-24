@@ -3,10 +3,19 @@ Tests for model-train/dataset.py
 Tests VehicleDataset class and data loading functionality.
 """
 import pytest
-import torch
 import sys
+import os
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
+
+# Set DB password to avoid input prompt
+os.environ['DB_PASSWORD'] = 'test_password'
+
+# Mock torchaudio to avoid CUDA runtime library issues
+sys.modules['torchaudio'] = MagicMock()
+sys.modules['torchaudio.transforms'] = MagicMock()
+
+import torch
 
 # Add model-train to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "model-train"))

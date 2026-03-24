@@ -3,12 +3,21 @@ Tests for ensemble-train/ensemble.py and ensemble prediction functionality.
 Tests late fusion, model discovery, and two-stage prediction.
 """
 import pytest
-import torch
 import sys
+import os
 import tempfile
 import json
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
+
+# Set DB password to avoid input prompt
+os.environ['DB_PASSWORD'] = 'test_password'
+
+# Mock torchaudio to avoid CUDA runtime library issues
+sys.modules['torchaudio'] = MagicMock()
+sys.modules['torchaudio.transforms'] = MagicMock()
+
+import torch
 
 # Add ensemble-train to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "ensemble-train"))
