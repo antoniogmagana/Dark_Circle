@@ -273,7 +273,7 @@ def main():
         criterion = nn.CrossEntropyLoss()
 
     optimizer = model.get_optimizer()
-    scaler = torch.cuda.amp.GradScaler() if device.type == "cuda" else None
+    scaler = torch.amp.GradScaler('cuda') if device.type == "cuda" else None
 
     # ------------------------------------------------------------
     # CSV Initialization & Dynamic Headers
