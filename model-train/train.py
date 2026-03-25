@@ -21,7 +21,7 @@ import config
 
 
 def train_one_epoch(
-    model, loader, optimizer, criterion, device, sigmas, epsilon, config, epoch
+    model, loader, optimizer, criterion, device, sigmas, epsilon, config, epoch, scaler
 ):
     model.train()
     total_loss = 0
@@ -50,10 +50,18 @@ def train_one_epoch(
         x = preprocess_for_training(x, batch_sigma, epsilon, config=config)        
 
         optimizer.zero_grad()
-        logits = model(x)
-        loss = criterion(logits, y)
-        loss.backward()
-        optimizer.step()
+        if scaler is not None:
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                logits = model(x)
+                loss = criterion(logits, y)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            logits = model(x)
+            loss = criterion(logits, y)
+            loss.backward()
+            optimizer.step()
 
         total_loss += loss.item() * x.size(0)
         total_correct += (logits.argmax(dim=1) == y).sum().item()
@@ -81,15 +89,22 @@ def evaluate(model, loader, criterion, device, sigmas, epsilon, config):
             # Preprocessing on the GPU
             x = preprocess_for_training(x, batch_sigma, epsilon, config=config)
 
-            logits = model(x)
-            loss = criterion(logits, y)
+            if device.type == "cuda":
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    logits = model(x)
+                    loss = criterion(logits, y)
+            else:
+                logits = model(x)
+                loss = criterion(logits, y)
 
             total_loss += loss.item() * x.size(0)
             preds = logits.argmax(dim=1)
-            
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(y.cpu().numpy())
 
+            all_preds.append(preds)
+            all_labels.append(y)
+
+    all_preds = torch.cat(all_preds).cpu().numpy()
+    all_labels = torch.cat(all_labels).cpu().numpy()
     total_samples = len(all_labels)
     avg_loss = total_loss / total_samples
     
@@ -110,53 +125,40 @@ def evaluate(model, loader, criterion, device, sigmas, epsilon, config):
     return avg_loss, accuracy, precision, recall, f1, per_class_acc
 
 
-def compute_stats(calib_loader, config):
-    """Calculates standard deviation (sigma) per dataset."""
+def compute_calibration_stats(calib_loader, config):
+    """Single-pass calibration: computes per-dataset sigmas and noise floors together."""
     channels_sq_sum = {}
     total_samples = {}
-    
+    all_stds = {}
+
     with torch.no_grad():
         for x, _, dataset_names in calib_loader:
             window_mean = x.mean(dim=-1, keepdim=True)
             x_ac = x - window_mean
-            x_sq = x_ac**2
-            
-            # Accumulate stats dynamically based on the dataset string
+            x_sq = x_ac ** 2
+            window_stds = torch.std(x, dim=2)
+
             for i, ds in enumerate(dataset_names):
                 if ds not in channels_sq_sum:
                     channels_sq_sum[ds] = torch.zeros(config.IN_CHANNELS)
                     total_samples[ds] = 0
-                    
-                channels_sq_sum[ds] += torch.sum(x_sq[i], dim=1) # Sum over time
-                total_samples[ds] += x.shape[2]
-                
-    sigmas = {}
-    epsilon = 1e-8
-    for ds in channels_sq_sum:
-        sigmas[ds] = torch.sqrt(channels_sq_sum[ds] / total_samples[ds])
-        
-    return sigmas, epsilon
-
-
-def compute_noise_floor(calib_loader):
-    """Calculates the 5th percentile noise floor per dataset."""
-    all_stds = {}
-    
-    with torch.no_grad():
-        for x, _, dataset_names in calib_loader:
-            window_stds = torch.std(x, dim=2)
-            
-            for i, ds in enumerate(dataset_names):
-                if ds not in all_stds:
                     all_stds[ds] = []
+
+                channels_sq_sum[ds] += torch.sum(x_sq[i], dim=1)
+                total_samples[ds] += x.shape[2]
                 all_stds[ds].append(window_stds[i].unsqueeze(0))
-                
-    noise_floors = {}
-    for ds, stds_list in all_stds.items():
-        stds_tensor = torch.cat(stds_list, dim=0) # [N, Channels]
-        noise_floors[ds] = torch.quantile(stds_tensor, q=0.05, dim=0)
-        
-    return noise_floors
+
+    epsilon = 1e-8
+    sigmas = {
+        ds: torch.sqrt(channels_sq_sum[ds] / total_samples[ds])
+        for ds in channels_sq_sum
+    }
+    noise_floors = {
+        ds: torch.quantile(torch.cat(stds, dim=0), q=0.05, dim=0)
+        for ds, stds in all_stds.items()
+    }
+
+    return sigmas, epsilon, noise_floors
 
 
 def main():
@@ -182,16 +184,16 @@ def main():
     calib_ds = torch.utils.data.Subset(train_ds, subset_indices)
 
     calib_loader = DataLoader(
-        calib_ds, 
-        batch_size=config.BATCH_SIZE, 
-        shuffle=True, 
+        calib_ds,
+        batch_size=config.BATCH_SIZE,
+        shuffle=True,
         num_workers=config.NUM_WORKERS,
         worker_init_fn=custom_worker_init,
-    )    
+        pin_memory=True,
+    )
     print(f"Estimating stats and noise floor from a {calib_size}-sample calibration subset...")
 
-    sigmas, epsilon = compute_stats(calib_loader, config=config)
-    noise_floors = compute_noise_floor(calib_loader)
+    sigmas, epsilon, noise_floors = compute_calibration_stats(calib_loader, config=config)
 
     # Pass the noise_floor dictionary to the dataset
     train_ds.noise_floors = noise_floors
@@ -207,7 +209,7 @@ def main():
         worker_init_fn=custom_worker_init,
         persistent_workers=True,
         pin_memory=True,
-        prefetch_factor=2,
+        prefetch_factor=8,
     )
 
     val_loader = DataLoader(
@@ -218,7 +220,7 @@ def main():
         worker_init_fn=custom_worker_init,
         persistent_workers=True,
         pin_memory=True,
-        prefetch_factor=2,
+        prefetch_factor=8,
     )
 
     # ------------------------------------------------------------
@@ -260,6 +262,9 @@ def main():
             model(x_dummy)
             break
 
+    if device.type == "cuda":
+        model = torch.compile(model)
+
     if len(config.CLASS_WEIGHTS) == config.NUM_CLASSES:
         weights = torch.tensor(config.CLASS_WEIGHTS, device=device)
         criterion = nn.CrossEntropyLoss(weight=weights)
@@ -268,6 +273,7 @@ def main():
         criterion = nn.CrossEntropyLoss()
 
     optimizer = model.get_optimizer()
+    scaler = torch.cuda.amp.GradScaler() if device.type == "cuda" else None
 
     # ------------------------------------------------------------
     # CSV Initialization & Dynamic Headers
@@ -305,7 +311,7 @@ def main():
         print(f"\nEpoch {epoch}/{config.EPOCHS}")
 
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, optimizer, criterion, device, sigmas, epsilon, config, epoch
+            model, train_loader, optimizer, criterion, device, sigmas, epsilon, config, epoch, scaler
         )
 
         val_loss, val_acc, val_prec, val_rec, val_f1, per_class_acc = evaluate(

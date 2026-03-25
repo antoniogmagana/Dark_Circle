@@ -42,6 +42,7 @@ class VehicleDataset(Dataset):
         self.conn = None
         self.cursor = None
         self.noise_floor = 0.01
+        self.reverse_class_map = {v: k for k, v in self.config.CLASS_MAP.items()}
 
         self._get_tables()
         self._get_table_max_time()
@@ -60,8 +61,7 @@ class VehicleDataset(Dataset):
             label_int = 0 if label_str == "background" else 1
             
         elif self.config.TRAINING_MODE == "category":
-            reverse_class_map = {v: k for k, v in self.config.CLASS_MAP.items()}
-            label_int = reverse_class_map.get(label_str, 0) 
+            label_int = self.reverse_class_map.get(label_str, 0)
             
         elif self.config.TRAINING_MODE == "instance":
             vehicle_type = self.config.DATASET_VEHICLE_MAP[dataset][instance][1]

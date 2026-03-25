@@ -15,9 +15,9 @@ import numpy as np
 # ============================================================
 
 # Core training loop settings
-BATCH_SIZE = 128
+BATCH_SIZE = 4096
 EPOCHS = 30
-NUM_WORKERS = 32
+NUM_WORKERS = 80
 LOG_INTERVAL = 10
 BLOCK_SIZE = 60
 USABLE_SIZE = 45
