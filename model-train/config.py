@@ -106,43 +106,43 @@ CLASS_MAP = {0: "pedestrian", 1: "light", 2: "sport", 3: "utility"}
 # Instance → category mapping (authoritative)
 DATASET_VEHICLE_MAP = {
     "iobt": {
-        "polaris0150pm": "light",
-        "polaris0215pm": "light",
-        "polaris0235pm_nolineofsig": "light",
-        "warhog1135am": "light",
-        "warhog1149am": "light",
-        "warhog_nolineofsight": "light",
-        "silverado0255pm": "utility",
-        "silverado0315pm": "utility",
+        "polaris0150pm": ["light", "polaris"]
+        "polaris0215pm": ["light", "polaris"]
+        "polaris0235pm_nolineofsig": ["light", "polaris"]
+        "warhog1135am": ["light", "warhog"]
+        "warhog1149am": ["light", "warhog"]
+        "warhog_nolineofsight": ["light", "warhog"]
+        "silverado0255pm": ["utility", "pickup"]
+        "silverado0315pm": ["utility", "pickup"]
     },
     "focal": {
-        "walk": "pedestrian",
-        "walk2": "pedestrian",
-        "bicycle": "pedestrian",
-        "bicycle2": "pedestrian",
-        "motor": "light",
-        "motor2": "light",
-        "scooter": "light",
-        "scooter2": "light",
-        "forester": "utility",
-        "forester2": "utility",
-        "mustang": "sport",
-        "mustang0528": "sport",
-        "mustang2": "sport",
-        "pickup": "utility",
-        "pickup2": "utility",
-        "tesla": "sport",
-        "tesla2": "sport",
+        "walk": ["pedestrian", "walk"]
+        "walk2": ["pedestrian", "walk"]
+        "bicycle": ["pedestrian", "bicycle"]
+        "bicycle2": ["pedestrian", "bicycle"]
+        "motor": ["light", "motorcycle"]
+        "motor2": ["light", "motorcycle"]
+        "scooter": ["light", "scooter"]
+        "scooter2": ["light", "scooter"]
+        "forester": ["utility", "forester"]
+        "forester2": ["utility", "forester"]
+        "mustang": ["sport", "mustang"]
+        "mustang0528": ["sport", "mustang"]
+        "mustang2": ["sport", "mustang"]
+        "pickup": ["utility", "pickup"]
+        "pickup2": ["utility", "pickup"]
+        "tesla": ["sport", "ev"]
+        "tesla2": ["sport", "ev"]
     },
     "m3nvc": {
-        "background": "background",
-        "cx30": "utility",
-        "miata": "sport",
-        "mustang": "sport",
+        "background": ["background", "background"]
+        "cx30": ["utility", "cx30"]
+        "miata": ["sport", "miata"]
+        "mustang": ["sport", "mustang"]
         # "cx30_miata": 4,
         # "cx30_mustang": 4,
-        "miata_mustang": "sport",
-        "gle350": "utility",
+        # "miata_mustang": "sport",
+        "gle350": ["utility", "gle350"]
     },
 }
 
@@ -153,8 +153,7 @@ DATASET_VEHICLE_MAP = {
 # Collect all instances across all datasets
 ALL_INSTANCES = []
 for ds_map in DATASET_VEHICLE_MAP.values():
-    ALL_INSTANCES.extend(ds_map.keys())
-
+    ALL_INSTANCES.extend(v[1] for v in ds_map.values())
 ALL_INSTANCES = sorted(set(ALL_INSTANCES))
 
 # Build reproducible instance-level class IDs

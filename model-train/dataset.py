@@ -64,7 +64,8 @@ class VehicleDataset(Dataset):
             label_int = reverse_class_map.get(label_str, 0) 
             
         elif self.config.TRAINING_MODE == "instance":
-            label_int = self.config.INSTANCE_TO_CLASS[instance]
+            vehicle_type = self.config.DATASET_VEHICLE_MAP[dataset][instance][1]
+            label_int = self.config.INSTANCE_TO_CLASS[vehicle_type]
             
         else:
             raise ValueError(f"Unknown TRAINING_MODE: {self.config.TRAINING_MODE}")
@@ -165,11 +166,7 @@ class VehicleDataset(Dataset):
         sensor_data = torch.tensor(raw_data, dtype=torch.float32).T
 
         if sensor_data.shape[1] != expected_window:
-            if hasattr(self, "_fft_resample"):
-                sensor_data = self._fft_resample(sensor_data, expected_window)
-            else:
-                pad_amount = expected_window - sensor_data.shape[1]
-                sensor_data = torch.nn.functional.pad(sensor_data, (0, pad_amount))
+            sensor_data = self._fft_resample(sensor_data, expected_window)
 
         target_freq = int(max_time_steps / self.config.SAMPLE_SECONDS)
         if sample_rate < target_freq:
@@ -294,12 +291,10 @@ class VehicleDataset(Dataset):
             sensor_node = parts[-1]
 
             # 1. Fetch category STRING from mapping (e.g., "sport")
-            category_str = self.config.DATASET_VEHICLE_MAP.get(dataset, {}).get(instance, None)
-            
-            # If the instance isn't in the map, or if we are in Category mode
-            # and the string isn't in our CLASS_MAP (like "background" being skipped), we skip it!
-            if category_str is None:
+            vehicle_info = self.config.DATASET_VEHICLE_MAP.get(dataset, {}).get(instance, None)
+            if vehicle_info is None:
                 continue
+            category_str = vehicle_info[0]
             if self.config.TRAINING_MODE == "category" and category_str not in self.config.CLASS_MAP.values():
                 continue
 
