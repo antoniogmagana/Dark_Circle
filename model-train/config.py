@@ -106,39 +106,39 @@ CLASS_MAP = {0: "pedestrian", 1: "light", 2: "sport", 3: "utility"}
 # Instance → category mapping (authoritative)
 DATASET_VEHICLE_MAP = {
     "iobt": {
-        "polaris0150pm": ["light", "polaris"]
-        "polaris0215pm": ["light", "polaris"]
-        "polaris0235pm_nolineofsig": ["light", "polaris"]
-        "warhog1135am": ["light", "warhog"]
-        "warhog1149am": ["light", "warhog"]
-        "warhog_nolineofsight": ["light", "warhog"]
-        "silverado0255pm": ["utility", "pickup"]
+        "polaris0150pm": ["light", "polaris"],
+        "polaris0215pm": ["light", "polaris"],
+        "polaris0235pm_nolineofsig": ["light", "polaris"],
+        "warhog1135am": ["light", "warhog"],
+        "warhog1149am": ["light", "warhog"],
+        "warhog_nolineofsight": ["light", "warhog"],
+        "silverado0255pm": ["utility", "pickup"],
         "silverado0315pm": ["utility", "pickup"]
     },
     "focal": {
-        "walk": ["pedestrian", "walk"]
-        "walk2": ["pedestrian", "walk"]
-        "bicycle": ["pedestrian", "bicycle"]
-        "bicycle2": ["pedestrian", "bicycle"]
-        "motor": ["light", "motorcycle"]
-        "motor2": ["light", "motorcycle"]
-        "scooter": ["light", "scooter"]
-        "scooter2": ["light", "scooter"]
-        "forester": ["utility", "forester"]
-        "forester2": ["utility", "forester"]
-        "mustang": ["sport", "mustang"]
-        "mustang0528": ["sport", "mustang"]
-        "mustang2": ["sport", "mustang"]
-        "pickup": ["utility", "pickup"]
-        "pickup2": ["utility", "pickup"]
-        "tesla": ["sport", "ev"]
+        "walk": ["pedestrian", "walk"],
+        "walk2": ["pedestrian", "walk"],
+        "bicycle": ["pedestrian", "bicycle"],
+        "bicycle2": ["pedestrian", "bicycle"],
+        "motor": ["light", "motorcycle"],
+        "motor2": ["light", "motorcycle"],
+        "scooter": ["light", "scooter"],
+        "scooter2": ["light", "scooter"],
+        "forester": ["utility", "forester"],
+        "forester2": ["utility", "forester"],
+        "mustang": ["sport", "mustang"],
+        "mustang0528": ["sport", "mustang"],
+        "mustang2": ["sport", "mustang"],
+        "pickup": ["utility", "pickup"],
+        "pickup2": ["utility", "pickup"],
+        "tesla": ["sport", "ev"],
         "tesla2": ["sport", "ev"]
     },
     "m3nvc": {
-        "background": ["background", "background"]
-        "cx30": ["utility", "cx30"]
-        "miata": ["sport", "miata"]
-        "mustang": ["sport", "mustang"]
+        "background": ["background", "background"],
+        "cx30": ["utility", "cx30"],
+        "miata": ["sport", "miata"],
+        "mustang": ["sport", "mustang"],
         # "cx30_miata": 4,
         # "cx30_mustang": 4,
         # "miata_mustang": "sport",
