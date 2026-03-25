@@ -81,7 +81,7 @@ BEST_MODEL_METRIC = "val_f1"
 TRAIN_DATASETS = ["iobt", "focal", "m3nvc"]
 
 # "audio" "seismic" "accel"
-TRAIN_SENSORS = ["seismic"]  # accel can be added later
+TRAIN_SENSORS = ["audio", "seismic"]  # accel can be added later
 
 # Derived: audio=1, seismic=1, accel=3
 IN_CHANNELS = len(TRAIN_SENSORS) + (2 if "accel" in TRAIN_SENSORS else 0)
@@ -250,6 +250,11 @@ OVERSAMPLE_BACKGROUNDS = True
 BASE_LR = 1e-3
 BASE_DROPOUT = 0.3
 
+# Sequence length derived from the active sensor/dataset combination.
+# All per-model kernel/stride values below are computed from this so they
+# remain valid regardless of which sensor or sample rate is selected.
+SEQ_LEN = int(REF_SAMPLE_RATE * SAMPLE_SECONDS)
+
 # --- Detection CNN ---
 if MODEL_NAME == "DetectionCNN":
     LEARNING_RATE = 1e-3
@@ -272,22 +277,40 @@ if MODEL_NAME == "ClassificationCNN":
 if MODEL_NAME == "WaveformClassificationCNN":
     LEARNING_RATE = 1e-3
     CHANNELS = [32, 64, 128]
-    KERNELS = [64, 32, 16]
-    STRIDES = [8, 4, 2]
     HIDDEN = 256
     DROPOUT = 0.3
+    # Kernels and strides derived from SEQ_LEN so the 3-layer frontend
+    # always produces a valid flat feature vector regardless of sample rate.
+    # Layer 1 targets ~50 samples; layer 2 ~20; layer 3 ~10.
+    _s0 = max(4, SEQ_LEN // 50)
+    _k0 = max(8, _s0 * 2)
+    _len1 = (SEQ_LEN - _k0) // _s0 + 1
+    _s1 = max(2, _len1 // 20)
+    _k1 = max(4, _s1 * 2)
+    _len2 = (_len1 - _k1) // _s1 + 1
+    _s2 = max(1, _len2 // 10)
+    _k2 = max(4, _s2 * 2)
+    KERNELS = [_k0, _k1, _k2]
+    STRIDES = [_s0, _s1, _s2]
 
 # --- LSTM Networks ---
 if MODEL_NAME == "ClassificationLSTM":
     LEARNING_RATE = 1e-3
     CHANNELS = [16, 32]
-    KERNELS = [32, 16]
-    STRIDES = [8, 4]
-    POOLS = [4, 2]
     HIDDEN = 128
     LAYERS = 3
     DIM = 64
     DROPOUT = 0.3
+    POOLS = [2, 2]
+    # CNN frontend sized for SEQ_LEN: layer 1 targets ~100 samples,
+    # after pool ~50; layer 2 targets ~25 RNN timesteps after pool.
+    _s0 = max(2, SEQ_LEN // 100)
+    _k0 = max(8, _s0 * 2)
+    _len1 = ((SEQ_LEN - _k0) // _s0 + 1) // POOLS[0]
+    _s1 = max(1, _len1 // 25)
+    _k1 = max(4, _s1 * 2)
+    KERNELS = [_k0, _k1]
+    STRIDES = [_s0, _s1]
 
 # --- miniROCKET ---
 if MODEL_NAME == "IterativeMiniRocket":
@@ -318,13 +341,19 @@ if MODEL_NAME == "TCN":
 if MODEL_NAME == "BiGRU":
     LEARNING_RATE = 1e-3
     CHANNELS = [16, 32]
-    KERNELS = [32, 16]
-    STRIDES = [8, 4]
-    POOLS = [4, 2]
     HIDDEN = 128
     LAYERS = 2
     DIM = 64
     DROPOUT = 0.3
+    POOLS = [2, 2]
+    # Same frontend sizing logic as ClassificationLSTM.
+    _s0 = max(2, SEQ_LEN // 100)
+    _k0 = max(8, _s0 * 2)
+    _len1 = ((SEQ_LEN - _k0) // _s0 + 1) // POOLS[0]
+    _s1 = max(1, _len1 // 25)
+    _k1 = max(4, _s1 * 2)
+    KERNELS = [_k0, _k1]
+    STRIDES = [_s0, _s1]
 
 # =====================================================================
 # 9. ROUTING LOGIC (Replacing Circular Dependencies)
