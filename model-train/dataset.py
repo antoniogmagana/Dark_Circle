@@ -9,6 +9,7 @@ from torch.utils.data import get_worker_info
 
 # Centralized imports
 from db_utils import db_connect, db_close, fetch_sensor_batch, get_time_bounds
+from data_generator import generate_no_vehicle_sample
 
 
 def db_worker_init(worker_id, config=None):
@@ -79,7 +80,6 @@ class VehicleDataset(Dataset):
             and self.split == "train"
             and random.random() < getattr(self.config, "SYNTHESIZE_PROBABILITY", 0.5)
         ):
-            from data_generator import generate_no_vehicle_sample
 
             # Dynamically select the correct noise floor
             if hasattr(self, "noise_floors") and self.noise_floors:

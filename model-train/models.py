@@ -89,9 +89,9 @@ class ClassificationCNN(nn.Module):
         self.dropout = nn.Dropout(config.DROPOUT)
 
     def forward(self, x):
-        x = self.pool(F.tanh(self.conv1(x)))
+        x = self.pool(torch.tanh(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
-        x = self.pool(F.tanh(self.conv3(x)))
+        x = self.pool(torch.tanh(self.conv3(x)))
         x = self.pool(F.relu(self.conv4(x)))
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
@@ -454,7 +454,7 @@ class IterativeMiniRocket(nn.Module):
 
     def get_optimizer(self):
         # Crucial: We only pass the linear layer parameters to the optimizer!
-        return optim.Adam(self.fc.parameters(), lr=1e-3, weight_decay=1e-3)
+        return optim.Adam(self.fc.parameters(), lr=self.config.LEARNING_RATE, weight_decay=1e-3)
 
 
 # =====================================================================

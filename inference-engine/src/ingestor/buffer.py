@@ -10,33 +10,33 @@ class SensorBuffer():
         self.window = 1.0
 
         self.rates = {
-            'acoustic' : 16000,
-            'seismic' : 100,
-            'accel_x' : 100,
-            'accel_y' : 100,
-            'accel_z' : 100
+            'acoustic': 16000,
+            'seismic': 100,
+            'accel_x': 100,
+            'accel_y': 100,
+            'accel_z': 100
             }
         self.limits = {
-            'acoustic' : int(self.window * self.rates['acoustic']),
-            'seismic' : int(self.window * self.rates['seismic']),
-            'accel_x' : int(self.window * self.rates['accel_x']),
-            'accel_y' : int(self.window * self.rates['accel_y']),
-            'accel_z' : int(self.window * self.rates['accel_z'])
+            'acoustic': int(self.window * self.rates['acoustic']),
+            'seismic': int(self.window * self.rates['seismic']),
+            'accel_x': int(self.window * self.rates['accel_x']),
+            'accel_y': int(self.window * self.rates['accel_y']),
+            'accel_z': int(self.window * self.rates['accel_z'])
             }
         self.buffers = {
             'acoustic': np.zeros(self.limits['acoustic']),
-            'seismic' : np.zeros(self.limits['seismic']),
-            'accel_x' : np.zeros(self.limits['accel_x']),
-            'accel_y' : np.zeros(self.limits['accel_y']),
-            'accel_z' : np.zeros(self.limits['accel_z'])
+            'seismic': np.zeros(self.limits['seismic']),
+            'accel_x': np.zeros(self.limits['accel_x']),
+            'accel_y': np.zeros(self.limits['accel_y']),
+            'accel_z': np.zeros(self.limits['accel_z'])
             }
         
         self.holding_pen = {
-            'acoustic' : [],
-            'seismic' : [],
-            'accel_x' : [],
-            'accel_y' : [],
-            'accel_z' : []
+            'acoustic': [],
+            'seismic': [],
+            'accel_x': [],
+            'accel_y': [],
+            'accel_z': []
         }
         self.adc_scale = {
             'acoustic': 2**15,
@@ -146,7 +146,7 @@ class SensorBuffer():
         if end_index < limit:
             buffer[start_index:end_index] = data
             return None
-        elif end_index >= limit:
+        else:
             space_left = limit - start_index
             chunk_1 = data[0:space_left]
             chunk_2 = data[space_left:]

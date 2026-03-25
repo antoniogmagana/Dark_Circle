@@ -265,7 +265,7 @@ if MODEL_NAME == "DetectionCNN":
     HIDDEN = 64
 
 # --- Classification CNN ---
-if MODEL_NAME == "ClassificationCNN":
+elif MODEL_NAME == "ClassificationCNN":
     LEARNING_RATE = 1e-3
     CHANNELS = [32, 64, 128, 256]
     KERNEL = 3
@@ -274,7 +274,7 @@ if MODEL_NAME == "ClassificationCNN":
     DROPOUT = 0.3
 
 # --- Waveform 1D CNN ---
-if MODEL_NAME == "WaveformClassificationCNN":
+elif MODEL_NAME == "WaveformClassificationCNN":
     LEARNING_RATE = 1e-3
     CHANNELS = [32, 64, 128]
     HIDDEN = 256
@@ -294,7 +294,7 @@ if MODEL_NAME == "WaveformClassificationCNN":
     STRIDES = [_s0, _s1, _s2]
 
 # --- LSTM Networks ---
-if MODEL_NAME == "ClassificationLSTM":
+elif MODEL_NAME == "ClassificationLSTM":
     LEARNING_RATE = 1e-3
     CHANNELS = [16, 32]
     HIDDEN = 128
@@ -313,14 +313,14 @@ if MODEL_NAME == "ClassificationLSTM":
     STRIDES = [_s0, _s1]
 
 # --- miniROCKET ---
-if MODEL_NAME == "IterativeMiniRocket":
+elif MODEL_NAME == "IterativeMiniRocket":
     LEARNING_RATE = 1e-3
     DROPOUT = 0.3
     MINIROCKET_FEATURES = 1000
     # The tsai extractor defaults to 10,000 kernels automatically
 
 # --- InceptionTime ---
-if MODEL_NAME == "InceptionTime":
+elif MODEL_NAME == "InceptionTime":
     LEARNING_RATE = 1e-3
     NB_FILTERS = 64              # output channels per parallel branch
     INCEPTION_KERNELS = [9, 19, 39]  # kernel sizes (9≈45ms, 19≈95ms, 39≈195ms at 200Hz)
@@ -329,7 +329,7 @@ if MODEL_NAME == "InceptionTime":
     DROPOUT = 0.3
 
 # --- TCN ---
-if MODEL_NAME == "TCN":
+elif MODEL_NAME == "TCN":
     LEARNING_RATE = 1e-3
     TCN_CHANNELS = 64            # filters per dilated conv level
     TCN_KERNEL_SIZE = 7          # kernel size for all dilated convolutions
@@ -338,7 +338,7 @@ if MODEL_NAME == "TCN":
     DROPOUT = 0.2
 
 # --- BiGRU ---
-if MODEL_NAME == "BiGRU":
+elif MODEL_NAME == "BiGRU":
     LEARNING_RATE = 1e-3
     CHANNELS = [16, 32]
     HIDDEN = 128
