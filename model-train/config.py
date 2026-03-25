@@ -294,7 +294,37 @@ if MODEL_NAME == "IterativeMiniRocket":
     LEARNING_RATE = 1e-3
     DROPOUT = 0.3
     MINIROCKET_FEATURES = 1000
-    # The tsai extractor defaults to 10,000 kernels automatically 
+    # The tsai extractor defaults to 10,000 kernels automatically
+
+# --- InceptionTime ---
+if MODEL_NAME == "InceptionTime":
+    LEARNING_RATE = 1e-3
+    NB_FILTERS = 64              # output channels per parallel branch
+    INCEPTION_KERNELS = [9, 19, 39]  # kernel sizes (9≈45ms, 19≈95ms, 39≈195ms at 200Hz)
+    INCEPTION_BLOCKS = 3         # number of inception modules; residual shortcut every 3
+    HIDDEN = 256
+    DROPOUT = 0.3
+
+# --- TCN ---
+if MODEL_NAME == "TCN":
+    LEARNING_RATE = 1e-3
+    TCN_CHANNELS = 64            # filters per dilated conv level
+    TCN_KERNEL_SIZE = 7          # kernel size for all dilated convolutions
+    TCN_LEVELS = 4               # dilation = 1,2,4,8 → receptive field ≈ 91 samples
+    HIDDEN = 128
+    DROPOUT = 0.2
+
+# --- BiGRU ---
+if MODEL_NAME == "BiGRU":
+    LEARNING_RATE = 1e-3
+    CHANNELS = [16, 32]
+    KERNELS = [32, 16]
+    STRIDES = [8, 4]
+    POOLS = [4, 2]
+    HIDDEN = 128
+    LAYERS = 2
+    DIM = 64
+    DROPOUT = 0.3
 
 # =====================================================================
 # 9. ROUTING LOGIC (Replacing Circular Dependencies)
@@ -308,6 +338,9 @@ SHAPE_MAP = {
     "WaveformClassificationCNN": "1D",
     "ClassificationLSTM": "1D",
     "IterativeMiniRocket": "1D",
+    "InceptionTime": "1D",
+    "TCN": "1D",
+    "BiGRU": "1D",
 }
 USE_MEL = SHAPE_MAP.get(MODEL_NAME, "1D") == "2D"
 

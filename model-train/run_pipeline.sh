@@ -39,19 +39,25 @@ echo "  2) ClassificationCNN"
 echo "  3) WaveformClassificationCNN"
 echo "  4) ClassificationLSTM"
 echo "  5) IterativeMiniRocket"
-echo "  6) ALL MODELS"
+echo "  6) InceptionTime"
+echo "  7) TCN"
+echo "  8) BiGRU"
+echo "  9) ALL MODELS"
 echo ""
 read -p "Models > " model_input
 
 selected_models=()
-if [[ "$model_input" == *"6"* ]] || [[ "${model_input,,}" == *"all"* ]]; then
-    selected_models=("DetectionCNN" "ClassificationCNN" "WaveformClassificationCNN" "ClassificationLSTM" "IterativeMiniRocket")
+if [[ "$model_input" == *"9"* ]] || [[ "${model_input,,}" == *"all"* ]]; then
+    selected_models=("DetectionCNN" "ClassificationCNN" "WaveformClassificationCNN" "ClassificationLSTM" "IterativeMiniRocket" "InceptionTime" "TCN" "BiGRU")
 else
     [[ "$model_input" == *"1"* ]] && selected_models+=("DetectionCNN")
     [[ "$model_input" == *"2"* ]] && selected_models+=("ClassificationCNN")
     [[ "$model_input" == *"3"* ]] && selected_models+=("WaveformClassificationCNN")
     [[ "$model_input" == *"4"* ]] && selected_models+=("ClassificationLSTM")
     [[ "$model_input" == *"5"* ]] && selected_models+=("IterativeMiniRocket")
+    [[ "$model_input" == *"6"* ]] && selected_models+=("InceptionTime")
+    [[ "$model_input" == *"7"* ]] && selected_models+=("TCN")
+    [[ "$model_input" == *"8"* ]] && selected_models+=("BiGRU")
 fi
 
 # --- 3. Validation & Confirmation ---

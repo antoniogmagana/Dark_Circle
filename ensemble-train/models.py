@@ -221,7 +221,7 @@ class _ResidualBlock1D(nn.Module):
     """
     Basic residual block: two conv layers with a skip connection.
     Handles channel expansion and stride-2 downsampling via a
-    learned 1×1 projection on the skip path.
+    learned 1x1 projection on the skip path.
     """
 
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1):

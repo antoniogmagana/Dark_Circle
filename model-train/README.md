@@ -5,7 +5,7 @@ The `config.py` file acts as the central nervous system for the vehicle detectio
 ### 1. Model Selection & Checkpointing
 The pipeline dynamically routes inputs and automatically generates unique output directories for every training run.
 
-* **`MODEL_NAME`**: The exact class name of the model you want to train (e.g., `"ClassificationCNN"`, `"WaveformClassificationCNN"`, `"IterativeMiniRocket"`). This must match a key in `MODEL_REGISTRY` inside `models.py`.
+* **`MODEL_NAME`**: The exact class name of the model you want to train. This must match a key in `MODEL_REGISTRY` inside `models.py`. Available models: `"DetectionCNN"`, `"ClassificationCNN"`, `"WaveformClassificationCNN"`, `"ClassificationLSTM"`, `"IterativeMiniRocket"`, `"InceptionTime"`, `"TCN"`, `"BiGRU"`.
 * **`RUN_ID`**: A unique timestamp string (e.g., `20260308_2032`) generated at runtime to prevent files from being overwritten.
 * **`RUN_DIR`**: The master directory for a specific experiment, structured as `saved_models/[TRAINING_MODE]/[MODEL_NAME]/[RUN_ID]`.
 * **`MODEL_SAVE_PATH`**: The output filepath for the best-performing model weights (`best_model.pth`).
@@ -21,7 +21,7 @@ The pipeline supports dynamic label routing. Changing `TRAINING_MODE` automatica
 | Mode | Objective | Description |
 | :--- | :--- | :--- |
 | `"detection"` | Binary | Classifies samples as either `0` (Background) or `1` (Vehicle). |
-| `"category"` | Multi-Class | Classifies by vehicle weight: `0` (Background), `1` (Light), `2` (Heavy). Relies on `CLASS_MAP`. |
+| `"category"` | Multi-Class | Classifies by vehicle type: `0` (Pedestrian), `1` (Light), `2` (Sport), `3` (Utility). Relies on `CLASS_MAP`. |
 | `"instance"` | Specific ID | Treats every unique vehicle name (e.g., `warhog1135am`, `tesla2`) as its own distinct class. |
 
 * **`CLASS_MAP`**: Dictionary mapping numeric IDs to semantic names for category mode.
@@ -70,11 +70,24 @@ These parameters control the physical time windows and the math behind `torchaud
 
 ### 7. Model Hyperparameters & Control Flow
 
-Hyperparameters are now explicitly defined per architecture.
+Hyperparameters are explicitly defined per architecture in `config.py` via `if MODEL_NAME == "..."` blocks. All models share `LEARNING_RATE` and `DROPOUT`.
 
-* **Base Settings**: `BASE_LR`, `BASE_DROPOUT`.
-* **CNN/LSTM Architectures**: Unique channel lists, kernel sizes, strides, paddings, and hidden dimensions for `DET_CNN_*`, `CLASS_CNN_*`, `WAVE_CNN_*`, and `LSTM_*`.
-* **MiniRocket**: `IterativeMiniRocket` uses `LEARNING_RATE` and `DROPOUT` for its end-to-end PyTorch trainable linear head, completely replacing the legacy scikit-learn implementation.
+| Model | Input | Key Hyperparameters |
+| :--- | :--- | :--- |
+| `DetectionCNN` | 2D Mel | `CHANNELS`, `KERNELS`, `STRIDES`, `PADS`, `HIDDEN` |
+| `ClassificationCNN` | 2D Mel | `CHANNELS`, `KERNEL`, `PADS`, `HIDDEN`, `DROPOUT` |
+| `WaveformClassificationCNN` | 1D Waveform | `CHANNELS`, `KERNELS`, `STRIDES`, `HIDDEN`, `DROPOUT` |
+| `ClassificationLSTM` | 1D Waveform | `CHANNELS`, `KERNELS`, `STRIDES`, `POOLS`, `HIDDEN`, `LAYERS`, `DIM`, `DROPOUT` |
+| `IterativeMiniRocket` | 1D Waveform | `DROPOUT`, `MINIROCKET_FEATURES` — only the linear head is trained |
+| `InceptionTime` | 1D Waveform | `NB_FILTERS`, `INCEPTION_KERNELS`, `INCEPTION_BLOCKS`, `HIDDEN`, `DROPOUT` |
+| `TCN` | 1D Waveform | `TCN_CHANNELS`, `TCN_KERNEL_SIZE`, `TCN_LEVELS`, `HIDDEN`, `DROPOUT` |
+| `BiGRU` | 1D Waveform | `CHANNELS`, `KERNELS`, `STRIDES`, `POOLS`, `HIDDEN`, `LAYERS`, `DIM`, `DROPOUT` |
+
+**InceptionTime** uses parallel Conv1d branches at multiple kernel sizes (`INCEPTION_KERNELS`, default `[9, 19, 39]` samples) to capture vehicle vibrations across short, mid, and long temporal scales. Residual shortcuts are added every 3 blocks.
+
+**TCN** stacks dilated causal Conv1d residual blocks with exponentially growing dilation (`2^i` per level). At 4 levels with kernel size 7, the receptive field covers ~91 samples (~0.45s at 200Hz). Uses weight normalization for training stability.
+
+**BiGRU** mirrors the `ClassificationLSTM` CNN front-end but replaces the unidirectional LSTM with a bidirectional GRU. The forward and backward final hidden states are concatenated, allowing the model to see both the onset and decay of a vibration event within the 1-second window.
 
 ### 8. Routing Logic & Experiment Tracking
 
