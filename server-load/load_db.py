@@ -182,6 +182,8 @@ def load_data(
         f"Found {len(files)} files for {signal_type} ({file_name}). Starting COPY process..."
     )
 
+    table_offset = {}  # accumulated sample count per table across multiple files
+
     for file_path in files:
         parts = file_path.parts
         try:
@@ -210,7 +212,7 @@ def load_data(
         print(
             f"Streaming {dataset_name.upper()} {vehicle} sensor {sensor} into {table_name}..."
         )
-        samples_processed = 0
+        samples_processed = table_offset.get(table_name, 0)
 
         for chunk in pd.read_csv(
             file_path,
@@ -233,6 +235,8 @@ def load_data(
 
             samples_processed += len(chunk)
 
+        table_offset[table_name] = samples_processed
+
 
 def load_tri_axial_data(
     conn, cursor, path_marker, root_dir, signal_type, file_map, sample_period
@@ -247,6 +251,8 @@ def load_tri_axial_data(
     print(
         f"Found {len(files)} potential tri-axial sets for {signal_type}. Processing..."
     )
+
+    table_offset = {}  # accumulated sample count per table across multiple files
 
     for file_path in files:
         parent_dir = file_path.parent
@@ -287,14 +293,16 @@ def load_tri_axial_data(
         if not table_name:
             continue
 
+        offset = table_offset.get(table_name, 0)
         combined_df = pd.concat(dfs, axis=1)
-        combined_df["time_stamp"] = np.arange(len(combined_df)) * sample_period
+        combined_df["time_stamp"] = (np.arange(len(combined_df)) + offset) * sample_period
 
         db_cols = ["time_stamp"] + list(file_map.keys())
         final_df = combined_df[db_cols]
 
         copy_to_postgres(conn, cursor, final_df, table_name, tuple(db_cols))
         print(f"   - Inserted {len(final_df)} rows into {table_name}")
+        table_offset[table_name] = offset + len(combined_df)
 
 
 # ==========================================

@@ -30,3 +30,18 @@ spec:
               value: "<sensor_array_id>"          # discovery node substitutes this
             - name: SENSOR_TOPICS
               value: "<comma,separated,topics>"   # discovery node substitutes this
+            - name: AUDIO_BIT_DEPTH
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: audio_bit_depth
+            - name: SEISMIC_BIT_DEPTH
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: seismic_bit_depth
+            - name: ACCEL_BIT_DEPTH
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: accel_bit_depth

@@ -1,5 +1,10 @@
+import os
 import numpy as np
 from inference_protos import inference_pb2
+
+_AUDIO_BITS   = int(os.environ.get("AUDIO_BIT_DEPTH",   "16"))
+_SEISMIC_BITS = int(os.environ.get("SEISMIC_BIT_DEPTH", "24"))
+_ACCEL_BITS   = int(os.environ.get("ACCEL_BIT_DEPTH",   "24"))
 
 
 class SensorBuffer():
@@ -39,9 +44,9 @@ class SensorBuffer():
             'accel_z': []
         }
         self.adc_scale = {
-            'acoustic': 2**15,
-            'seismic': 2**23,
-            'accel': 2**23,
+            'acoustic': 2 ** (_AUDIO_BITS - 1),
+            'seismic':  2 ** (_SEISMIC_BITS - 1),
+            'accel':    2 ** (_ACCEL_BITS - 1),
         }
 
     
@@ -58,7 +63,6 @@ class SensorBuffer():
         if 'acoustic' in self.active_channels:
             arr = self.buffers['acoustic'] / self.adc_scale['acoustic']
             arr = arr - arr.mean()
-            arr = arr / (arr.std() + 1e-8)
             arr = np.clip(arr, -10.0, 10.0)
             payload.channels.append('acoustic')
             payload.acoustic_data.CopyFrom(
@@ -71,7 +75,6 @@ class SensorBuffer():
         if 'seismic' in self.active_channels:
             arr = self.buffers['seismic'] / self.adc_scale['seismic']
             arr = arr - arr.mean()
-            arr = arr / (arr.std() + 1e-8)
             arr = np.clip(arr, -10.0, 10.0)
             payload.channels.append('seismic')
             payload.seismic_data.CopyFrom(
@@ -89,7 +92,6 @@ class SensorBuffer():
                 self.buffers['accel_z']
             )) / self.adc_scale['accel']
             accel_matrix = accel_matrix - accel_matrix.mean(axis=1, keepdims=True)
-            accel_matrix = accel_matrix / (accel_matrix.std(axis=1, keepdims=True) + 1e-8)
             accel_matrix = np.clip(accel_matrix, -10.0, 10.0)
             payload.accel_data.CopyFrom(
                 inference_pb2.Tensor(

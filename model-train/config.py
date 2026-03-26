@@ -99,6 +99,21 @@ NATIVE_SR = {
 # Global reference sample rate for all sensors/datasets
 REF_SAMPLE_RATE = max(NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_SENSORS)
 
+# Bit depth per sensor type (hardware spec)
+BIT_DEPTH_MAP = {"audio": 16, "seismic": 24, "accel": 24}
+
+# ADC max count per sensor (signed: 2^(bits-1))
+ADC_SCALE_MAP = {s: 2 ** (b - 1) for s, b in BIT_DEPTH_MAP.items()}
+
+# Per-channel ADC scales ordered to match channel concatenation in dataset.py
+# audio=1ch, seismic=1ch, accel=3ch — channels stacked in TRAIN_SENSORS order
+_SENSOR_CHANNELS = {"audio": 1, "seismic": 1, "accel": 3}
+CHANNEL_ADC_SCALES = [
+    ADC_SCALE_MAP[s]
+    for s in TRAIN_SENSORS
+    for _ in range(_SENSOR_CHANNELS[s])
+]
+
 # Semantic category names (used for category-level classification)
 # if background used, always set to 0: "background"
 CLASS_MAP = {0: "pedestrian", 1: "light", 2: "sport", 3: "utility"}

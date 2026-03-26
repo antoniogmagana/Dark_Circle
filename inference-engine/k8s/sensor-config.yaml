@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sensor-config
+  namespace: default
+data:
+  audio_bit_depth: "16"
+  seismic_bit_depth: "24"
+  accel_bit_depth: "24"

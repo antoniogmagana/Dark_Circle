@@ -96,40 +96,25 @@ def evaluate(model, loader, criterion, device, config):
     return avg_loss, accuracy, precision, recall, f1, per_class_acc
 
 
-def compute_calibration_stats(calib_loader, config):
-    """Single-pass calibration: computes per-dataset sigmas and noise floors together."""
-    channels_sq_sum = {}
-    total_samples = {}
+def compute_noise_floors(calib_loader, config):
+    """Computes per-dataset noise floors for synthetic background augmentation."""
     all_stds = {}
 
     with torch.no_grad():
         for x, _, dataset_names in calib_loader:
-            window_mean = x.mean(dim=-1, keepdim=True)
-            x_ac = x - window_mean
-            x_sq = x_ac ** 2
             window_stds = torch.std(x, dim=2)
 
             for i, ds in enumerate(dataset_names):
-                if ds not in channels_sq_sum:
-                    channels_sq_sum[ds] = torch.zeros(config.IN_CHANNELS)
-                    total_samples[ds] = 0
+                if ds not in all_stds:
                     all_stds[ds] = []
-
-                channels_sq_sum[ds] += torch.sum(x_sq[i], dim=1)
-                total_samples[ds] += x.shape[2]
                 all_stds[ds].append(window_stds[i].unsqueeze(0))
 
-    epsilon = 1e-8
-    sigmas = {
-        ds: torch.sqrt(channels_sq_sum[ds] / total_samples[ds])
-        for ds in channels_sq_sum
-    }
     noise_floors = {
         ds: torch.quantile(torch.cat(stds, dim=0), q=0.05, dim=0)
         for ds, stds in all_stds.items()
     }
 
-    return sigmas, epsilon, noise_floors
+    return noise_floors
 
 
 def main():
@@ -159,14 +144,13 @@ def main():
         num_workers=config.NUM_WORKERS,
         pin_memory=True,
     )
-    print(f"Estimating stats and noise floor from a {calib_size}-sample calibration subset...")
+    print(f"Estimating noise floors from a {calib_size}-sample calibration subset...")
 
-    sigmas, epsilon, noise_floors = compute_calibration_stats(calib_loader, config=config)
+    noise_floors = compute_noise_floors(calib_loader, config=config)
 
-    # Pass the noise_floor dictionary to the dataset
+    # Pass the noise_floor dictionary to the dataset for synthetic augmentation
     train_ds.noise_floors = noise_floors
 
-    print(f"Computed Per-Dataset Sigmas: {sigmas}")
     print(f"Computed Per-Dataset Noise Floors: {noise_floors}")
 
     train_loader = DataLoader(
@@ -195,12 +179,9 @@ def main():
     torch.save({
         "model_name": config.MODEL_NAME,
         "use_mel": config.USE_MEL,
-        "sigmas": sigmas,
-        "epsilon": epsilon,
-        "noise_floors": noise_floors 
     }, config.META_SAVE_PATH)
-    
-    print(f"Saved normalization stats to: {config.META_SAVE_PATH}")
+
+    print(f"Saved model metadata to: {config.META_SAVE_PATH}")
 
     # ------------------------------------------------------------
     # Model, optimizer, loss

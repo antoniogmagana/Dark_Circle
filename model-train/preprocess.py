@@ -67,16 +67,19 @@ def extract_mel_spectrogram(batch_tensor, config):
 
 def preprocess_for_training(batch_tensor, config):
     """
-    Robust preprocessing pipeline for deployment environments.
-    Handles DC drift, preserves physical amplitude, and limits transient spikes.
+    Preprocessing pipeline for training and inference.
+    Normalizes raw ADC counts to a physical amplitude range, removes DC drift,
+    and limits transient spikes.
     """
-    # 1. LOCAL DC OFFSET REMOVAL
+    # 1. ADC SCALE NORMALIZATION (maps raw counts to [-1, 1] based on bit depth)
+    adc_scales = torch.tensor(
+        config.CHANNEL_ADC_SCALES, dtype=batch_tensor.dtype
+    ).view(1, -1, 1).to(batch_tensor.device)
+    batch_tensor = batch_tensor / adc_scales
+
+    # 2. PER-WINDOW MEAN SUBTRACTION (DC drift correction)
     window_mean = batch_tensor.mean(dim=-1, keepdim=True)
     batch_tensor = batch_tensor - window_mean
-
-    # 2. PER-WINDOW AMPLITUDE SCALING
-    window_std = batch_tensor.std(dim=-1, keepdim=True)
-    batch_tensor = batch_tensor / (window_std + 1e-8)
 
     # 3. TRANSIENT SPIKE CLIPPING
     batch_tensor = torch.clamp(batch_tensor, min=-10.0, max=10.0)
