@@ -21,7 +21,7 @@ import config
 
 
 def train_one_epoch(
-    model, loader, optimizer, criterion, device, sigmas, epsilon, config, epoch, scaler
+    model, loader, optimizer, criterion, device, sigmas, epsilon, config, epoch
 ):
     model.train()
     total_loss = 0
@@ -47,21 +47,13 @@ def train_one_epoch(
         # -----------------------------------------------------------------
 
         # Preprocessing on the GPU
-        x = preprocess_for_training(x, batch_sigma, epsilon, config=config)        
+        x = preprocess_for_training(x, batch_sigma, epsilon, config=config)
 
         optimizer.zero_grad()
-        if scaler is not None:
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                logits = model(x)
-                loss = criterion(logits, y)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            logits = model(x)
-            loss = criterion(logits, y)
-            loss.backward()
-            optimizer.step()
+        logits = model(x)
+        loss = criterion(logits, y)
+        loss.backward()
+        optimizer.step()
 
         total_loss += loss.item() * x.size(0)
         total_correct += (logits.argmax(dim=1) == y).sum().item()
@@ -89,13 +81,8 @@ def evaluate(model, loader, criterion, device, sigmas, epsilon, config):
             # Preprocessing on the GPU
             x = preprocess_for_training(x, batch_sigma, epsilon, config=config)
 
-            if device.type == "cuda":
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    logits = model(x)
-                    loss = criterion(logits, y)
-            else:
-                logits = model(x)
-                loss = criterion(logits, y)
+            logits = model(x)
+            loss = criterion(logits, y)
 
             total_loss += loss.item() * x.size(0)
             preds = logits.argmax(dim=1)
@@ -209,7 +196,7 @@ def main():
         worker_init_fn=custom_worker_init,
         persistent_workers=True,
         pin_memory=True,
-        prefetch_factor=8,
+        prefetch_factor=2,
     )
 
     val_loader = DataLoader(
@@ -220,7 +207,7 @@ def main():
         worker_init_fn=custom_worker_init,
         persistent_workers=True,
         pin_memory=True,
-        prefetch_factor=8,
+        prefetch_factor=2,
     )
 
     # ------------------------------------------------------------
@@ -264,9 +251,6 @@ def main():
                 model(x_dummy)
             break
 
-    if device.type == "cuda":
-        model = torch.compile(model)
-
     if len(config.CLASS_WEIGHTS) == config.NUM_CLASSES:
         weights = torch.tensor(config.CLASS_WEIGHTS, device=device)
         criterion = nn.CrossEntropyLoss(weight=weights)
@@ -275,7 +259,6 @@ def main():
         criterion = nn.CrossEntropyLoss()
 
     optimizer = model.get_optimizer()
-    scaler = torch.amp.GradScaler('cuda') if device.type == "cuda" else None
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode="min" if getattr(config, "BEST_MODEL_METRIC", "val_acc") == "val_loss" else "max",
@@ -322,7 +305,7 @@ def main():
         print(f"\nEpoch {epoch}/{config.EPOCHS}")
 
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, optimizer, criterion, device, sigmas, epsilon, config, epoch, scaler
+            model, train_loader, optimizer, criterion, device, sigmas, epsilon, config, epoch
         )
 
         val_loss, val_acc, val_prec, val_rec, val_f1, per_class_acc = evaluate(
