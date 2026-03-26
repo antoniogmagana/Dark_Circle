@@ -8,7 +8,7 @@ import atexit
 from torch.utils.data import get_worker_info
 
 # Centralized imports
-from db_utils import db_connect, db_close, fetch_sensor_batch, get_time_bounds
+from db_utils import db_connect, db_close, fetch_sensor_batch, fetch_table_segment, get_time_bounds
 from data_generator import generate_no_vehicle_sample
 
 
@@ -48,6 +48,7 @@ class VehicleDataset(Dataset):
         self._get_table_max_time()
         self._align_max_time()
         self._get_samples()
+        self._preload_tables()
 
     def __len__(self):
         return len(self.samples)
@@ -107,11 +108,25 @@ class VehicleDataset(Dataset):
         max_time_steps = self.config.REF_SAMPLE_RATE * self.config.SAMPLE_SECONDS
 
         for signal in self.config.TRAIN_SENSORS:
-            exact_table = f"{dataset}_{signal}_{instance}_{sensor_node}"
+            table = f"{dataset}_{signal}_{instance}_{sensor_node}"
+            sample_rate = self.config.NATIVE_SR[dataset][signal]
+            expected_window = int(sample_rate * self.config.SAMPLE_SECONDS)
 
-            sensor_data = self._fetch_sensor_data(
-                self.cursor, exact_table, dataset, signal, run_id, time, max_time_steps
-            )
+            start = time * expected_window
+            cached = self.table_cache[(table, run_id)]
+            sensor_data = cached[:, start:start + expected_window].clone()
+
+            if sensor_data.shape[1] < expected_window:
+                pad_amount = expected_window - sensor_data.shape[1]
+                sensor_data = torch.nn.functional.pad(sensor_data, (0, pad_amount), mode="replicate")
+
+            target_freq = int(max_time_steps / self.config.SAMPLE_SECONDS)
+            if sample_rate < target_freq:
+                sensor_data = self._upsample_signal(sensor_data, sample_rate, target_freq)
+
+            if sensor_data.shape[1] > max_time_steps:
+                sensor_data = sensor_data[:, :max_time_steps]
+
             sensor_tensors.append(sensor_data)
 
         X = torch.cat(sensor_tensors, dim=0)
@@ -349,6 +364,35 @@ class VehicleDataset(Dataset):
                     self.samples.extend(dummy_samples)
                     
                 random.shuffle(self.samples)
+
+    def _preload_tables(self):
+        """Bulk-load all required table segments into memory to eliminate per-sample DB queries."""
+        conn, cursor = db_connect(self.config.DB_CONN_PARAMS)
+        self.table_cache = {}
+
+        needed = set()
+        for dataset, instance, sensor_node, run_id, _, _ in self.samples:
+            if dataset == "synthetic":
+                continue
+            for signal in self.config.TRAIN_SENSORS:
+                table = f"{dataset}_{signal}_{instance}_{sensor_node}"
+                key = (table, run_id)
+                if key in self.table_run_min_time:
+                    needed.add(key)
+
+        total = len(needed)
+        print(f"[{self.split}] Pre-loading {total} table segments into memory...")
+
+        for i, (table, run_id) in enumerate(sorted(needed)):
+            min_t = self.table_run_min_time[(table, run_id)]
+            rows = fetch_table_segment(cursor, table, from_time=min_t, run_id=run_id)
+            if rows:
+                self.table_cache[(table, run_id)] = torch.tensor(rows, dtype=torch.float32).T
+            if (i + 1) % 20 == 0 or (i + 1) == total:
+                print(f"  [{self.split}] Loaded {i + 1}/{total} segments...", flush=True)
+
+        db_close(conn, cursor)
+        print(f"[{self.split}] Pre-loading complete.", flush=True)
 
     def close_connection(self):
         if getattr(self, "cursor", None) and not self.cursor.closed:

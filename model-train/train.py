@@ -3,7 +3,6 @@ import csv
 import torch
 import torch.nn as nn
 import numpy as np
-from functools import partial
 from torch.utils.data import DataLoader
 from sklearn.metrics import (precision_score, 
                              recall_score, 
@@ -12,9 +11,7 @@ from sklearn.metrics import (precision_score,
 )
 
 from data_generator import augment_batch
-from dataset import (VehicleDataset,
-                     db_worker_init
-)
+from dataset import VehicleDataset
 from models import build_model
 from preprocess import preprocess_for_training
 import config
@@ -162,8 +159,6 @@ def main():
     train_ds = VehicleDataset(split="train", config=config)
     val_ds = VehicleDataset(split="val", config=config)
 
-    custom_worker_init = partial(db_worker_init, config=config)
-
     print(f"Total training samples: {len(train_ds)}")
 
     calib_size = max(1, int(len(train_ds) * 0.10))
@@ -175,7 +170,6 @@ def main():
         batch_size=config.BATCH_SIZE,
         shuffle=True,
         num_workers=config.NUM_WORKERS,
-        worker_init_fn=custom_worker_init,
         pin_memory=True,
     )
     print(f"Estimating stats and noise floor from a {calib_size}-sample calibration subset...")
@@ -193,10 +187,9 @@ def main():
         batch_size=config.BATCH_SIZE,
         shuffle=True,
         num_workers=config.NUM_WORKERS,
-        worker_init_fn=custom_worker_init,
-        persistent_workers=True,
         pin_memory=True,
         prefetch_factor=2,
+        persistent_workers=True,
     )
 
     val_loader = DataLoader(
@@ -204,10 +197,9 @@ def main():
         batch_size=config.BATCH_SIZE,
         shuffle=False,
         num_workers=config.NUM_WORKERS,
-        worker_init_fn=custom_worker_init,
-        persistent_workers=True,
         pin_memory=True,
         prefetch_factor=2,
+        persistent_workers=True,
     )
 
     # ------------------------------------------------------------

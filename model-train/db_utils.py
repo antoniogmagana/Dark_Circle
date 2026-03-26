@@ -65,7 +65,49 @@ def get_time_bounds(cursor, table_name, run_id=None):
 
 
 # ---------------------------------------------------------------------
-# 2. Fetch N samples starting at a timestamp WITH optional run_id
+# 2. Bulk-fetch an entire table segment from a start time onward
+# ---------------------------------------------------------------------
+def fetch_table_segment(cursor, table_name, from_time, run_id=None):
+    """
+    Fetches all rows from `from_time` onward, ordered by time_stamp.
+    Used for pre-loading entire table segments into memory at startup.
+    """
+    if "_accel_" in table_name:
+        target_cols = sql.SQL("accel_x_ew, accel_y_ns, accel_z_ud")
+    else:
+        target_cols = sql.SQL("amplitude")
+
+    if run_id is None:
+        query = sql.SQL(
+            "SELECT {columns} FROM {table} "
+            "WHERE time_stamp >= {from_time} ORDER BY time_stamp ASC"
+        ).format(
+            columns=target_cols,
+            table=sql.Identifier(table_name),
+            from_time=sql.Literal(float(from_time)),
+        )
+    else:
+        query = sql.SQL(
+            "SELECT {columns} FROM {table} "
+            "WHERE time_stamp >= {from_time} AND run_id = {run_id} "
+            "ORDER BY time_stamp ASC"
+        ).format(
+            columns=target_cols,
+            table=sql.Identifier(table_name),
+            from_time=sql.Literal(float(from_time)),
+            run_id=sql.Literal(run_id),
+        )
+
+    try:
+        cursor.execute(query)
+        return cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching segment from {table_name}: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------
+# 3. Fetch N samples starting at a timestamp WITH optional run_id
 # ---------------------------------------------------------------------
 def fetch_sensor_batch(cursor, table_name, sample_count, start_time, run_id=None):
     """
