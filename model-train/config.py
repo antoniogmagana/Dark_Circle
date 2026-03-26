@@ -193,6 +193,7 @@ if not RUN_ID:
 
 # 2. Build the nested directory structure
 RUN_DIR = os.path.join("saved_models", TRAINING_MODE, MODEL_NAME, RUN_ID)
+CACHE_DIR = os.path.join("saved_models", "cache")
 
 # 3. Define the specific file paths inside that new folder
 MODEL_SAVE_PATH = os.path.join(RUN_DIR, "best_model.pth")

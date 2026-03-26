@@ -1,3 +1,6 @@
+import os
+import hashlib
+import json
 import random
 import math
 import torch
@@ -365,8 +368,30 @@ class VehicleDataset(Dataset):
                     
                 random.shuffle(self.samples)
 
+    def _get_cache_path(self):
+        key_data = {
+            "datasets": sorted(self.config.TRAIN_DATASETS),
+            "sensors": sorted(self.config.TRAIN_SENSORS),
+            "sample_seconds": self.config.SAMPLE_SECONDS,
+            "split": self.split,
+        }
+        key_hash = hashlib.md5(
+            json.dumps(key_data, sort_keys=True).encode()
+        ).hexdigest()[:12]
+        cache_dir = getattr(self.config, "CACHE_DIR", "cache")
+        return os.path.join(cache_dir, f"table_cache_{self.split}_{key_hash}.pt")
+
     def _preload_tables(self):
-        """Bulk-load all required table segments into memory to eliminate per-sample DB queries."""
+        """Bulk-load all required table segments into memory to eliminate per-sample DB queries.
+        Caches to disk so subsequent runs skip the DB load entirely."""
+        cache_path = self._get_cache_path()
+
+        if os.path.exists(cache_path):
+            print(f"[{self.split}] Loading table cache from disk: {cache_path}", flush=True)
+            self.table_cache = torch.load(cache_path, weights_only=False)
+            print(f"[{self.split}] Cache loaded ({len(self.table_cache)} segments).", flush=True)
+            return
+
         conn, cursor = db_connect(self.config.DB_CONN_PARAMS)
         self.table_cache = {}
 
@@ -393,6 +418,10 @@ class VehicleDataset(Dataset):
 
         db_close(conn, cursor)
         print(f"[{self.split}] Pre-loading complete.", flush=True)
+
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        torch.save(self.table_cache, cache_path)
+        print(f"[{self.split}] Cache saved to {cache_path}", flush=True)
 
     def close_connection(self):
         if getattr(self, "cursor", None) and not self.cursor.closed:
