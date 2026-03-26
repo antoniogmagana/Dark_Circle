@@ -441,13 +441,17 @@ class IterativeMiniRocket(nn.Module):
                 param.requires_grad = False
 
     def forward(self, x):
-        # 1. Extract MiniRocket features (no gradients needed here)
+        # 1. Extract MiniRocket features in chunks to avoid 32-bit index overflow
+        chunk_size = 128
+        feature_chunks = []
         with torch.no_grad():
-            features = self.mrf(x)
-            # tsai MRF outputs [B, Features, 1], we need to flatten the trailing dimension
-            if features.ndim == 3:
-                features = features.squeeze(-1)
-                
+            for i in range(0, x.shape[0], chunk_size):
+                f = self.mrf(x[i:i + chunk_size])
+                if f.ndim == 3:
+                    f = f.squeeze(-1)
+                feature_chunks.append(f)
+        features = torch.cat(feature_chunks, dim=0)
+
         # 2. Pass through the trainable head
         x = self.dropout(features)
         return self.fc(x)
