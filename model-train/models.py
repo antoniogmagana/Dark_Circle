@@ -214,7 +214,7 @@ class _InceptionBlock(nn.Module):
 
         self.maxpool_branch = nn.Sequential(
             nn.MaxPool1d(kernel_size=3, stride=1, padding=1),
-            nn.Conv1d(in_channels, nb_filters, kernel_size=1, bias=False),
+            nn.Conv1d(bottleneck_size, nb_filters, kernel_size=1, bias=False),
         )
 
         self.bn = nn.BatchNorm1d(nb_filters * (len(kernels) + 1))
@@ -223,7 +223,7 @@ class _InceptionBlock(nn.Module):
     def forward(self, x):
         bottleneck = self.bottleneck(x)
         outs = [conv(bottleneck) for conv in self.conv_branches]
-        outs.append(self.maxpool_branch(x))
+        outs.append(self.maxpool_branch(bottleneck))
         return self.act(self.bn(torch.cat(outs, dim=1)))
 
 
