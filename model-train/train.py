@@ -259,7 +259,9 @@ def main():
             
             if hasattr(model, 'fit_extractor'):
                 model.fit_extractor(x_dummy[:32])
-            model(x_dummy)
+                model(x_dummy[:32])
+            else:
+                model(x_dummy)
             break
 
     if device.type == "cuda":
