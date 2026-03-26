@@ -258,7 +258,7 @@ def main():
             x_dummy = preprocess_for_training(x_dummy, batch_sigma, epsilon, config=config)
             
             if hasattr(model, 'fit_extractor'):
-                model.fit_extractor(x_dummy)
+                model.fit_extractor(x_dummy[:32])
             model(x_dummy)
             break
 
