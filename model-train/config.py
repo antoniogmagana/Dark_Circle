@@ -93,7 +93,7 @@ ACOUSTIC_SR = 16000
 NATIVE_SR = {
     "iobt": {"audio": 16000, "seismic": 100, "accel": 100},
     "focal": {"audio": 16000, "seismic": 100, "accel": 100},
-    "m3nvc": {"audio": 1600, "seismic": 200, "accel": 200},
+    "m3nvc": {"audio": 16000, "seismic": 200, "accel": 200},
 }
 
 # Global reference sample rate for all sensors/datasets

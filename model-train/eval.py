@@ -96,7 +96,11 @@ def evaluate_directory(run_dir_path):
     ).to(device)
     
     model_path = run_dir_path / "best_model.pth"
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
+    state_dict = torch.load(model_path, map_location=device, weights_only=True)
+    # Strip torch.compile prefix if the model was saved after compilation
+    if any(k.startswith('_orig_mod.') for k in state_dict):
+        state_dict = {k.removeprefix('_orig_mod.'): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict)
     model.eval()
     
     # 6. Inference Loop
