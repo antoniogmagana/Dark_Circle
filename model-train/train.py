@@ -274,6 +274,12 @@ def main():
 
     optimizer = model.get_optimizer()
     scaler = torch.amp.GradScaler('cuda') if device.type == "cuda" else None
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min" if getattr(config, "BEST_MODEL_METRIC", "val_acc") == "val_loss" else "max",
+        factor=0.5,
+        patience=3,
+    )
 
     # ------------------------------------------------------------
     # CSV Initialization & Dynamic Headers
@@ -303,9 +309,12 @@ def main():
     target_metric_name = getattr(config, "BEST_MODEL_METRIC", "val_acc")
     
     if target_metric_name == "val_loss":
-        best_metric_value = float('inf') 
+        best_metric_value = float('inf')
     else:
         best_metric_value = 0.0
+
+    epochs_no_improve = 0
+    EARLY_STOP_PATIENCE = 8
 
     for epoch in range(1, config.EPOCHS + 1):
         print(f"\nEpoch {epoch}/{config.EPOCHS}")
@@ -357,8 +366,17 @@ def main():
 
         if is_best:
             best_metric_value = current_metric_value
+            epochs_no_improve = 0
             torch.save(model.state_dict(), config.MODEL_SAVE_PATH)
             print(f"  --> New Best Model saved with {target_metric_name}: {best_metric_value:.4f}")
+        else:
+            epochs_no_improve += 1
+            print(f"  --> No improvement: {epochs_no_improve}/{EARLY_STOP_PATIENCE} epochs.")
+            if epochs_no_improve >= EARLY_STOP_PATIENCE:
+                print(f"Early stopping after {epoch} epochs.")
+                break
+
+        scheduler.step(current_metric_value)
 
     print(f"\nTraining Complete. Best {target_metric_name} Achieved: {best_metric_value:.4f}")
     print(f"Model saved to {config.MODEL_SAVE_PATH}")
