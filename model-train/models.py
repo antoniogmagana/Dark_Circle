@@ -243,6 +243,20 @@ class InceptionTime(nn.Module):
         n_blocks = config.INCEPTION_BLOCKS
         out_channels = nb_filters * (len(kernels) + 1)
 
+        # Downsampling stem: normalises T to ~200 samples so INCEPTION_KERNELS remain
+        # meaningful regardless of REF_SAMPLE_RATE. stride=1 at seismic-only rates.
+        stem_stride = getattr(config, 'INCEPTION_STEM_STRIDE', 1)
+        if stem_stride > 1:
+            stem_k = 2 * stem_stride - 1   # odd kernel → symmetric padding
+            self.stem = nn.Sequential(
+                nn.Conv1d(in_channels, in_channels, kernel_size=stem_k,
+                          stride=stem_stride, padding=stem_stride - 1, bias=False),
+                nn.BatchNorm1d(in_channels),
+                nn.ReLU(),
+            )
+        else:
+            self.stem = nn.Identity()
+
         self.inception_blocks = nn.ModuleList()
         self.shortcuts = nn.ModuleDict()
 
@@ -265,6 +279,7 @@ class InceptionTime(nn.Module):
         self.fc = nn.Linear(out_channels, num_classes)
 
     def forward(self, x):
+        x = self.stem(x)
         residual = x
         for i, block in enumerate(self.inception_blocks):
             x = block(x)

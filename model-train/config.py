@@ -323,18 +323,15 @@ elif MODEL_NAME == "IterativeMiniRocket":
 elif MODEL_NAME == "InceptionTime":
     LEARNING_RATE = 1e-3
     NB_FILTERS = 64              # output channels per parallel branch
-    # Kernels scaled to SEQ_LEN so each covers a meaningful temporal window regardless of sample rate.
-    # Targeting ~45ms, ~95ms, ~195ms windows: k = round(target_ms * REF_SAMPLE_RATE / 1000) | odd
-    _k0 = max(9,  int(0.045 * REF_SAMPLE_RATE) | 1)
-    _k1 = max(19, int(0.095 * REF_SAMPLE_RATE) | 1)
-    _k2 = max(39, int(0.195 * REF_SAMPLE_RATE) | 1)
-    INCEPTION_KERNELS = [_k0, _k1, _k2]
+    INCEPTION_KERNELS = [9, 19, 39]  # kernel sizes (9≈45ms, 19≈95ms, 39≈195ms at 200Hz post-stem)
     INCEPTION_BLOCKS = 3         # number of inception modules; residual shortcut every 3
     HIDDEN = 256
     DROPOUT = 0.3
-    # With large SEQ_LEN (e.g. 16000 for audio), intermediate tensors are [B, 256, T].
-    # Reduce batch size to stay within GPU memory.
-    BATCH_SIZE = max(16, 128 // max(1, SEQ_LEN // 200))
+    # Stem stride normalises T to ~200 samples before the inception blocks.
+    # At seismic-only rates (SEQ_LEN≈200), stride=1 → Identity (no change).
+    # At audio rates (SEQ_LEN=16000), stride=80 → 200 post-stem samples, keeping
+    # INCEPTION_KERNELS meaningful and intermediate tensors small enough for B=128.
+    INCEPTION_STEM_STRIDE = max(1, SEQ_LEN // 200)
 
 # --- TCN ---
 elif MODEL_NAME == "TCN":
