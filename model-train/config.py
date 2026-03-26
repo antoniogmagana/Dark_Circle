@@ -50,12 +50,10 @@ DB_CONN_PARAMS = {
     "port": 5432,
 }
 if not DB_CONN_PARAMS["password"]:
-    # Use environment variable for testing, fallback to input
-    import os
-    DB_CONN_PARAMS["password"] = os.getenv("DB_PASSWORD") or input("Enter Database Password: ")
+    DB_CONN_PARAMS["password"] = input("Enter Database Password: ")
 
 # =====================================================================
-# 3. TRAINING MODE (NEW)
+# 3. TRAINING MODE
 # =====================================================================
 # Options:
 #   "detection"  -> binary: background vs vehicle
@@ -162,7 +160,7 @@ DATASET_VEHICLE_MAP = {
 }
 
 # =====================================================================
-# 5. DYNAMIC LABEL SPACE CONSTRUCTION (NEW)
+# 5. DYNAMIC LABEL SPACE CONSTRUCTION
 # =====================================================================
 
 # Collect all instances across all datasets
@@ -412,7 +410,7 @@ def save_config_snapshot():
         # Only grab standard uppercase configuration variables
         if key.isupper() and not key.startswith("_"):
 
-            # Handle NumPy arrays (like ROCKET_ALPHAS) which JSON hates
+            # Handle NumPy arrays which are not JSON-serializable
             if isinstance(value, np.ndarray):
                 config_dict[key] = value.tolist()
             # Handle PyTorch devices

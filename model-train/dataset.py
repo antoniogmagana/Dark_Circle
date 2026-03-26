@@ -11,7 +11,7 @@ import atexit
 from torch.utils.data import get_worker_info
 
 # Centralized imports
-from db_utils import db_connect, db_close, fetch_sensor_batch, fetch_table_segment, get_time_bounds
+from db_utils import db_connect, db_close, fetch_table_segment, get_time_bounds
 from data_generator import generate_no_vehicle_sample
 
 
@@ -44,7 +44,7 @@ class VehicleDataset(Dataset):
         self.resamplers = {}
         self.conn = None
         self.cursor = None
-        self.noise_floor = 0.01
+        self.noise_floors = None
         self.reverse_class_map = {v: k for k, v in self.config.CLASS_MAP.items()}
 
         self._get_tables()
@@ -87,15 +87,15 @@ class VehicleDataset(Dataset):
         ):
 
             # Dynamically select the correct noise floor
-            if hasattr(self, "noise_floors") and self.noise_floors:
+            if self.noise_floors is not None:
                 # If pure synthetic, fallback to the average of all noise floors
                 if is_pure_synthetic or dataset not in self.noise_floors:
                     current_amplitude = torch.stack(list(self.noise_floors.values())).mean(dim=0)
                 else:
                     current_amplitude = self.noise_floors[dataset]
             else:
-                # Fallback for early initialization before stats are computed
-                current_amplitude = getattr(self, "noise_floor", 0.01)
+                # Fallback before noise floors are computed (val/test splits)
+                current_amplitude = 0.01
 
             X = generate_no_vehicle_sample(
                 config=self.config,
@@ -137,68 +137,6 @@ class VehicleDataset(Dataset):
 
         # CRITICAL: Return dataset string here
         return X, y, dataset
-
-    def _fft_resample(self, signal, target_length):
-        C, T_in = signal.shape
-        if T_in == target_length:
-            return signal
-
-        freqs = torch.fft.rfft(signal, dim=1)
-        target_bins = target_length // 2 + 1
-        new_freqs = torch.zeros(
-            (C, target_bins), dtype=freqs.dtype, device=freqs.device
-        )
-
-        copy_bins = min(freqs.shape[1], target_bins)
-        new_freqs[:, :copy_bins] = freqs[:, :copy_bins]
-
-        resampled = torch.fft.irfft(new_freqs, n=target_length, dim=1)
-        resampled = resampled * (target_length / T_in)
-
-        return resampled
-
-    def _fetch_sensor_data(
-        self, cursor, table, dataset, signal, run_id, time, max_time_steps
-    ):
-        sample_rate = self.config.NATIVE_SR[dataset][signal]
-        expected_window = int(sample_rate * self.config.SAMPLE_SECONDS)
-
-        min_t = self.table_run_min_time[(table, run_id)]
-        start_time_seconds = min_t + float(time * self.config.SAMPLE_SECONDS)
-
-        raw_data = fetch_sensor_batch(
-            cursor=cursor,
-            table_name=table,
-            sample_count=expected_window,
-            start_time=start_time_seconds,
-            run_id=run_id,
-        )
-
-        if not raw_data:
-            run_str = f" (Run: {run_id})" if run_id is not None else ""
-            raise ValueError(
-                f"CRITICAL: 0 rows returned for {table}{run_str} at time_stamp {start_time_seconds}. "
-                f"Check database table for missing rows or alignment issues."
-            )
-
-        sensor_data = torch.tensor(raw_data, dtype=torch.float32).T
-
-        if sensor_data.shape[1] != expected_window:
-            sensor_data = self._fft_resample(sensor_data, expected_window)
-
-        target_freq = int(max_time_steps / self.config.SAMPLE_SECONDS)
-        if sample_rate < target_freq:
-            sensor_data = self._upsample_signal(sensor_data, sample_rate, target_freq)
-
-        if sensor_data.shape[1] > max_time_steps:
-            sensor_data = sensor_data[:, :max_time_steps]
-        elif sensor_data.shape[1] < max_time_steps:
-            pad_amount = max_time_steps - sensor_data.shape[1]
-            sensor_data = torch.nn.functional.pad(
-                sensor_data, (0, pad_amount), mode="replicate"
-            )
-
-        return sensor_data
 
     def _upsample_signal(self, sensor_data, sample_rate, target_freq):
         resample_key = (sample_rate, target_freq)

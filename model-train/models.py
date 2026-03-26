@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import time
 import numpy as np
 
 from tsai.models.MINIROCKET_Pytorch import MiniRocketFeatures, get_minirocket_features
@@ -477,7 +476,7 @@ class IterativeMiniRocket(nn.Module):
 
 
 # =====================================================================
-# 4. MODEL REGISTRY
+# 5. MODEL REGISTRY
 # =====================================================================
 
 MODEL_REGISTRY = {

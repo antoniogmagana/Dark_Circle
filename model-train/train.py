@@ -100,7 +100,7 @@ def compute_noise_floors(calib_loader, config):
     """Computes per-dataset noise floors for synthetic background augmentation."""
     all_stds = {}
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for x, _, dataset_names in calib_loader:
             window_stds = torch.std(x, dim=2)
 

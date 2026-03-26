@@ -6,7 +6,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from functools import partial
 from types import SimpleNamespace
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
@@ -27,7 +26,7 @@ warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 # NOTICE: global 'config' is NO LONGER IMPORTED
 
-from dataset import VehicleDataset, db_worker_init
+from dataset import VehicleDataset
 from models import build_model
 from preprocess import preprocess_for_training
 
@@ -79,13 +78,11 @@ def evaluate_directory(run_dir_path):
         print(f"  [!] No test samples found for {run_config.TRAINING_MODE}.")
         return
         
-    custom_worker_init = partial(db_worker_init, config=run_config)
     test_loader = DataLoader(
-        test_ds, 
-        batch_size=run_config.BATCH_SIZE, 
-        shuffle=False, 
+        test_ds,
+        batch_size=run_config.BATCH_SIZE,
+        shuffle=False,
         num_workers=run_config.NUM_WORKERS,
-        worker_init_fn=custom_worker_init
     )
     
     # 5. Load Model
