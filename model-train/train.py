@@ -18,22 +18,15 @@ import config
 
 
 def train_one_epoch(
-    model, loader, optimizer, criterion, device, sigmas, epsilon, config, epoch
+    model, loader, optimizer, criterion, device, config, epoch
 ):
     model.train()
     total_loss = 0
     total_correct = 0
     total_samples = 0
 
-    fallback_sigma = torch.stack(list(sigmas.values())).mean(dim=0).to(device)
-
     for batch_idx, (x, y, dataset_names) in enumerate(loader):
         x, y = x.to(device), y.to(device)
-
-        # Build a batch-specific sigma tensor of shape [B, C, 1]
-        batch_sigma = torch.stack([
-            sigmas.get(ds, fallback_sigma) for ds in dataset_names
-        ]).to(device).view(-1, config.IN_CHANNELS, 1)
 
         # -----------------------------------------------------------------
         # DYNAMIC SYNTHESIS: SNR Augmentation (Controlled via config)
@@ -44,7 +37,7 @@ def train_one_epoch(
         # -----------------------------------------------------------------
 
         # Preprocessing on the GPU
-        x = preprocess_for_training(x, batch_sigma, epsilon, config=config)
+        x = preprocess_for_training(x, config=config)
 
         optimizer.zero_grad()
         logits = model(x)
@@ -59,24 +52,18 @@ def train_one_epoch(
     return total_loss / total_samples, total_correct / total_samples
 
 
-def evaluate(model, loader, criterion, device, sigmas, epsilon, config):
+def evaluate(model, loader, criterion, device, config):
     model.eval()
     total_loss = 0
     all_preds = []
     all_labels = []
 
-    fallback_sigma = torch.stack(list(sigmas.values())).mean(dim=0).to(device)
-
     with torch.inference_mode():
         for x, y, dataset_names in loader:
             x, y = x.to(device), y.to(device)
 
-            batch_sigma = torch.stack([
-                sigmas.get(ds, fallback_sigma) for ds in dataset_names
-            ]).to(device).view(-1, config.IN_CHANNELS, 1)
-
             # Preprocessing on the GPU
-            x = preprocess_for_training(x, batch_sigma, epsilon, config=config)
+            x = preprocess_for_training(x, config=config)
 
             logits = model(x)
             loss = criterion(logits, y)
@@ -228,13 +215,7 @@ def main():
         for x_dummy, _, ds_names in train_loader:
             x_dummy = x_dummy.to(device)
             
-            # Map dummy sigma
-            fallback_sigma = torch.stack(list(sigmas.values())).mean(dim=0).to(device)
-            batch_sigma = torch.stack([
-                sigmas.get(ds, fallback_sigma) for ds in ds_names
-            ]).to(device).view(-1, config.IN_CHANNELS, 1)
-
-            x_dummy = preprocess_for_training(x_dummy, batch_sigma, epsilon, config=config)
+            x_dummy = preprocess_for_training(x_dummy, config=config)
             
             if hasattr(model, 'fit_extractor'):
                 model.fit_extractor(x_dummy[:32])
@@ -297,11 +278,11 @@ def main():
         print(f"\nEpoch {epoch}/{config.EPOCHS}")
 
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, optimizer, criterion, device, sigmas, epsilon, config, epoch
+            model, train_loader, optimizer, criterion, device, config, epoch
         )
 
         val_loss, val_acc, val_prec, val_rec, val_f1, per_class_acc = evaluate(
-            model, val_loader, criterion, device, sigmas, epsilon, config
+            model, val_loader, criterion, device, config
         )
 
         print(

@@ -442,7 +442,7 @@ class IterativeMiniRocket(nn.Module):
 
     def forward(self, x):
         # 1. Extract MiniRocket features in chunks to avoid 32-bit index overflow
-        chunk_size = 128
+        chunk_size = 256
         feature_chunks = []
         with torch.no_grad():
             for i in range(0, x.shape[0], chunk_size):

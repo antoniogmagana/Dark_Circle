@@ -57,6 +57,9 @@ class SensorBuffer():
 
         if 'acoustic' in self.active_channels:
             arr = self.buffers['acoustic'] / self.adc_scale['acoustic']
+            arr = arr - arr.mean()
+            arr = arr / (arr.std() + 1e-8)
+            arr = np.clip(arr, -10.0, 10.0)
             payload.channels.append('acoustic')
             payload.acoustic_data.CopyFrom(
                 inference_pb2.Tensor(
@@ -64,9 +67,12 @@ class SensorBuffer():
                     data=arr.flatten().tolist()
                 )
             )
-        
+
         if 'seismic' in self.active_channels:
             arr = self.buffers['seismic'] / self.adc_scale['seismic']
+            arr = arr - arr.mean()
+            arr = arr / (arr.std() + 1e-8)
+            arr = np.clip(arr, -10.0, 10.0)
             payload.channels.append('seismic')
             payload.seismic_data.CopyFrom(
                 inference_pb2.Tensor(
@@ -82,6 +88,9 @@ class SensorBuffer():
                 self.buffers['accel_y'],
                 self.buffers['accel_z']
             )) / self.adc_scale['accel']
+            accel_matrix = accel_matrix - accel_matrix.mean(axis=1, keepdims=True)
+            accel_matrix = accel_matrix / (accel_matrix.std(axis=1, keepdims=True) + 1e-8)
+            accel_matrix = np.clip(accel_matrix, -10.0, 10.0)
             payload.accel_data.CopyFrom(
                 inference_pb2.Tensor(
                     shape=list(accel_matrix.shape),

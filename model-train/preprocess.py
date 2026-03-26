@@ -65,7 +65,7 @@ def extract_mel_spectrogram(batch_tensor, config):
 # 2. Main Training Wrapper
 # ============================================================
 
-def preprocess_for_training(batch_tensor, sigma, epsilon, config):
+def preprocess_for_training(batch_tensor, config):
     """
     Robust preprocessing pipeline for deployment environments.
     Handles DC drift, preserves physical amplitude, and limits transient spikes.
@@ -74,14 +74,9 @@ def preprocess_for_training(batch_tensor, sigma, epsilon, config):
     window_mean = batch_tensor.mean(dim=-1, keepdim=True)
     batch_tensor = batch_tensor - window_mean
 
-    # 2. GLOBAL AMPLITUDE SCALING
-    # Check dimensions: if it's an old 1D tensor, reshape it. Otherwise, use it as-is.
-    if sigma.dim() == 1:
-        sigma = sigma.to(batch_tensor.device).view(1, -1, 1)
-    else:
-        sigma = sigma.to(batch_tensor.device)
-        
-    batch_tensor = batch_tensor / (sigma + epsilon)
+    # 2. PER-WINDOW AMPLITUDE SCALING
+    window_std = batch_tensor.std(dim=-1, keepdim=True)
+    batch_tensor = batch_tensor / (window_std + 1e-8)
 
     # 3. TRANSIENT SPIKE CLIPPING
     batch_tensor = torch.clamp(batch_tensor, min=-10.0, max=10.0)

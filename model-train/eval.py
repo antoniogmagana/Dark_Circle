@@ -69,14 +69,6 @@ def evaluate_directory(run_dir_path):
         
     meta = torch.load(meta_path, map_location=device, weights_only=False)
     
-    # Handle both new dictionary format and old single-tensor format
-    sigmas = meta.get("sigmas", None)
-    if sigmas is None:
-        # Backwards compatibility for models trained before the update
-        sigmas = {"default": meta["sigma"]}
-        
-    epsilon = meta["epsilon"]
-    
     # Force USE_MEL to whatever was saved in the metadata
     run_config.USE_MEL = meta.get("use_mel", getattr(run_config, "USE_MEL", True))
     
@@ -114,9 +106,6 @@ def evaluate_directory(run_dir_path):
     
     start_time = time.perf_counter()
     
-    # Pre-compute the fallback sigma
-    fallback_sigma = torch.stack(list(sigmas.values())).mean(dim=0).to(device)
-    
     with torch.inference_mode():
         for batch in test_loader:
             # Safely unpack based on whether the dataset returned the name
@@ -124,16 +113,10 @@ def evaluate_directory(run_dir_path):
                 x, y, dataset_names = batch
             else:
                 x, y = batch
-                dataset_names = ["default"] * x.shape[0]
-                
+
             x = x.to(device)
-            
-            # Dynamically map the correct sigma to each sample in the batch
-            batch_sigma = torch.stack([
-                sigmas.get(ds, fallback_sigma) for ds in dataset_names
-            ]).to(device).view(-1, run_config.IN_CHANNELS, 1)
-            
-            x = preprocess_for_training(x, batch_sigma, epsilon, config=run_config)
+
+            x = preprocess_for_training(x, config=run_config)
             
             logits = model(x)
             probs = F.softmax(logits, dim=1)
