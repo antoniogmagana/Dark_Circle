@@ -27,5 +27,10 @@ ENV/
 .devcontainer
 poetry.lock
 
-# Claude
+# ai context
+.ai
 .claude/
+GEMINI.md
+
+#large folders
+data/
