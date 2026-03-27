@@ -91,7 +91,7 @@ ACOUSTIC_SR = 16000
 NATIVE_SR = {
     "iobt": {"audio": 16000, "seismic": 100, "accel": 100},
     "focal": {"audio": 16000, "seismic": 100, "accel": 100},
-    "m3nvc": {"audio": 16000, "seismic": 200, "accel": 200},
+    "m3nvc": {"audio": 1600, "seismic": 200, "accel": 200},
 }
 
 # Global reference sample rate for all sensors/datasets
@@ -107,9 +107,7 @@ ADC_SCALE_MAP = {s: 2 ** (b - 1) for s, b in BIT_DEPTH_MAP.items()}
 # audio=1ch, seismic=1ch, accel=3ch — channels stacked in TRAIN_SENSORS order
 _SENSOR_CHANNELS = {"audio": 1, "seismic": 1, "accel": 3}
 CHANNEL_ADC_SCALES = [
-    ADC_SCALE_MAP[s]
-    for s in TRAIN_SENSORS
-    for _ in range(_SENSOR_CHANNELS[s])
+    ADC_SCALE_MAP[s] for s in TRAIN_SENSORS for _ in range(_SENSOR_CHANNELS[s])
 ]
 
 # Semantic category names (used for category-level classification)
@@ -126,7 +124,7 @@ DATASET_VEHICLE_MAP = {
         "warhog1149am": ["light", "warhog"],
         "warhog_nolineofsight": ["light", "warhog"],
         "silverado0255pm": ["utility", "pickup"],
-        "silverado0315pm": ["utility", "pickup"]
+        "silverado0315pm": ["utility", "pickup"],
     },
     "focal": {
         "walk": ["pedestrian", "walk"],
@@ -145,7 +143,7 @@ DATASET_VEHICLE_MAP = {
         "pickup": ["utility", "pickup"],
         "pickup2": ["utility", "pickup"],
         "tesla": ["sport", "ev"],
-        "tesla2": ["sport", "ev"]
+        "tesla2": ["sport", "ev"],
     },
     "m3nvc": {
         "background": ["background", "background"],
@@ -155,7 +153,7 @@ DATASET_VEHICLE_MAP = {
         # "cx30_miata": 4,
         # "cx30_mustang": 4,
         # "miata_mustang": "sport",
-        "gle350": ["utility", "gle350"]
+        "gle350": ["utility", "gle350"],
     },
 }
 
@@ -184,7 +182,7 @@ if TRAINING_MODE == "detection":
     CLASS_WEIGHTS = [25.5, 1.0]
 elif TRAINING_MODE == "category":
     NUM_CLASSES = len(CLASS_MAP)
-    CLASS_WEIGHTS = [28.0, 2.0, 13.0, 15.5] # based on classification classes
+    CLASS_WEIGHTS = [28.0, 2.0, 13.0, 15.5]  # based on classification classes
 elif TRAINING_MODE == "instance":
     NUM_CLASSES = len(INSTANCE_TO_CLASS)
 else:
@@ -196,7 +194,7 @@ else:
 
 MODEL_NAME = os.environ.get("MODEL_NAME")
 if not MODEL_NAME:
-    MODEL_NAME = input('Enter Model Name: ')
+    MODEL_NAME = input("Enter Model Name: ")
 
 # 1. Generate or Retrieve RUN_ID
 # If evaluating, we can pass RUN_ID="20260308_2032". Otherwise, it generates a new timestamp.
@@ -335,9 +333,13 @@ elif MODEL_NAME == "IterativeMiniRocket":
 # --- InceptionTime ---
 elif MODEL_NAME == "InceptionTime":
     LEARNING_RATE = 1e-3
-    NB_FILTERS = 64              # output channels per parallel branch
-    INCEPTION_KERNELS = [9, 19, 39]  # kernel sizes (9≈45ms, 19≈95ms, 39≈195ms at 200Hz post-stem)
-    INCEPTION_BLOCKS = 3         # number of inception modules; residual shortcut every 3
+    NB_FILTERS = 64  # output channels per parallel branch
+    INCEPTION_KERNELS = [
+        9,
+        19,
+        39,
+    ]  # kernel sizes (9≈45ms, 19≈95ms, 39≈195ms at 200Hz post-stem)
+    INCEPTION_BLOCKS = 3  # number of inception modules; residual shortcut every 3
     HIDDEN = 256
     DROPOUT = 0.3
     # Stem stride normalises T to ~200 samples before the inception blocks.
@@ -349,9 +351,9 @@ elif MODEL_NAME == "InceptionTime":
 # --- TCN ---
 elif MODEL_NAME == "TCN":
     LEARNING_RATE = 1e-3
-    TCN_CHANNELS = 64            # filters per dilated conv level
-    TCN_KERNEL_SIZE = 7          # kernel size for all dilated convolutions
-    TCN_LEVELS = 4               # dilation = 1,2,4,8 → receptive field ≈ 91 samples
+    TCN_CHANNELS = 64  # filters per dilated conv level
+    TCN_KERNEL_SIZE = 7  # kernel size for all dilated convolutions
+    TCN_LEVELS = 4  # dilation = 1,2,4,8 → receptive field ≈ 91 samples
     HIDDEN = 128
     DROPOUT = 0.2
 

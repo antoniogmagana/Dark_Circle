@@ -224,7 +224,7 @@ def load_data(
             chunksize=variables.CHUNK_SIZE,
         ):
             chunk["time_stamp"] = (
-                pd.Series(range(len(chunk))) + samples_processed
+                np.arange(len(chunk)) + samples_processed
             ) * sample_period
 
             # Ensure we only try to insert time_stamp and amplitude into the db
@@ -295,7 +295,9 @@ def load_tri_axial_data(
 
         offset = table_offset.get(table_name, 0)
         combined_df = pd.concat(dfs, axis=1)
-        combined_df["time_stamp"] = (np.arange(len(combined_df)) + offset) * sample_period
+        combined_df["time_stamp"] = (
+            np.arange(len(combined_df)) + offset
+        ) * sample_period
 
         db_cols = ["time_stamp"] + list(file_map.keys())
         final_df = combined_df[db_cols]
