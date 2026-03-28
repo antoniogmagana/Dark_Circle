@@ -65,26 +65,30 @@ echo ""
 echo "============================================================"
 echo " SELECT MODELS"
 echo "============================================================"
-echo "  1) DetectionCNN          (2D spectrogram)"
-echo "  2) ClassificationCNN     (2D spectrogram)"
+echo "  1) DetectionCNN               (2D spectrogram)"
+echo "  2) ClassificationCNN          (2D spectrogram)"
 echo "  3) WaveformClassificationCNN  (1D waveform)"
-echo "  4) ClassificationLSTM    (1D waveform)"
-echo "  5) ResNet1D              (1D waveform, residual)"
-echo "  6) IterativeMiniRocket   (1D waveform)"
-echo "  7) ALL MODELS"
+echo "  4) ClassificationLSTM         (1D waveform)"
+echo "  5) BiGRU                      (1D waveform)"
+echo "  6) TCN                        (1D waveform)"
+echo "  7) InceptionTime              (1D waveform)"
+echo "  8) IterativeMiniRocket        (1D waveform)"
+echo "  9) ALL MODELS"
 echo ""
 read -p "Models (space-separated) > " model_input
 
 selected_models=()
-if [[ "$model_input" == *"7"* ]] || [[ "${model_input,,}" == *"all"* ]]; then
-    selected_models=("DetectionCNN" "ClassificationCNN" "WaveformClassificationCNN" "ClassificationLSTM" "ResNet1D" "IterativeMiniRocket")
+if [[ "$model_input" == *"9"* ]] || [[ "${model_input,,}" == *"all"* ]]; then
+    selected_models=("DetectionCNN" "ClassificationCNN" "WaveformClassificationCNN" "ClassificationLSTM" "BiGRU" "TCN" "InceptionTime" "IterativeMiniRocket")
 else
     [[ "$model_input" == *"1"* ]] && selected_models+=("DetectionCNN")
     [[ "$model_input" == *"2"* ]] && selected_models+=("ClassificationCNN")
     [[ "$model_input" == *"3"* ]] && selected_models+=("WaveformClassificationCNN")
     [[ "$model_input" == *"4"* ]] && selected_models+=("ClassificationLSTM")
-    [[ "$model_input" == *"5"* ]] && selected_models+=("ResNet1D")
-    [[ "$model_input" == *"6"* ]] && selected_models+=("IterativeMiniRocket")
+    [[ "$model_input" == *"5"* ]] && selected_models+=("BiGRU")
+    [[ "$model_input" == *"6"* ]] && selected_models+=("TCN")
+    [[ "$model_input" == *"7"* ]] && selected_models+=("InceptionTime")
+    [[ "$model_input" == *"8"* ]] && selected_models+=("IterativeMiniRocket")
 fi
 
 # --- 4. Validate ---
@@ -146,14 +150,18 @@ echo "============================================================"
 poetry run python eval.py
 poetry run python aggregate_results.py
 
-# --- 7. Build & evaluate ensemble ---
+# --- 7. Build & evaluate ensemble (per selected mode) ---
 echo ""
 echo "============================================================"
-echo "BUILDING SENSOR ENSEMBLE..."
+echo "BUILDING MODEL ENSEMBLE..."
 echo "============================================================"
 
-poetry run python ensemble.py build
-poetry run python ensemble.py eval
+for mode in "${selected_modes[@]}"; do
+    echo ""
+    echo "--- Ensemble: $mode ---"
+    TRAINING_MODE=$mode poetry run python ensemble.py build "$mode"
+    TRAINING_MODE=$mode poetry run python ensemble.py eval  "$mode"
+done
 
 echo ""
 echo "============================================================"

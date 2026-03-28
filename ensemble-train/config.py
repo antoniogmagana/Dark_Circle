@@ -38,7 +38,9 @@ if not DB_CONN_PARAMS["password"]:
 
 TRAINING_MODE = os.environ.get("TRAINING_MODE")
 if not TRAINING_MODE:
-    TRAINING_MODE = input('Enter Training Mode ["detection", "category", "instance"]: ')
+    TRAINING_MODE = input(
+        'Enter Training Mode ["detection", "category", "instance"]: '
+    )
 
 ALL_SENSORS = ["audio", "seismic", "accel"]
 
@@ -150,7 +152,7 @@ RUN_ID = os.environ.get("RUN_ID")
 if not RUN_ID:
     RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-RUN_DIR = os.path.join("saved_models", TRAINING_MODE, TRAIN_SENSOR, MODEL_NAME, RUN_ID)
+RUN_DIR = os.path.join("saved_models", TRAINING_MODE, MODEL_NAME, RUN_ID)
 MODEL_SAVE_PATH = os.path.join(RUN_DIR, "best_model.pth")
 META_SAVE_PATH = os.path.join(RUN_DIR, "meta.pt")
 IMG_SAVE_PATH = os.path.join(RUN_DIR, "conf_matrix.png")
@@ -391,34 +393,101 @@ _HYPERPARAMS = {
     },
 
     # -----------------------------------------------------------------
-    # ResNet1D (residual 1D CNN — new)
+    # BiGRU (CNN frontend + bidirectional GRU)
     # -----------------------------------------------------------------
-    ("ResNet1D", "audio"): {
+    ("BiGRU", "audio"): {
         "LEARNING_RATE": 1e-3,
-        "CHANNELS": [32, 64, 128],
-        "STEM_KERNEL": 15,
-        "STEM_STRIDE": 4,
-        "BLOCKS_PER_STAGE": 2,
+        "CHANNELS": [16, 32],
+        "KERNELS": [32, 16],
+        "STRIDES": [8, 4],
+        "POOLS": [4, 2],
         "HIDDEN": 128,
+        "LAYERS": 2,
+        "DIM": 64,
         "DROPOUT": 0.3,
     },
-    ("ResNet1D", "seismic"): {
+    ("BiGRU", "seismic"): {
         "LEARNING_RATE": 1e-3,
-        "CHANNELS": [32, 64, 128],
-        "STEM_KERNEL": 7,
-        "STEM_STRIDE": 1,
-        "BLOCKS_PER_STAGE": 2,
+        "CHANNELS": [16, 32],
+        "KERNELS": [7, 5],
+        "STRIDES": [2, 2],
+        "POOLS": [2, 2],
         "HIDDEN": 64,
-        "DROPOUT": 0.3,
+        "LAYERS": 2,
+        "DIM": 32,
+        "DROPOUT": 0.2,
     },
-    ("ResNet1D", "accel"): {
+    ("BiGRU", "accel"): {
         "LEARNING_RATE": 1e-3,
-        "CHANNELS": [32, 64, 128],
-        "STEM_KERNEL": 7,
-        "STEM_STRIDE": 1,
-        "BLOCKS_PER_STAGE": 2,
+        "CHANNELS": [16, 32],
+        "KERNELS": [7, 5],
+        "STRIDES": [2, 2],
+        "POOLS": [2, 2],
         "HIDDEN": 64,
+        "LAYERS": 2,
+        "DIM": 32,
+        "DROPOUT": 0.2,
+    },
+
+    # -----------------------------------------------------------------
+    # TCN (dilated causal convolutions)
+    # -----------------------------------------------------------------
+    ("TCN", "audio"): {
+        "LEARNING_RATE": 1e-3,
+        "TCN_CHANNELS": 64,
+        "TCN_KERNEL_SIZE": 7,
+        "TCN_LEVELS": 4,
+        "HIDDEN": 128,
+        "DROPOUT": 0.2,
+    },
+    ("TCN", "seismic"): {
+        "LEARNING_RATE": 1e-3,
+        "TCN_CHANNELS": 64,
+        "TCN_KERNEL_SIZE": 7,
+        "TCN_LEVELS": 4,
+        "HIDDEN": 128,
+        "DROPOUT": 0.2,
+    },
+    ("TCN", "accel"): {
+        "LEARNING_RATE": 1e-3,
+        "TCN_CHANNELS": 64,
+        "TCN_KERNEL_SIZE": 7,
+        "TCN_LEVELS": 4,
+        "HIDDEN": 128,
+        "DROPOUT": 0.2,
+    },
+
+    # -----------------------------------------------------------------
+    # InceptionTime (multi-scale parallel convolutions)
+    # -----------------------------------------------------------------
+    ("InceptionTime", "audio"): {
+        "LEARNING_RATE": 1e-3,
+        "NB_FILTERS": 64,
+        "INCEPTION_KERNELS": [9, 19, 39],
+        "INCEPTION_BLOCKS": 3,
+        "HIDDEN": 256,
         "DROPOUT": 0.3,
+        "INCEPTION_STEM_STRIDE": max(
+            1, int(REF_SAMPLE_RATE * SAMPLE_SECONDS) // 200
+        ),
+    },
+    ("InceptionTime", "seismic"): {
+        "LEARNING_RATE": 1e-3,
+        "NB_FILTERS": 64,
+        "INCEPTION_KERNELS": [9, 19, 39],
+        "INCEPTION_BLOCKS": 3,
+        "HIDDEN": 256,
+        "DROPOUT": 0.3,
+        "INCEPTION_STEM_STRIDE": 1,
+    },
+    ("InceptionTime", "accel"): {
+        "LEARNING_RATE": 1e-3,
+        "NB_FILTERS": 64,
+        "INCEPTION_KERNELS": [9, 19, 39],
+        "INCEPTION_BLOCKS": 3,
+        "HIDDEN": 256,
+        "DROPOUT": 0.3,
+        "INCEPTION_STEM_STRIDE": 1,
     },
 
     # -----------------------------------------------------------------
@@ -460,8 +529,10 @@ SHAPE_MAP = {
     "ClassificationCNN": "2D",
     "WaveformClassificationCNN": "1D",
     "ClassificationLSTM": "1D",
-    "ResNet1D": "1D",
     "IterativeMiniRocket": "1D",
+    "InceptionTime": "1D",
+    "TCN": "1D",
+    "BiGRU": "1D",
 }
 USE_MEL = SHAPE_MAP.get(MODEL_NAME, "1D") == "2D"
 
@@ -482,8 +553,35 @@ def save_config_snapshot():
             config_dict[key] = value.tolist()
         elif isinstance(value, torch.device):
             config_dict[key] = str(value)
-        elif isinstance(value, (int, float, str, list, dict, bool, tuple, type(None))):
+        elif isinstance(
+            value, (int, float, str, list, dict, bool, tuple, type(None))
+        ):
             config_dict[key] = value
 
     with open(JSON_LOG_PATH, "w") as f:
         json.dump(config_dict, f, indent=4)
+
+
+# =====================================================================
+# 13. ENSEMBLE CONFIGURATION
+# =====================================================================
+
+_ensemble_models_env = os.environ.get("ENSEMBLE_MODELS", "")
+ENSEMBLE_MODELS = (
+    [m for m in _ensemble_models_env.split(",") if m]
+    if _ensemble_models_env
+    else list(SHAPE_MAP.keys())
+)
+ENSEMBLE_WEIGHT_METRIC = "val_f1"
+ENSEMBLE_WEIGHT_SCHEME = "linear"   # "linear" or "softmax"
+
+ENSEMBLE_RUN_ID = os.environ.get(
+    "ENSEMBLE_RUN_ID", datetime.now().strftime("%Y%m%d_%H%M%S")
+)
+ENSEMBLE_DIR = os.path.join(
+    "saved_models", "ensemble", TRAINING_MODE, ENSEMBLE_RUN_ID
+)
+ENSEMBLE_REPORT_PATH = os.path.join(ENSEMBLE_DIR, "ensemble_report.txt")
+ENSEMBLE_WEIGHTS_PATH = os.path.join(
+    "saved_models", "ensemble", TRAINING_MODE, "ensemble_weights.json"
+)
