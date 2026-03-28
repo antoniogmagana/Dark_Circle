@@ -1,0 +1,15 @@
+Run Directory: 20260328_051821
+Mode: detection | Model: IterativeMiniRocket
+----------------------------------------
+Accuracy: 0.8657
+MCC: 0.4621
+ROC-AUC: 0.9970
+Precision: 0.9666
+Recall: 0.8657
+F1-Score: 0.9010
+Latency: 0.8740 ms/sample
+False Alarm Rate: 0.000%
+
+Per-Class Accuracy:
+  Background (0): 1.0000
+  Target (1): 0.8595

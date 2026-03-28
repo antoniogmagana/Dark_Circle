@@ -1,0 +1,26 @@
+Run Directory: 20260328_124347
+Mode: instance | Model: IterativeMiniRocket
+----------------------------------------
+Accuracy: 0.3451
+MCC: 0.2288
+ROC-AUC: 0.8532
+Precision: 0.3758
+Recall: 0.3451
+F1-Score: 0.3182
+Latency: 0.8756 ms/sample
+
+Per-Class Accuracy:
+  bicycle (0): 0.0733
+  polaris (1): 0.0000
+  pickup (2): 0.1965
+  gle350 (3): 0.2666
+  scooter (4): 0.3634
+  cx30 (5): 0.6023
+  ev (6): 0.0000
+  motorcycle (7): 0.0283
+  mustang (8): 0.3677
+  forester (9): 0.0661
+  background (10): 0.9135
+  walk (11): 0.0452
+  miata (12): 0.3911
+  warhog (13): 0.0000

@@ -1,0 +1,26 @@
+Run Directory: 20260328_120657
+Mode: instance | Model: ClassificationCNN
+----------------------------------------
+Accuracy: 0.6311
+MCC: 0.5750
+ROC-AUC: 0.9474
+Precision: 0.6371
+Recall: 0.6311
+F1-Score: 0.6282
+Latency: 0.1775 ms/sample
+
+Per-Class Accuracy:
+  bicycle (0): 0.0370
+  polaris (1): 0.8000
+  pickup (2): 0.3711
+  gle350 (3): 0.6347
+  scooter (4): 0.1362
+  cx30 (5): 0.7668
+  ev (6): 0.4803
+  motorcycle (7): 0.6518
+  mustang (8): 0.6743
+  forester (9): 0.2505
+  background (10): 0.9405
+  walk (11): 0.6499
+  miata (12): 0.7559
+  warhog (13): 0.8444

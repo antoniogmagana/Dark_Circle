@@ -1,0 +1,15 @@
+Run Directory: 20260328_075017
+Mode: detection | Model: BiGRU
+----------------------------------------
+Accuracy: 0.9990
+MCC: 0.9885
+ROC-AUC: 0.9996
+Precision: 0.9990
+Recall: 0.9990
+F1-Score: 0.9990
+Latency: 0.1789 ms/sample
+False Alarm Rate: 0.541%
+
+Per-Class Accuracy:
+  Background (0): 0.9946
+  Target (1): 0.9992

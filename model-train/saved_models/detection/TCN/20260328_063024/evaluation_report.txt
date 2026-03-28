@@ -1,0 +1,15 @@
+Run Directory: 20260328_063024
+Mode: detection | Model: TCN
+----------------------------------------
+Accuracy: 0.8473
+MCC: 0.4330
+ROC-AUC: 0.9738
+Precision: 0.9653
+Recall: 0.8473
+F1-Score: 0.8889
+Latency: 0.3396 ms/sample
+False Alarm Rate: 0.480%
+
+Per-Class Accuracy:
+  Background (0): 0.9952
+  Target (1): 0.8404
