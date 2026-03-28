@@ -164,7 +164,7 @@ METRICS_LOG_PATH = os.path.join(RUN_DIR, "metrics.csv")
 # =====================================================================
 
 BATCH_SIZE = 128
-EPOCHS = 30
+EPOCHS = 50
 NUM_WORKERS = 32
 LOG_INTERVAL = 10
 
