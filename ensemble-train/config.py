@@ -1,16 +1,37 @@
 import os
-import math
 import random
-import json
 import torch
-import numpy as np
+import json
 from datetime import datetime
+import numpy as np
 
+
+# ===========================================================
+# Globals
+# ===========================================================
+
+# ============================================================
+# Training hyperparameters
+# ============================================================
+
+# Core training loop settings
+BATCH_SIZE = 128
+EPOCHS = 50
+NUM_WORKERS = 32
+LOG_INTERVAL = 10
+BLOCK_SIZE = 60
+USABLE_SIZE = 45
+
+# Checkpoint + evaluation output directories
+CHECKPOINT_DIR = "./checkpoints"
+EVAL_RESULTS_DIR = "./eval_results"
+
+# How many batches eval.py should run before stopping
+EVAL_STEPS = 200
 
 # =====================================================================
 # 1. HARDWARE & DEVICE
 # =====================================================================
-
 if torch.cuda.is_available():
     DEVICE = torch.device("cuda")
 elif torch.backends.mps.is_available():
@@ -21,7 +42,6 @@ else:
 # =====================================================================
 # 2. DATABASE PARAMETERS
 # =====================================================================
-
 DB_CONN_PARAMS = {
     "dbname": "lvc_db",
     "user": "lvc_toolkit",
@@ -33,101 +53,136 @@ if not DB_CONN_PARAMS["password"]:
     DB_CONN_PARAMS["password"] = input("Enter Database Password: ")
 
 # =====================================================================
-# 3. TRAINING MODE & SENSOR
+# 3. TRAINING MODE
 # =====================================================================
-
+# Options:
+#   "detection"  -> binary: background vs vehicle
+#   "category"   -> multi-class: background/light/heavy (CLASS_MAP)
+#   "instance"   -> each vehicle instance is its own class
 TRAINING_MODE = os.environ.get("TRAINING_MODE")
 if not TRAINING_MODE:
     TRAINING_MODE = input(
         'Enter Training Mode ["detection", "category", "instance"]: '
     )
 
-ALL_SENSORS = ["audio", "seismic", "accel"]
-
-TRAIN_SENSOR = os.environ.get("TRAIN_SENSOR")
-if not TRAIN_SENSOR:
-    TRAIN_SENSOR = input('Enter Sensor ["audio", "seismic", "accel"]: ')
-
-TRAIN_SENSORS = [TRAIN_SENSOR]
-IN_CHANNELS = 3 if TRAIN_SENSOR == "accel" else 1
-
-# Sensors used for time-window alignment.  All sensors in this list
-# must be present for a group to be valid.  This ensures that training
-# audio alone and seismic alone produce identical sample lists.
-ALIGN_SENSORS = ["audio", "seismic"]
-
+# Reproducible instance-level class IDs
 INSTANCE_SEED = 0
 
 # =====================================================================
-# 4. DATASET & CLASS CONSTANTS
+# MODEL SELECTION CRITERIA
 # =====================================================================
+# Options: "val_acc", "val_loss", "val_f1", "val_precision", "val_recall"
+BEST_MODEL_METRIC = "val_f1"
 
+# =====================================================================
+# 4. DATASET, SENSOR & CLASS CONSTANTS
+# =====================================================================
+# "iobt" "focal" "m3nvc"
 TRAIN_DATASETS = ["iobt", "focal", "m3nvc"]
+
+# "audio" "seismic" "accel" — override via TRAIN_SENSORS=audio,seismic
+_sensors_env = os.environ.get("TRAIN_SENSORS", "")
+TRAIN_SENSORS = (
+    [s.strip() for s in _sensors_env.split(",") if s.strip()]
+    if _sensors_env
+    else ["audio", "seismic"]
+)
+
+# Derived: audio=1, seismic=1, accel=3
+_SENSOR_CHANNELS = {"audio": 1, "seismic": 1, "accel": 3}
+IN_CHANNELS = sum(_SENSOR_CHANNELS[s] for s in TRAIN_SENSORS)
+
+# Target sample rate all tensors will be upsampled to for the CNN
 ACOUSTIC_SR = 16000
 
+# Native sample rates per dataset and sensor
 NATIVE_SR = {
-    "iobt":  {"audio": 16000, "seismic": 100, "accel": 100},
+    "iobt": {"audio": 16000, "seismic": 100, "accel": 100},
     "focal": {"audio": 16000, "seismic": 100, "accel": 100},
-    "m3nvc": {"audio": 1600,  "seismic": 200, "accel": 200},
+    "m3nvc": {"audio": 1600, "seismic": 200, "accel": 200},
 }
 
-REF_SAMPLE_RATE = max(NATIVE_SR[ds][TRAIN_SENSOR] for ds in TRAIN_DATASETS)
+# Global reference sample rate for all sensors/datasets
+REF_SAMPLE_RATE = max(
+    NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_SENSORS
+)
 
+# Bit depth per sensor type (hardware spec)
+BIT_DEPTH_MAP = {"audio": 16, "seismic": 24, "accel": 24}
+
+# ADC max count per sensor (signed: 2^(bits-1))
+ADC_SCALE_MAP = {s: 2 ** (b - 1) for s, b in BIT_DEPTH_MAP.items()}
+
+# Per-channel ADC scales ordered to match channel concatenation in dataset.py
+# audio=1ch, seismic=1ch, accel=3ch — channels stacked in TRAIN_SENSORS order
+CHANNEL_ADC_SCALES = [
+    ADC_SCALE_MAP[s] for s in TRAIN_SENSORS for _ in range(_SENSOR_CHANNELS[s])
+]
+
+# Semantic category names (used for category-level classification)
+# if background used, always set to 0: "background"
 CLASS_MAP = {0: "pedestrian", 1: "light", 2: "sport", 3: "utility"}
 
+# Instance → category mapping (authoritative)
 DATASET_VEHICLE_MAP = {
     "iobt": {
-        "polaris0150pm": "light",
-        "polaris0215pm": "light",
-        "polaris0235pm_nolineofsig": "light",
-        "warhog1135am": "light",
-        "warhog1149am": "light",
-        "warhog_nolineofsight": "light",
-        "silverado0255pm": "utility",
-        "silverado0315pm": "utility",
+        "polaris0150pm": ["light", "polaris"],
+        "polaris0215pm": ["light", "polaris"],
+        "polaris0235pm_nolineofsig": ["light", "polaris"],
+        "warhog1135am": ["light", "warhog"],
+        "warhog1149am": ["light", "warhog"],
+        "warhog_nolineofsight": ["light", "warhog"],
+        "silverado0255pm": ["utility", "pickup"],
+        "silverado0315pm": ["utility", "pickup"],
     },
     "focal": {
-        "walk": "pedestrian",
-        "walk2": "pedestrian",
-        "bicycle": "pedestrian",
-        "bicycle2": "pedestrian",
-        "motor": "light",
-        "motor2": "light",
-        "scooter": "light",
-        "scooter2": "light",
-        "forester": "utility",
-        "forester2": "utility",
-        "mustang": "sport",
-        "mustang0528": "sport",
-        "mustang2": "sport",
-        "pickup": "utility",
-        "pickup2": "utility",
-        "tesla": "sport",
-        "tesla2": "sport",
+        "walk": ["pedestrian", "walk"],
+        "walk2": ["pedestrian", "walk"],
+        "bicycle": ["pedestrian", "bicycle"],
+        "bicycle2": ["pedestrian", "bicycle"],
+        "motor": ["light", "motorcycle"],
+        "motor2": ["light", "motorcycle"],
+        "scooter": ["light", "scooter"],
+        "scooter2": ["light", "scooter"],
+        "forester": ["utility", "forester"],
+        "forester2": ["utility", "forester"],
+        "mustang": ["sport", "mustang"],
+        "mustang0528": ["sport", "mustang"],
+        "mustang2": ["sport", "mustang"],
+        "pickup": ["utility", "pickup"],
+        "pickup2": ["utility", "pickup"],
+        "tesla": ["sport", "ev"],
+        "tesla2": ["sport", "ev"],
     },
     "m3nvc": {
-        "background": "background",
-        "cx30": "utility",
-        "miata": "sport",
-        "mustang": "sport",
-        "miata_mustang": "sport",
-        "gle350": "utility",
+        "background": ["background", "background"],
+        "cx30": ["utility", "cx30"],
+        "miata": ["sport", "miata"],
+        "mustang": ["sport", "mustang"],
+        "gle350": ["utility", "gle350"],
     },
 }
 
 # =====================================================================
-# 5. DYNAMIC LABEL SPACE
+# 5. DYNAMIC LABEL SPACE CONSTRUCTION
 # =====================================================================
 
-ALL_INSTANCES = sorted({
-    name for ds_map in DATASET_VEHICLE_MAP.values() for name in ds_map.keys()
-})
+# Collect all instances across all datasets
+ALL_INSTANCES = []
+for ds_map in DATASET_VEHICLE_MAP.values():
+    ALL_INSTANCES.extend(v[1] for v in ds_map.values())
+ALL_INSTANCES = sorted(set(ALL_INSTANCES))
 
+# Build reproducible instance-level class IDs
 random.seed(INSTANCE_SEED)
 shuffled_instances = ALL_INSTANCES.copy()
 random.shuffle(shuffled_instances)
+
 INSTANCE_TO_CLASS = {name: idx for idx, name in enumerate(shuffled_instances)}
 
+CLASS_WEIGHTS = []
+
+# Determine number of classes based on training mode
 if TRAINING_MODE == "detection":
     NUM_CLASSES = 2
     CLASS_WEIGHTS = [25.5, 1.0]
@@ -136,394 +191,180 @@ elif TRAINING_MODE == "category":
     CLASS_WEIGHTS = [28.0, 2.0, 13.0, 15.5]
 elif TRAINING_MODE == "instance":
     NUM_CLASSES = len(INSTANCE_TO_CLASS)
-    CLASS_WEIGHTS = [1.0] * NUM_CLASSES
 else:
     raise ValueError(f"Unknown TRAINING_MODE: {TRAINING_MODE}")
 
 # =====================================================================
-# 6. MODEL SELECTION & VERSIONING
+# 6. MODEL SELECTION & DYNAMIC VERSIONING
 # =====================================================================
 
 MODEL_NAME = os.environ.get("MODEL_NAME")
 if not MODEL_NAME:
     MODEL_NAME = input("Enter Model Name: ")
 
+# 1. Generate or Retrieve RUN_ID
 RUN_ID = os.environ.get("RUN_ID")
 if not RUN_ID:
     RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+# 2. Build the nested directory structure
 RUN_DIR = os.path.join("saved_models", TRAINING_MODE, MODEL_NAME, RUN_ID)
+CACHE_DIR = os.path.join("saved_models", "cache")
+
+# 3. Define the specific file paths inside that new folder
 MODEL_SAVE_PATH = os.path.join(RUN_DIR, "best_model.pth")
 META_SAVE_PATH = os.path.join(RUN_DIR, "meta.pt")
 IMG_SAVE_PATH = os.path.join(RUN_DIR, "conf_matrix.png")
 JSON_LOG_PATH = os.path.join(RUN_DIR, "hyperparameters.json")
 METRICS_LOG_PATH = os.path.join(RUN_DIR, "metrics.csv")
 
-# =====================================================================
-# 7. CORE TRAINING HYPERPARAMETERS
-# =====================================================================
-
-BATCH_SIZE = 128
-EPOCHS = 50
-NUM_WORKERS = 32
-LOG_INTERVAL = 10
-
-BEST_MODEL_METRIC = "val_f1"
-EARLY_STOP_PATIENCE = 8
-GRAD_CLIP = 1.0
-
-# Cache all samples in RAM after the first DB pass.
-# Eliminates DB queries for epochs 2+.  Memory cost:
-#   seismic/accel: ~300 MB – 1 GB
-#   audio: ~25 GB (disable if RAM is limited)
-CACHE_SAMPLES = True
-
-# Quick sweep mode: set via SWEEP=1 env var to override EPOCHS
-# for fast architecture comparison before full training runs.
-_sweep = os.environ.get("SWEEP")
-if _sweep:
-    EPOCHS = int(_sweep) if _sweep.isdigit() else 5
-
-BLOCK_SIZE = 60
-USABLE_SIZE = 45
 SPLIT_TRAIN = 0.70
 SPLIT_VAL = 0.15
 SPLIT_TEST = 0.15
 
+# Time-scale knobs
 SAMPLE_SECONDS = 1
 
-# =====================================================================
-# 8. SPECTRAL PARAMETERS (Sensor-Adaptive)
-# =====================================================================
-#
-# Audio at 16kHz produces rich spectrograms with many time frames.
-# Seismic/accel at 100-200Hz produce tiny spectrograms — we use
-# fewer mel bins and smaller FFT windows accordingly.
-
-_SPECTRAL_PROFILES = {
-    "audio": {
-        "MEL_BINS": 64,
-        "N_FFT": 1024,
-        "HOP_LENGTH": 256,
-    },
-    "seismic": {
-        "MEL_BINS": 32,
-    },
-    "accel": {
-        "MEL_BINS": 32,
-    },
-}
-
-_spectral = _SPECTRAL_PROFILES.get(TRAIN_SENSOR, {})
-MEL_BINS = _spectral.get("MEL_BINS", 64)
-
-_signal_length = int(REF_SAMPLE_RATE * SAMPLE_SECONDS)
-
-# For audio, use the profile values. For low-rate sensors, compute dynamically.
-if "N_FFT" in _spectral:
-    N_FFT = _spectral["N_FFT"]
-    HOP_LENGTH = _spectral["HOP_LENGTH"]
-else:
-    N_FFT = min(1024, 2 ** int(math.log2(_signal_length)))
-    HOP_LENGTH = max(1, N_FFT // 4)
-
+# Mel spectrogram parameters
+MEL_BINS = 64
+MEL_HOP_LENGTH = 512
 MEL_TOP_DB = 80
 NOISE_KERNEL_SIZE = 51
+
+# FFT window size
+N_FFT = 1024
+
+# Hop length between STFT frames
+HOP_LENGTH = 256
+
 BATCH_MODE = True
 
 # =====================================================================
-# 9. DATA AUGMENTATION & SYNTHESIS
+# 7. DATA AUGMENTATION & SYNTHESIS
 # =====================================================================
-
+# Toggle to dynamically inject generated background noise during training
 SYNTHESIZE_BACKGROUND = True
+
+# The probability (0.0 to 1.0) of adding a SYNTHETIC background sample
 SYNTHESIZE_PROBABILITY = 0.5
+
+# Toggle to dynamically add noise to the raw waveform during training
 AUGMENT_SNR = True
+
+# The minimum and maximum SNR (in decibels) to apply when augmenting
 AUGMENT_SNR_RANGE = (10, 30)
+
+# add extra synthetic background samples
 OVERSAMPLE_BACKGROUNDS = True
 
 # =====================================================================
-# 10. SENSOR-SPECIFIC MODEL HYPERPARAMETERS
+# 8. MODEL HYPERPARAMETERS & CONTROL FLOW
 # =====================================================================
-#
-# Each (MODEL_NAME, SENSOR) pair maps to a dict of hyperparameters.
-# This replaces the old flat if/elif blocks — different sensors get
-# architectures tuned to their signal length and frequency content.
-#
-# Key design rationale:
-#   Audio (16kHz, 16000 samples) — large kernels/strides OK, deep nets,
-#       rich mel spectrograms with MaxPool.
-#   Seismic (200Hz, 200 samples) — small kernels, moderate depth,
-#       tiny spectrograms with no MaxPool (AdaptiveAvgPool handles it).
-#   Accel (200Hz, 200 samples, 3ch) — same as seismic structurally;
-#       the 3 input channels provide cross-axis information naturally.
+BASE_LR = 1e-3
+BASE_DROPOUT = 0.3
 
-_HYPERPARAMS = {
+# Sequence length derived from the active sensor/dataset combination.
+SEQ_LEN = int(REF_SAMPLE_RATE * SAMPLE_SECONDS)
 
-    # -----------------------------------------------------------------
-    # DetectionCNN (2D spectrogram)
-    # -----------------------------------------------------------------
-    ("DetectionCNN", "audio"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [16, 32],
-        "KERNELS": [5, 3],
-        "STRIDES": [2, 1],
-        "PADS": [2, 1],
-        "POOL": True,
-        "HIDDEN": 64,
-        "DROPOUT": 0.2,
-    },
-    ("DetectionCNN", "seismic"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [16, 32],
-        "KERNELS": [3, 3],
-        "STRIDES": [1, 1],
-        "PADS": [1, 1],
-        "POOL": False,
-        "HIDDEN": 64,
-        "DROPOUT": 0.2,
-    },
-    ("DetectionCNN", "accel"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [16, 32],
-        "KERNELS": [3, 3],
-        "STRIDES": [1, 1],
-        "PADS": [1, 1],
-        "POOL": False,
-        "HIDDEN": 64,
-        "DROPOUT": 0.2,
-    },
+# --- Detection CNN ---
+if MODEL_NAME == "DetectionCNN":
+    LEARNING_RATE = 1e-3
+    CHANNELS = [16, 32]
+    KERNELS = [5, 3]
+    STRIDES = [2, 1]
+    PADS = [2, 1]
+    HIDDEN = 64
 
-    # -----------------------------------------------------------------
-    # ClassificationCNN (2D spectrogram)
-    # -----------------------------------------------------------------
-    ("ClassificationCNN", "audio"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [32, 64, 128, 256],
-        "KERNELS": [3, 3, 3, 3],
-        "STRIDES": [1, 1, 1, 1],
-        "PADS": [1, 1, 1, 1],
-        "POOL": True,
-        "HIDDEN": 512,
-        "DROPOUT": 0.3,
-    },
-    ("ClassificationCNN", "seismic"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [32, 64],
-        "KERNELS": [3, 3],
-        "STRIDES": [1, 1],
-        "PADS": [1, 1],
-        "POOL": False,
-        "HIDDEN": 128,
-        "DROPOUT": 0.3,
-    },
-    ("ClassificationCNN", "accel"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [32, 64],
-        "KERNELS": [3, 3],
-        "STRIDES": [1, 1],
-        "PADS": [1, 1],
-        "POOL": False,
-        "HIDDEN": 128,
-        "DROPOUT": 0.3,
-    },
+# --- Classification CNN ---
+elif MODEL_NAME == "ClassificationCNN":
+    LEARNING_RATE = 1e-3
+    CHANNELS = [32, 64, 128, 256]
+    KERNEL = 3
+    PADS = 1
+    HIDDEN = 512
+    DROPOUT = 0.3
 
-    # -----------------------------------------------------------------
-    # WaveformClassificationCNN (1D raw waveform)
-    # -----------------------------------------------------------------
-    ("WaveformClassificationCNN", "audio"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [32, 64, 128],
-        "KERNELS": [64, 32, 16],
-        "STRIDES": [8, 4, 2],
-        "HIDDEN": 256,
-        "DROPOUT": 0.3,
-    },
-    ("WaveformClassificationCNN", "seismic"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [32, 64, 128],
-        "KERNELS": [7, 5, 3],
-        "STRIDES": [2, 2, 1],
-        "HIDDEN": 128,
-        "DROPOUT": 0.3,
-    },
-    ("WaveformClassificationCNN", "accel"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [32, 64, 128],
-        "KERNELS": [7, 5, 3],
-        "STRIDES": [2, 2, 1],
-        "HIDDEN": 128,
-        "DROPOUT": 0.3,
-    },
+# --- Waveform 1D CNN ---
+elif MODEL_NAME == "WaveformClassificationCNN":
+    LEARNING_RATE = 1e-3
+    CHANNELS = [32, 64, 128]
+    HIDDEN = 256
+    DROPOUT = 0.3
+    _s0 = max(4, SEQ_LEN // 50)
+    _k0 = max(8, _s0 * 2)
+    _len1 = (SEQ_LEN - _k0) // _s0 + 1
+    _s1 = max(2, _len1 // 20)
+    _k1 = max(4, _s1 * 2)
+    _len2 = (_len1 - _k1) // _s1 + 1
+    _s2 = max(1, _len2 // 10)
+    _k2 = max(4, _s2 * 2)
+    KERNELS = [_k0, _k1, _k2]
+    STRIDES = [_s0, _s1, _s2]
 
-    # -----------------------------------------------------------------
-    # ClassificationLSTM (CNN frontend → LSTM)
-    # -----------------------------------------------------------------
-    ("ClassificationLSTM", "audio"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [16, 32],
-        "KERNELS": [32, 16],
-        "STRIDES": [8, 4],
-        "POOLS": [4, 2],
-        "HIDDEN": 128,
-        "LAYERS": 3,
-        "DIM": 64,
-        "DROPOUT": 0.3,
-    },
-    ("ClassificationLSTM", "seismic"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [16, 32],
-        "KERNELS": [7, 5],
-        "STRIDES": [2, 2],
-        "POOLS": [2, 2],
-        "HIDDEN": 64,
-        "LAYERS": 2,
-        "DIM": 32,
-        "DROPOUT": 0.2,
-    },
-    ("ClassificationLSTM", "accel"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [16, 32],
-        "KERNELS": [7, 5],
-        "STRIDES": [2, 2],
-        "POOLS": [2, 2],
-        "HIDDEN": 64,
-        "LAYERS": 2,
-        "DIM": 32,
-        "DROPOUT": 0.2,
-    },
+# --- LSTM Networks ---
+elif MODEL_NAME == "ClassificationLSTM":
+    LEARNING_RATE = 1e-3
+    CHANNELS = [16, 32]
+    HIDDEN = 128
+    LAYERS = 3
+    DIM = 64
+    DROPOUT = 0.3
+    POOLS = [2, 2]
+    _s0 = max(2, SEQ_LEN // 100)
+    _k0 = max(8, _s0 * 2)
+    _len1 = ((SEQ_LEN - _k0) // _s0 + 1) // POOLS[0]
+    _s1 = max(1, _len1 // 25)
+    _k1 = max(4, _s1 * 2)
+    KERNELS = [_k0, _k1]
+    STRIDES = [_s0, _s1]
 
-    # -----------------------------------------------------------------
-    # BiGRU (CNN frontend + bidirectional GRU)
-    # -----------------------------------------------------------------
-    ("BiGRU", "audio"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [16, 32],
-        "KERNELS": [32, 16],
-        "STRIDES": [8, 4],
-        "POOLS": [4, 2],
-        "HIDDEN": 128,
-        "LAYERS": 2,
-        "DIM": 64,
-        "DROPOUT": 0.3,
-    },
-    ("BiGRU", "seismic"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [16, 32],
-        "KERNELS": [7, 5],
-        "STRIDES": [2, 2],
-        "POOLS": [2, 2],
-        "HIDDEN": 64,
-        "LAYERS": 2,
-        "DIM": 32,
-        "DROPOUT": 0.2,
-    },
-    ("BiGRU", "accel"): {
-        "LEARNING_RATE": 1e-3,
-        "CHANNELS": [16, 32],
-        "KERNELS": [7, 5],
-        "STRIDES": [2, 2],
-        "POOLS": [2, 2],
-        "HIDDEN": 64,
-        "LAYERS": 2,
-        "DIM": 32,
-        "DROPOUT": 0.2,
-    },
+# --- miniROCKET ---
+elif MODEL_NAME == "IterativeMiniRocket":
+    LEARNING_RATE = 1e-3
+    DROPOUT = 0.3
+    MINIROCKET_FEATURES = 1000
 
-    # -----------------------------------------------------------------
-    # TCN (dilated causal convolutions)
-    # -----------------------------------------------------------------
-    ("TCN", "audio"): {
-        "LEARNING_RATE": 1e-3,
-        "TCN_CHANNELS": 64,
-        "TCN_KERNEL_SIZE": 7,
-        "TCN_LEVELS": 4,
-        "HIDDEN": 128,
-        "DROPOUT": 0.2,
-    },
-    ("TCN", "seismic"): {
-        "LEARNING_RATE": 1e-3,
-        "TCN_CHANNELS": 64,
-        "TCN_KERNEL_SIZE": 7,
-        "TCN_LEVELS": 4,
-        "HIDDEN": 128,
-        "DROPOUT": 0.2,
-    },
-    ("TCN", "accel"): {
-        "LEARNING_RATE": 1e-3,
-        "TCN_CHANNELS": 64,
-        "TCN_KERNEL_SIZE": 7,
-        "TCN_LEVELS": 4,
-        "HIDDEN": 128,
-        "DROPOUT": 0.2,
-    },
+# --- InceptionTime ---
+elif MODEL_NAME == "InceptionTime":
+    LEARNING_RATE = 1e-3
+    NB_FILTERS = 64
+    INCEPTION_KERNELS = [9, 19, 39]
+    INCEPTION_BLOCKS = 3
+    HIDDEN = 256
+    DROPOUT = 0.3
+    INCEPTION_STEM_STRIDE = max(1, SEQ_LEN // 200)
 
-    # -----------------------------------------------------------------
-    # InceptionTime (multi-scale parallel convolutions)
-    # -----------------------------------------------------------------
-    ("InceptionTime", "audio"): {
-        "LEARNING_RATE": 1e-3,
-        "NB_FILTERS": 64,
-        "INCEPTION_KERNELS": [9, 19, 39],
-        "INCEPTION_BLOCKS": 3,
-        "HIDDEN": 256,
-        "DROPOUT": 0.3,
-        "INCEPTION_STEM_STRIDE": max(
-            1, int(REF_SAMPLE_RATE * SAMPLE_SECONDS) // 200
-        ),
-    },
-    ("InceptionTime", "seismic"): {
-        "LEARNING_RATE": 1e-3,
-        "NB_FILTERS": 64,
-        "INCEPTION_KERNELS": [9, 19, 39],
-        "INCEPTION_BLOCKS": 3,
-        "HIDDEN": 256,
-        "DROPOUT": 0.3,
-        "INCEPTION_STEM_STRIDE": 1,
-    },
-    ("InceptionTime", "accel"): {
-        "LEARNING_RATE": 1e-3,
-        "NB_FILTERS": 64,
-        "INCEPTION_KERNELS": [9, 19, 39],
-        "INCEPTION_BLOCKS": 3,
-        "HIDDEN": 256,
-        "DROPOUT": 0.3,
-        "INCEPTION_STEM_STRIDE": 1,
-    },
+# --- TCN ---
+elif MODEL_NAME == "TCN":
+    LEARNING_RATE = 1e-3
+    TCN_CHANNELS = 64
+    TCN_KERNEL_SIZE = 7
+    TCN_LEVELS = 4
+    HIDDEN = 128
+    DROPOUT = 0.2
 
-    # -----------------------------------------------------------------
-    # IterativeMiniRocket (all sensors identical)
-    # -----------------------------------------------------------------
-    ("IterativeMiniRocket", "audio"): {
-        "LEARNING_RATE": 1e-3,
-        "DROPOUT": 0.3,
-        "MINIROCKET_FEATURES": 1000,
-    },
-    ("IterativeMiniRocket", "seismic"): {
-        "LEARNING_RATE": 1e-3,
-        "DROPOUT": 0.3,
-        "MINIROCKET_FEATURES": 1000,
-    },
-    ("IterativeMiniRocket", "accel"): {
-        "LEARNING_RATE": 1e-3,
-        "DROPOUT": 0.3,
-        "MINIROCKET_FEATURES": 1000,
-    },
-}
-
-# Apply the sensor-specific hyperparameters to the global namespace
-_key = (MODEL_NAME, TRAIN_SENSOR)
-if _key in _HYPERPARAMS:
-    globals().update(_HYPERPARAMS[_key])
-else:
-    raise ValueError(
-        f"No hyperparameter profile for ({MODEL_NAME}, {TRAIN_SENSOR}). "
-        f"Available: {sorted(_HYPERPARAMS.keys())}"
-    )
+# --- BiGRU ---
+elif MODEL_NAME == "BiGRU":
+    LEARNING_RATE = 1e-3
+    CHANNELS = [16, 32]
+    HIDDEN = 128
+    LAYERS = 2
+    DIM = 64
+    DROPOUT = 0.3
+    POOLS = [2, 2]
+    _s0 = max(2, SEQ_LEN // 100)
+    _k0 = max(8, _s0 * 2)
+    _len1 = ((SEQ_LEN - _k0) // _s0 + 1) // POOLS[0]
+    _s1 = max(1, _len1 // 25)
+    _k1 = max(4, _s1 * 2)
+    KERNELS = [_k0, _k1]
+    STRIDES = [_s0, _s1]
 
 # =====================================================================
-# 11. ROUTING LOGIC
+# 9. ROUTING LOGIC (Replacing Circular Dependencies)
 # =====================================================================
 
+# Map the current model to its required input shape
 SHAPE_MAP = {
     "DetectionCNN": "2D",
     "ClassificationCNN": "2D",
@@ -537,43 +378,41 @@ SHAPE_MAP = {
 USE_MEL = SHAPE_MAP.get(MODEL_NAME, "1D") == "2D"
 
 # =====================================================================
-# 12. EXPERIMENT SNAPSHOT
+# 10. EXPERIMENT TRACKING UTILITY
 # =====================================================================
 
 
 def save_config_snapshot():
-    """Dump all uppercase config variables to JSON in the run directory."""
+    """
+    Scans the config namespace for hyperparameter variables and dumps them
+    into a JSON file inside the specific run's directory.
+    """
     os.makedirs(RUN_DIR, exist_ok=True)
 
     config_dict = {}
+
     for key, value in list(globals().items()):
-        if not key.isupper() or key.startswith("_"):
-            continue
-        if isinstance(value, np.ndarray):
-            config_dict[key] = value.tolist()
-        elif isinstance(value, torch.device):
-            config_dict[key] = str(value)
-        elif isinstance(
-            value, (int, float, str, list, dict, bool, tuple, type(None))
-        ):
-            config_dict[key] = value
+        if key.isupper() and not key.startswith("_"):
+
+            if isinstance(value, np.ndarray):
+                config_dict[key] = value.tolist()
+            elif isinstance(value, torch.device):
+                config_dict[key] = str(value)
+            elif isinstance(
+                value, (int, float, str, list, dict, bool, tuple, type(None))
+            ):
+                config_dict[key] = value
 
     with open(JSON_LOG_PATH, "w") as f:
         json.dump(config_dict, f, indent=4)
 
 
 # =====================================================================
-# 13. ENSEMBLE CONFIGURATION
+# 11. ENSEMBLE CONFIGURATION
 # =====================================================================
 
-_ensemble_models_env = os.environ.get("ENSEMBLE_MODELS", "")
-ENSEMBLE_MODELS = (
-    [m for m in _ensemble_models_env.split(",") if m]
-    if _ensemble_models_env
-    else list(SHAPE_MAP.keys())
-)
 ENSEMBLE_WEIGHT_METRIC = "val_f1"
-ENSEMBLE_WEIGHT_SCHEME = "linear"   # "linear" or "softmax"
+ENSEMBLE_WEIGHT_SCHEME = "linear"
 
 ENSEMBLE_RUN_ID = os.environ.get(
     "ENSEMBLE_RUN_ID", datetime.now().strftime("%Y%m%d_%H%M%S")

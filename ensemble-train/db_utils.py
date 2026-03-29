@@ -1,23 +1,28 @@
-import re
 import psycopg2
 from psycopg2 import sql
+import re
+
+# NOTICE: global 'config' is no longer imported
 
 
 def sanitize_name(name, max_length=25):
-    """Lowercase alphanumeric+underscore, no leading digits, capped length."""
-    clean = re.sub(r"[^a-z0-9_]", "_", str(name).lower())
-    clean = re.sub(r"_+", "_", clean).strip("_")
-    if clean and clean[0].isdigit():
-        clean = f"v_{clean}"
-    return (clean[:max_length]) or "unknown_entity"
+    clean_name = str(name).lower()
+    clean_name = re.sub(r"[^a-z0-9_]", "_", clean_name)
+    clean_name = re.sub(r"_+", "_", clean_name)
+    clean_name = clean_name.strip("_")
+    if clean_name and clean_name[0].isdigit():
+        clean_name = f"v_{clean_name}"
+    clean_name = clean_name[:max_length]
+    return clean_name or "unknown_entity"
 
 
 def db_connect(db_conn_params):
-    """Open a PostgreSQL connection with autocommit enabled."""
     try:
+        # Unpacks the passed dictionary 
         conn = psycopg2.connect(**db_conn_params)
         conn.autocommit = True
-        return conn, conn.cursor()
+        cursor = conn.cursor()
+        return conn, cursor
     except Exception as e:
         print(f"Failed to connect: {e}")
         raise
@@ -28,42 +33,27 @@ def db_close(conn, cursor):
     conn.close()
 
 
-def _build_where(start_time=None, run_id=None, scene_id=None):
-    """Build a WHERE clause from optional filters."""
-    conditions = []
-
-    if start_time is not None:
-        conditions.append(
-            sql.SQL("time_stamp >= {t}").format(t=sql.Literal(start_time))
-        )
-    if run_id is not None:
-        conditions.append(
-            sql.SQL("run_id = {r}").format(r=sql.Literal(run_id))
-        )
-    if scene_id is not None:
-        conditions.append(
-            sql.SQL("scene_id = {s}").format(s=sql.Literal(scene_id))
-        )
-
-    if not conditions:
-        return sql.SQL("")
-
-    return sql.SQL(" WHERE ") + sql.SQL(" AND ").join(conditions)
-
-
-def get_time_bounds(cursor, table_name, run_id=None, scene_id=None):
+# ---------------------------------------------------------------------
+# 1. Time bounds WITH optional run_id filtering
+# ---------------------------------------------------------------------
+def get_time_bounds(cursor, table_name, run_id=None):
     """
-    Return (min_timestamp, max_timestamp) for a table,
-    optionally filtered by run_id and/or scene_id.
+    Returns (min_timestamp, max_timestamp) for a table.
+    If run_id is provided, restricts to that run.
     """
-    where = _build_where(run_id=run_id, scene_id=scene_id)
 
-    query = sql.SQL(
-        "SELECT MIN(time_stamp), MAX(time_stamp) FROM {table}{where}"
-    ).format(
-        table=sql.Identifier(table_name),
-        where=where,
-    )
+    if run_id is None:
+        query = sql.SQL("SELECT MIN(time_stamp), MAX(time_stamp) FROM {table}").format(
+            table=sql.Identifier(table_name)
+        )
+    else:
+        query = sql.SQL(
+            "SELECT MIN(time_stamp), MAX(time_stamp) "
+            "FROM {table} WHERE run_id = {run_id}"
+        ).format(
+            table=sql.Identifier(table_name),
+            run_id=sql.Literal(run_id),
+        )
 
     try:
         cursor.execute(query)
@@ -74,29 +64,89 @@ def get_time_bounds(cursor, table_name, run_id=None, scene_id=None):
         return 0.0, 0.0
 
 
-def fetch_sensor_batch(cursor, table_name, sample_count, start_time,
-                       run_id=None, scene_id=None):
+# ---------------------------------------------------------------------
+# 2. Bulk-fetch an entire table segment from a start time onward
+# ---------------------------------------------------------------------
+def fetch_table_segment(cursor, table_name, from_time, run_id=None):
     """
-    Fetch ``sample_count`` rows starting at ``start_time``.
-
-    Handles audio/seismic (amplitude) and accelerometer (3-axis) tables.
-    Optionally filters by run_id and/or scene_id.
+    Fetches all rows from `from_time` onward, ordered by time_stamp.
+    Used for pre-loading entire table segments into memory at startup.
     """
-    target_cols = (
-        sql.SQL("accel_x_ew, accel_y_ns, accel_z_ud")
-        if "_accel_" in table_name
-        else sql.SQL("amplitude")
-    )
+    if "_accel_" in table_name:
+        target_cols = sql.SQL("accel_x_ew, accel_y_ns, accel_z_ud")
+    else:
+        target_cols = sql.SQL("amplitude")
 
-    where = _build_where(start_time=start_time, run_id=run_id, scene_id=scene_id)
+    if run_id is None:
+        query = sql.SQL(
+            "SELECT {columns} FROM {table} "
+            "WHERE time_stamp >= {from_time} ORDER BY time_stamp ASC"
+        ).format(
+            columns=target_cols,
+            table=sql.Identifier(table_name),
+            from_time=sql.Literal(float(from_time)),
+        )
+    else:
+        query = sql.SQL(
+            "SELECT {columns} FROM {table} "
+            "WHERE time_stamp >= {from_time} AND run_id = {run_id} "
+            "ORDER BY time_stamp ASC"
+        ).format(
+            columns=target_cols,
+            table=sql.Identifier(table_name),
+            from_time=sql.Literal(float(from_time)),
+            run_id=sql.Literal(run_id),
+        )
+
+    try:
+        cursor.execute(query)
+        return cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching segment from {table_name}: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------
+# 3. Fetch N samples starting at a timestamp WITH optional run_id
+# ---------------------------------------------------------------------
+def fetch_sensor_batch(cursor, table_name, sample_count, start_time, run_id=None):
+    """
+    Fetches `sample_count` rows starting at `start_time`.
+    Uses the B-tree index on time_stamp (and run_id if present).
+    Handles audio, seismic, and 3-axis accelerometer tables.
+    """
+
+    # Determine which columns to fetch based on TRAIN_SENSORS
+    if "_accel_" in table_name:
+        target_cols = sql.SQL("accel_x_ew, accel_y_ns, accel_z_ud")
+    else:
+        target_cols = sql.SQL("amplitude")
+
+    # WHERE clause depends on whether run_id is used
+    if run_id is None:
+        where_clause = sql.SQL("time_stamp >= {start_time}").format(
+            start_time=sql.Literal(start_time)
+        )
+    else:
+        where_clause = sql.SQL(
+            "time_stamp >= {start_time} AND run_id = {run_id}"
+        ).format(
+            start_time=sql.Literal(start_time),
+            run_id=sql.Literal(run_id),
+        )
 
     query = sql.SQL(
-        "SELECT {cols} FROM {table}{where} "
-        "ORDER BY time_stamp ASC LIMIT {limit}"
+        """
+        SELECT {columns}
+        FROM {table}
+        WHERE {where_clause}
+        ORDER BY time_stamp ASC
+        LIMIT {limit}
+        """
     ).format(
-        cols=target_cols,
+        columns=target_cols,
         table=sql.Identifier(table_name),
-        where=where,
+        where_clause=where_clause,
         limit=sql.Literal(sample_count),
     )
 

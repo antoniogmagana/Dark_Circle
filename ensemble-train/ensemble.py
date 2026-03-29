@@ -1,600 +1,466 @@
 """
-Model Ensemble — weighted late fusion across all trained model architectures.
+Ensemble evaluation — polls all trained models for a given mode and
+combines their softmax outputs into a single pooled prediction.
 
-Each member is the best-performing run for a given model architecture,
-ranked by test F1. Predictions are fused as a weighted average of per-model
-softmax outputs, producing a pooled confidence score over the class space.
+Each model's prediction is weighted by its individual test F1-Score.
+The final prediction is the argmax of the weighted sum of softmax
+probability vectors (a valid probability distribution).
 
 Usage:
-  python ensemble.py build [mode]   # discover best runs, compute weights
-  python ensemble.py show  [mode]   # print ensemble composition
-  python ensemble.py eval  [mode]   # evaluate, write report + conf matrices
-
-  If [mode] is omitted, all three training modes are processed in sequence.
-  Mode can also be set via the TRAINING_MODE environment variable.
+    TRAINING_MODE=detection poetry run python ensemble.py detection
+    TRAINING_MODE=category  poetry run python ensemble.py category
+    TRAINING_MODE=instance  poetry run python ensemble.py instance
+    poetry run python ensemble.py          # runs all three modes
 """
 
-import json
-import math
 import os
-import re
 import sys
-import warnings
+import json
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
-
-import matplotlib.pyplot as plt
-import numpy as np
-import seaborn as sns
-from sklearn.exceptions import UndefinedMetricWarning
 from sklearn.metrics import (
     accuracy_score,
-    confusion_matrix,
-    f1_score,
     matthews_corrcoef,
+    roc_auc_score,
+    confusion_matrix,
     precision_score,
     recall_score,
-    roc_auc_score,
+    f1_score,
 )
-
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 
-ALL_MODES = ["detection", "category", "instance"]
-DEFAULT_MODEL_DIR = Path("saved_models")
-
-
 # =====================================================================
-# Model Discovery
+# 1. Discovery — find the best evaluated run per model architecture
 # =====================================================================
 
-def _parse_f1(report_path):
-    """Extract F1-Score from an evaluation_report.txt."""
+def _parse_f1_from_report(report_path):
+    """Return the F1-Score float from an evaluation_report.txt, or None."""
     try:
-        text = Path(report_path).read_text()
-        match = re.search(r"F1-Score:\s*([0-9.]+)", text)
-        return float(match.group(1)) if match else 0.0
+        with open(report_path) as f:
+            for line in f:
+                if line.startswith("F1-Score:"):
+                    return float(line.split(":")[1].strip())
     except Exception:
-        return 0.0
+        pass
+    return None
 
 
-def discover_models(mode, base_dir=DEFAULT_MODEL_DIR):
+def discover_members(mode, base_dir="saved_models"):
     """
-    Scan saved_models/{mode}/{model_name}/{run_id}/ for evaluated runs.
+    Scan saved_models/{mode}/{model_name}/*/evaluation_report.txt.
+    For each model architecture, keep only the run with the highest F1.
 
-    Keeps the best run (by test F1) per model architecture. Only includes
-    runs that have both evaluation_report.txt and predictions.npz.
-
-    Returns list of dicts: {model_name, run_id, run_dir, val_f1}
+    Returns a list of dicts:
+        {model_name, run_id, run_dir (Path), f1}
     """
-    mode_dir = Path(base_dir) / mode
-    if not mode_dir.exists():
-        return []
+    pattern = Path(base_dir) / mode / "*" / "*" / "evaluation_report.txt"
+    candidates = {}
 
-    best_per_model = {}
-
-    for report_path in mode_dir.glob("*/*/evaluation_report.txt"):
+    for report_path in Path(base_dir).glob(f"{mode}/*/*/evaluation_report.txt"):
+        parts = report_path.parts
+        # structure: saved_models / mode / model_name / run_id / report
+        model_name = parts[-3]
+        run_id = parts[-2]
         run_dir = report_path.parent
-        model_name = run_dir.parent.name
-        run_id = run_dir.name
 
-        if not (run_dir / "predictions.npz").exists():
+        f1 = _parse_f1_from_report(report_path)
+        if f1 is None:
             continue
 
-        f1 = _parse_f1(report_path)
+        # Also require predictions.npz to exist (written by eval.py)
+        if not (run_dir / "predictions.npz").exists():
+            print(
+                f"  [!] Skipping {run_dir}: predictions.npz missing. "
+                "Re-run eval.py to generate it."
+            )
+            continue
 
-        if (
-            model_name not in best_per_model
-            or f1 > best_per_model[model_name]["val_f1"]
-        ):
-            best_per_model[model_name] = {
+        if model_name not in candidates or f1 > candidates[model_name]["f1"]:
+            candidates[model_name] = {
                 "model_name": model_name,
                 "run_id": run_id,
-                "run_dir": str(run_dir),
-                "val_f1": f1,
+                "run_dir": run_dir,
+                "f1": f1,
             }
 
-    return list(best_per_model.values())
+    return list(candidates.values())
 
 
 # =====================================================================
-# Weight Computation
+# 2. Weight computation
 # =====================================================================
 
-def compute_weights(members, scheme="linear"):
+def compute_weights(members):
     """
-    Assign fusion weights to each member based on val_f1.
-    Mutates each member dict in-place by adding a 'weight' key.
-
-    scheme="linear"  — proportional to F1; falls back to uniform if all zero
-    scheme="softmax" — softmax of F1 scores; prevents zero-weight members
+    Linear F1-normalised weights: w_i = f1_i / sum(f1_j).
+    Falls back to uniform weights if all F1s are zero.
+    Adds a 'weight' key to each member dict in-place.
     """
-    f1_scores = [m["val_f1"] for m in members]
-
-    if scheme == "softmax":
-        exps = [math.exp(f) for f in f1_scores]
-        total = sum(exps)
-        weights = [e / total for e in exps]
-    else:  # linear
-        total = sum(f1_scores)
-        if total == 0:
-            weights = [1.0 / len(members)] * len(members)
-        else:
-            weights = [f / total for f in f1_scores]
-
-    for member, w in zip(members, weights):
-        member["weight"] = w
-
+    total = sum(m["f1"] for m in members)
+    for m in members:
+        m["weight"] = (m["f1"] / total) if total > 0 else 1.0 / len(members)
     return members
 
 
 # =====================================================================
-# Metrics
-# =====================================================================
-
-def _compute_auc(labels, probs, num_classes):
-    if len(np.unique(labels)) <= 1:
-        return float("nan")
-    try:
-        if num_classes == 2:
-            return roc_auc_score(labels, probs[:, 1])
-        return roc_auc_score(labels, probs, multi_class="ovr")
-    except ValueError:
-        return float("nan")
-
-
-def _compute_metrics(labels, probs, mode):
-    """Compute the full metric suite from label and probability arrays."""
-    preds = probs.argmax(axis=1)
-    num_classes = probs.shape[1]
-
-    acc = accuracy_score(labels, preds)
-    mcc = matthews_corrcoef(labels, preds)
-    prec = precision_score(
-        labels, preds, average="weighted", zero_division=0
-    )
-    rec = recall_score(
-        labels, preds, average="weighted", zero_division=0
-    )
-    f1 = f1_score(labels, preds, average="weighted", zero_division=0)
-    auc = _compute_auc(labels, probs, num_classes)
-
-    target_labels = list(range(num_classes))
-    cm = confusion_matrix(labels, preds, labels=target_labels)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        per_class_acc = np.true_divide(cm.diagonal(), cm.sum(axis=1))
-        per_class_acc[np.isnan(per_class_acc)] = 0.0
-
-    far = None
-    if mode == "detection" and cm.shape == (2, 2):
-        tn, fp, _fn, _tp = cm.ravel()
-        far = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-
-    return {
-        "accuracy": acc,
-        "mcc": mcc,
-        "precision": prec,
-        "recall": rec,
-        "f1": f1,
-        "auc": auc,
-        "per_class_acc": per_class_acc.tolist(),
-        "far": far,
-        "preds": preds,
-    }
-
-
-# =====================================================================
-# Axis Labels & Config helpers
-# =====================================================================
-
-def _load_run_config(run_dir):
-    """Reconstruct a SimpleNamespace config from hyperparameters.json."""
-    json_path = Path(run_dir) / "hyperparameters.json"
-    if not json_path.exists():
-        return SimpleNamespace()
-    with open(json_path) as f:
-        data = json.load(f)
-    if "CLASS_MAP" in data:
-        data["CLASS_MAP"] = {
-            int(k): v for k, v in data["CLASS_MAP"].items()
-        }
-    return SimpleNamespace(**data)
-
-
-def _build_axis_labels(mode, run_config):
-    """Human-readable class labels for confusion matrix axes."""
-    if mode == "detection":
-        return ["background", "vehicle"]
-    if mode == "category":
-        class_map = getattr(run_config, "CLASS_MAP", {})
-        num_classes = getattr(run_config, "NUM_CLASSES", 4)
-        return [class_map.get(i, str(i)) for i in range(num_classes)]
-    if mode == "instance":
-        inv = {
-            v: k
-            for k, v in getattr(
-                run_config, "INSTANCE_TO_CLASS", {}
-            ).items()
-        }
-        num_classes = getattr(run_config, "NUM_CLASSES", 0)
-        return [inv.get(i, str(i)) for i in range(num_classes)]
-    return []
-
-
-# =====================================================================
-# Confusion Matrix
-# =====================================================================
-
-def _save_conf_matrix(labels, preds, mode, run_config, output_path):
-    """Save a confusion matrix heatmap with dynamic axis labels."""
-    axis_labels = _build_axis_labels(mode, run_config)
-    num_classes = int(labels.max()) + 1 if len(labels) > 0 else 2
-    target_labels = list(range(num_classes))
-    cm = confusion_matrix(labels, preds, labels=target_labels)
-
-    fig_size = max(6, num_classes)
-    annot_kws = {"size": max(6, 14 - num_classes // 3)}
-    fig, ax = plt.subplots(figsize=(fig_size, fig_size))
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt="d",
-        cmap="Blues",
-        xticklabels=axis_labels if axis_labels else target_labels,
-        yticklabels=axis_labels if axis_labels else target_labels,
-        ax=ax,
-        annot_kws=annot_kws,
-    )
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("True")
-    ax.set_title(f"Ensemble Confusion Matrix — {mode}")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
-    plt.close(fig)
-
-
-# =====================================================================
-# Ensemble Evaluation (offline — loads predictions.npz)
+# 3. Ensemble evaluation (offline — from predictions.npz)
 # =====================================================================
 
 def evaluate_ensemble(members, mode):
     """
-    Load predictions.npz from each member, compute weighted pooled
-    probabilities, and evaluate the full metric suite.
+    Load predictions.npz from each member, pool softmax probabilities
+    by weighted sum, then compute the full metric suite.
 
-    Returns a result dict containing ensemble metrics, individual
-    model metrics, and the pooled probability array.
+    Returns a result dict with keys:
+        labels, pooled_preds, pooled_probs,
+        ensemble_metrics, individual_metrics
     """
-    loaded = []
-    ref_labels = None
+    labels_ref = None
+    pooled_probs = None
 
-    for member in members:
-        npz_path = Path(member["run_dir"]) / "predictions.npz"
-        if not npz_path.exists():
-            print(
-                f"  [!] Missing predictions.npz for "
-                f"{member['model_name']} — skipping."
-            )
-            continue
+    individual_metrics = []
 
-        data = np.load(npz_path)
+    for m in members:
+        data = np.load(m["run_dir"] / "predictions.npz")
         labels = data["labels"]
-        probs = data["probs"]
+        probs = data["probs"]   # [N, C]
+        preds = data["preds"]
 
-        if ref_labels is None:
-            ref_labels = labels
-        elif not np.array_equal(ref_labels, labels):
-            print(
-                f"  [!] Label mismatch for {member['model_name']}"
-                f" — skipping member."
-            )
-            continue
+        # Verify all models evaluated on the same test set
+        if labels_ref is None:
+            labels_ref = labels
+        else:
+            if not np.array_equal(labels, labels_ref):
+                raise ValueError(
+                    f"Label mismatch between models in mode '{mode}'. "
+                    "Ensure all models were trained with identical splits."
+                )
 
-        loaded.append((member, probs))
-
-    if not loaded:
-        raise RuntimeError(
-            f"No valid members with matching labels for mode={mode}"
+        # Per-model metrics
+        f1_ind = f1_score(labels, preds, average="weighted", zero_division=0)
+        acc_ind = accuracy_score(labels, preds)
+        mcc_ind = matthews_corrcoef(labels, preds)
+        prec_ind = precision_score(
+            labels, preds, average="weighted", zero_division=0
         )
+        rec_ind = recall_score(
+            labels, preds, average="weighted", zero_division=0
+        )
+        try:
+            num_classes = probs.shape[1]
+            if num_classes == 2:
+                auc_ind = roc_auc_score(labels, probs[:, 1])
+            else:
+                auc_ind = roc_auc_score(labels, probs, multi_class="ovr")
+        except ValueError:
+            auc_ind = float("nan")
 
-    # Recompute weights over the clean subset only
-    clean_members = [m for m, _ in loaded]
-    compute_weights(clean_members, scheme="linear")
-
-    # Pooled probabilities: weighted convex combination
-    pooled_probs = np.zeros_like(loaded[0][1], dtype=np.float64)
-    for member, probs in loaded:
-        pooled_probs += member["weight"] * probs.astype(np.float64)
-
-    labels = ref_labels
-    ensemble_metrics = _compute_metrics(labels, pooled_probs, mode)
-
-    individual = []
-    for member, probs in loaded:
-        m = _compute_metrics(labels, probs, mode)
-        individual.append({
-            "model_name": member["model_name"],
-            "run_id": member["run_id"],
-            "run_dir": member["run_dir"],
-            "val_f1": member["val_f1"],
-            "weight": member["weight"],
-            "test_metrics": m,
+        individual_metrics.append({
+            "model_name": m["model_name"],
+            "run_id": m["run_id"],
+            "f1": f1_ind,
+            "accuracy": acc_ind,
+            "mcc": mcc_ind,
+            "precision": prec_ind,
+            "recall": rec_ind,
+            "auc": auc_ind,
         })
 
-    best_ind = max(
-        individual, key=lambda x: x["test_metrics"]["f1"]
+        # Weighted accumulation
+        if pooled_probs is None:
+            pooled_probs = m["weight"] * probs
+        else:
+            pooled_probs = pooled_probs + m["weight"] * probs
+
+    pooled_preds = np.argmax(pooled_probs, axis=1)
+
+    # Ensemble metrics
+    acc = accuracy_score(labels_ref, pooled_preds)
+    mcc = matthews_corrcoef(labels_ref, pooled_preds)
+    precision = precision_score(
+        labels_ref, pooled_preds, average="weighted", zero_division=0
     )
-    lift = ensemble_metrics["f1"] - best_ind["test_metrics"]["f1"]
+    recall = recall_score(
+        labels_ref, pooled_preds, average="weighted", zero_division=0
+    )
+    f1 = f1_score(
+        labels_ref, pooled_preds, average="weighted", zero_division=0
+    )
+
+    num_classes = pooled_probs.shape[1]
+    try:
+        if num_classes == 2:
+            auc = roc_auc_score(labels_ref, pooled_probs[:, 1])
+        else:
+            auc = roc_auc_score(labels_ref, pooled_probs, multi_class="ovr")
+    except ValueError:
+        auc = float("nan")
+
+    target_labels = list(range(num_classes))
+    cm = confusion_matrix(labels_ref, pooled_preds, labels=target_labels)
+
+    far = None
+    if mode == "detection" and cm.shape == (2, 2):
+        tn, fp, fn, tp = cm.ravel()
+        far = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        per_class_acc = np.true_divide(cm.diagonal(), cm.sum(axis=1))
+        per_class_acc[np.isnan(per_class_acc)] = 0.0
+
+    ensemble_metrics = {
+        "accuracy": acc,
+        "mcc": mcc,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "auc": auc,
+        "per_class_acc": per_class_acc,
+        "far": far,
+        "cm": cm,
+    }
 
     return {
-        "mode": mode,
-        "ensemble_metrics": ensemble_metrics,
-        "individual": individual,
-        "best_individual_model": best_ind["model_name"],
-        "best_individual_f1": best_ind["test_metrics"]["f1"],
-        "lift": lift,
-        "num_samples": int(len(labels)),
-        "labels": labels,
+        "labels": labels_ref,
+        "pooled_preds": pooled_preds,
         "pooled_probs": pooled_probs,
+        "ensemble_metrics": ensemble_metrics,
+        "individual_metrics": individual_metrics,
     }
 
 
 # =====================================================================
-# Report Generation
+# 4. Report generation
 # =====================================================================
 
-def _fmt(val, pct=False):
-    if val is None or (isinstance(val, float) and math.isnan(val)):
-        return "N/A"
-    if pct:
-        return f"{val * 100:.3f}%"
-    return f"{val:.4f}"
+def _axis_labels_for_mode(mode, num_classes, members):
+    """Derive human-readable class names from the mode."""
+    if mode == "detection":
+        return ["background", "target"]
+    if mode == "category":
+        # Load CLASS_MAP from any member's hyperparameters.json
+        for m in members:
+            hp_path = m["run_dir"] / "hyperparameters.json"
+            if hp_path.exists():
+                with open(hp_path) as f:
+                    cfg = json.load(f)
+                class_map = {int(k): v for k, v in cfg.get("CLASS_MAP", {}).items()}
+                return [class_map.get(i, str(i)) for i in range(num_classes)]
+    if mode == "instance":
+        for m in members:
+            hp_path = m["run_dir"] / "hyperparameters.json"
+            if hp_path.exists():
+                with open(hp_path) as f:
+                    cfg = json.load(f)
+                itc = cfg.get("INSTANCE_TO_CLASS", {})
+                inv = {v: k for k, v in itc.items()}
+                return [inv.get(i, str(i)) for i in range(num_classes)]
+    return [str(i) for i in range(num_classes)]
 
 
-def build_report(result, output_path):
-    """Write the full ensemble evaluation report to a text file."""
-    mode = result["mode"]
+def build_report(mode, members, result, output_path):
+    """Write a human-readable ensemble evaluation report."""
     em = result["ensemble_metrics"]
-    individual = result["individual"]
+    ind = result["individual_metrics"]
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    run_config = _load_run_config(individual[0]["run_dir"])
-    axis_labels = _build_axis_labels(mode, run_config)
+    best_ind = max(ind, key=lambda x: x["f1"])
+    lift = em["f1"] - best_ind["f1"]
 
-    SEP = "=" * 60
-    DIV = "-" * 60
-    lines = [
-        SEP,
-        "ENSEMBLE EVALUATION REPORT",
-        f"Mode: {mode}",
-        DIV,
-        "",
-        "ENSEMBLE COMPOSITION",
-        DIV,
-        f"{'Model':<30} {'Run ID':<20} {'Val F1':>8} {'Weight':>8}",
-    ]
-    for m in individual:
-        lines.append(
-            f"{m['model_name']:<30} {m['run_id']:<20}"
-            f" {m['val_f1']:>8.4f} {m['weight']:>8.4f}"
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    with open(output_path, "w") as f:
+        f.write("=" * 60 + "\n")
+        f.write("ENSEMBLE EVALUATION REPORT\n")
+        f.write(f"Mode: {mode} | Timestamp: {ts}\n")
+        f.write("=" * 60 + "\n\n")
+
+        # --- Composition ---
+        f.write("ENSEMBLE COMPOSITION\n")
+        f.write("-" * 60 + "\n")
+        f.write(
+            f"{'Model':<30} {'Run ID':<20} {'F1':>6}  {'Weight':>7}\n"
         )
+        f.write("-" * 60 + "\n")
+        for m in sorted(members, key=lambda x: -x["f1"]):
+            f.write(
+                f"{m['model_name']:<30} {m['run_id']:<20} "
+                f"{m['f1']:>6.4f}  {m['weight']:>7.4f}\n"
+            )
+        f.write("\n")
 
-    lines += [
-        "",
-        "INDIVIDUAL MODEL TEST METRICS",
-        DIV,
-        f"{'Model':<30} {'Accuracy':>9} {'F1':>8}"
-        f" {'MCC':>8} {'ROC-AUC':>9}",
-    ]
-    for m in individual:
-        tm = m["test_metrics"]
-        lines.append(
-            f"{m['model_name']:<30}"
-            f" {_fmt(tm['accuracy']):>9}"
-            f" {_fmt(tm['f1']):>8}"
-            f" {_fmt(tm['mcc']):>8}"
-            f" {_fmt(tm['auc']):>9}"
+        # --- Individual model metrics ---
+        f.write("INDIVIDUAL MODEL TEST METRICS\n")
+        f.write("-" * 60 + "\n")
+        f.write(
+            f"{'Model':<30} {'Acc':>6}  {'F1':>6}  {'MCC':>6}  {'AUC':>6}\n"
         )
+        f.write("-" * 60 + "\n")
+        for m in sorted(ind, key=lambda x: -x["f1"]):
+            auc_str = f"{m['auc']:>6.4f}" if not np.isnan(m["auc"]) else "   N/A"
+            f.write(
+                f"{m['model_name']:<30} {m['accuracy']:>6.4f}  "
+                f"{m['f1']:>6.4f}  {m['mcc']:>6.4f}  {auc_str}\n"
+            )
+        f.write("\n")
 
-    lines += [
-        "",
-        "ENSEMBLE METRICS (Pooled Confidence)",
-        DIV,
-        f"Accuracy:   {_fmt(em['accuracy'])}",
-        f"MCC:        {_fmt(em['mcc'])}",
-        f"Precision:  {_fmt(em['precision'])}",
-        f"Recall:     {_fmt(em['recall'])}",
-        f"F1-Score:   {_fmt(em['f1'])}",
-        f"ROC-AUC:    {_fmt(em['auc'])}",
-        "",
-        "Per-Class Accuracy:",
-    ]
-    for i, acc in enumerate(em["per_class_acc"]):
-        label = axis_labels[i] if i < len(axis_labels) else str(i)
-        lines.append(f"  {label} ({i}): {_fmt(acc)}")
+        # --- Ensemble metrics ---
+        f.write("ENSEMBLE METRICS (Pooled Confidence)\n")
+        f.write("-" * 60 + "\n")
+        f.write(f"Accuracy:    {em['accuracy']:.4f}\n")
+        f.write(f"MCC:         {em['mcc']:.4f}\n")
+        f.write(f"Precision:   {em['precision']:.4f}\n")
+        f.write(f"Recall:      {em['recall']:.4f}\n")
+        f.write(f"F1-Score:    {em['f1']:.4f}\n")
+        auc_str = (
+            f"{em['auc']:.4f}" if not np.isnan(em["auc"]) else "N/A"
+        )
+        f.write(f"ROC-AUC:     {auc_str}\n")
 
-    if em["far"] is not None:
-        lines.append(f"\nFalse Alarm Rate: {_fmt(em['far'], pct=True)}")
+        if em["far"] is not None:
+            f.write(f"False Alarm Rate: {em['far'] * 100:.3f}%\n")
 
-    best_f1 = result["best_individual_f1"]
-    lift_pct = (
-        result["lift"] / best_f1 * 100 if best_f1 > 0 else 0.0
+        f.write("\nPer-Class Accuracy:\n")
+        num_classes = len(em["per_class_acc"])
+        axis_labels = _axis_labels_for_mode(mode, num_classes, members)
+        for i, label in enumerate(axis_labels):
+            if i < len(em["per_class_acc"]):
+                f.write(f"  {label} ({i}): {em['per_class_acc'][i]:.4f}\n")
+        f.write("\n")
+
+        # --- Lift ---
+        f.write("ENSEMBLE LIFT\n")
+        f.write("-" * 60 + "\n")
+        f.write(
+            f"Best Individual:  {best_ind['model_name']} "
+            f"(F1: {best_ind['f1']:.4f})\n"
+        )
+        f.write(f"Ensemble F1:      {em['f1']:.4f}\n")
+        sign = "+" if lift >= 0 else ""
+        pct = lift / best_ind["f1"] * 100 if best_ind["f1"] > 0 else 0.0
+        f.write(f"Lift:             {sign}{lift:.4f} ({sign}{pct:.2f}%)\n")
+        f.write("=" * 60 + "\n")
+
+    print(f"  Ensemble report saved: {output_path}")
+
+
+def save_conf_matrix(mode, members, result, output_path):
+    """Save the ensemble confusion matrix as a PNG."""
+    em = result["ensemble_metrics"]
+    cm = em["cm"]
+    num_classes = cm.shape[0]
+    axis_labels = _axis_labels_for_mode(mode, num_classes, members)
+
+    fig_size = max(12, num_classes * 1.2)
+    annot_size = max(18, min(26, int(240 / num_classes)))
+
+    plt.figure(figsize=(fig_size, fig_size))
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap="Greens",
+        annot_kws={"size": annot_size, "weight": "bold"},
+        cbar_kws={"shrink": 0.8},
+        xticklabels=axis_labels,
+        yticklabels=axis_labels,
     )
-    lines += [
-        "",
-        "ENSEMBLE LIFT",
-        DIV,
-        f"Best Individual: {result['best_individual_model']}"
-        f" (F1: {_fmt(best_f1)})",
-        f"Ensemble F1:     {_fmt(em['f1'])}",
-        f"Lift:            {result['lift']:+.4f} ({lift_pct:+.2f}%)",
-        SEP,
-    ]
+    plt.title(
+        f"Ensemble Confusion Matrix ({mode})", fontsize=26, pad=20
+    )
+    plt.ylabel("True Label", fontsize=22, labelpad=14)
+    plt.xlabel("Predicted Label", fontsize=22, labelpad=14)
 
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    Path(output_path).write_text("\n".join(lines) + "\n")
-    print(f"  Report → {output_path}")
+    if num_classes > 5:
+        plt.xticks(rotation=45, ha="right", fontsize=20)
+    else:
+        plt.xticks(rotation=0, fontsize=20)
+
+    plt.yticks(rotation=0, fontsize=20)
+    plt.gcf().axes[-1].tick_params(labelsize=16)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+    print(f"  Ensemble confusion matrix saved: {output_path}")
 
 
 # =====================================================================
-# ModelEnsemble class
+# 5. Entry point
 # =====================================================================
 
-class ModelEnsemble:
-    """Weighted ensemble of trained model-architecture runs."""
+def run_ensemble(mode):
+    print(f"\n{'='*60}")
+    print(f"  ENSEMBLE — mode: {mode}")
+    print(f"{'='*60}")
 
-    def __init__(self, mode, members):
-        self.mode = mode
-        self.members = members  # list of dicts, each with 'weight' key
+    members = discover_members(mode)
 
-    @classmethod
-    def build(cls, mode, base_dir=DEFAULT_MODEL_DIR, scheme="linear"):
-        members = discover_models(mode, base_dir)
-        if not members:
-            print(f"  [!] No evaluated runs found for mode={mode}")
-            return cls(mode, [])
-        compute_weights(members, scheme=scheme)
-        return cls(mode, members)
-
-    @classmethod
-    def load(cls, weights_path):
-        with open(weights_path) as f:
-            data = json.load(f)
-        return cls(data["mode"], data["members"])
-
-    def save(self, path):
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "mode": self.mode,
-            "weight_metric": "val_f1",
-            "members": self.members,
-        }
-        with open(path, "w") as f:
-            json.dump(payload, f, indent=2)
-        print(f"  Weights → {path}")
-
-    def summary(self):
+    if len(members) == 0:
         print(
-            f"\nEnsemble — mode: {self.mode}"
-            f"  ({len(self.members)} members)"
+            f"  [!] No evaluated runs found for mode '{mode}'. "
+            "Run eval.py first."
         )
+        return
+
+    if len(members) == 1:
         print(
-            f"{'Model':<30} {'Run ID':<20} {'Val F1':>8} {'Weight':>8}"
+            f"  [!] Only one model found for mode '{mode}'. "
+            "Ensemble requires at least two models."
         )
-        print("-" * 70)
-        for m in self.members:
-            print(
-                f"{m['model_name']:<30} {m['run_id']:<20}"
-                f" {m['val_f1']:>8.4f}"
-                f" {m.get('weight', float('nan')):>8.4f}"
-            )
+        return
 
-    def evaluate(self, base_dir=DEFAULT_MODEL_DIR):
-        return evaluate_ensemble(self.members, self.mode)
+    compute_weights(members)
 
-
-# =====================================================================
-# CLI helpers
-# =====================================================================
-
-def _resolve_modes(mode_arg):
-    """Return list of modes from CLI arg or TRAINING_MODE env var."""
-    if mode_arg and mode_arg in ALL_MODES:
-        return [mode_arg]
-    env = os.environ.get("TRAINING_MODE", "")
-    if env in ALL_MODES:
-        return [env]
-    return ALL_MODES
-
-
-def _weights_path(mode, base_dir=DEFAULT_MODEL_DIR):
-    return Path(base_dir) / "ensemble" / mode / "ensemble_weights.json"
-
-
-def cmd_build(mode_arg):
-    for mode in _resolve_modes(mode_arg):
-        print(f"\n[build] mode={mode}")
-        ens = ModelEnsemble.build(mode)
-        if not ens.members:
-            continue
-        ens.save(_weights_path(mode))
-        ens.summary()
-
-
-def cmd_show(mode_arg):
-    for mode in _resolve_modes(mode_arg):
-        wp = _weights_path(mode)
-        if not wp.exists():
-            print(
-                f"  [!] No weights file for mode={mode}."
-                f" Run 'build' first."
-            )
-            continue
-        ModelEnsemble.load(wp).summary()
-
-
-def cmd_eval(mode_arg):
-    for mode in _resolve_modes(mode_arg):
-        print(f"\n[eval] mode={mode}")
-        wp = _weights_path(mode)
-        if not wp.exists():
-            print(
-                f"  [!] No weights file for mode={mode}."
-                f" Run 'build' first."
-            )
-            continue
-
-        ens = ModelEnsemble.load(wp)
-        if not ens.members:
-            print(f"  [!] Ensemble for mode={mode} has no members.")
-            continue
-
-        try:
-            result = ens.evaluate()
-        except Exception as exc:
-            print(f"  [!] Evaluation failed for mode={mode}: {exc}")
-            continue
-
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_dir = (
-            DEFAULT_MODEL_DIR / "ensemble" / mode / ts
+    print(f"  Members ({len(members)}):")
+    for m in sorted(members, key=lambda x: -x["f1"]):
+        print(
+            f"    {m['model_name']:<30} F1={m['f1']:.4f}  "
+            f"weight={m['weight']:.4f}  run={m['run_id']}"
         )
-        out_dir.mkdir(parents=True, exist_ok=True)
 
-        build_report(result, out_dir / "ensemble_report.txt")
+    result = evaluate_ensemble(members, mode)
 
-        run_config = _load_run_config(
-            result["individual"][0]["run_dir"]
-        )
-        cm_path = out_dir / f"ensemble_conf_matrix_{mode}.png"
-        _save_conf_matrix(
-            result["labels"],
-            result["ensemble_metrics"]["preds"],
-            mode,
-            run_config,
-            cm_path,
-        )
-        print(f"  Conf matrix → {cm_path}")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = Path("saved_models") / "ensemble" / mode / ts
+    os.makedirs(out_dir, exist_ok=True)
+
+    report_path = out_dir / "ensemble_report.txt"
+    matrix_path = out_dir / "ensemble_conf_matrix.png"
+
+    build_report(mode, members, result, report_path)
+    save_conf_matrix(mode, members, result, matrix_path)
+
+    em = result["ensemble_metrics"]
+    print(
+        f"\n  Ensemble F1: {em['f1']:.4f}  "
+        f"Acc: {em['accuracy']:.4f}  "
+        f"MCC: {em['mcc']:.4f}"
+    )
 
 
 def main():
-    args = sys.argv[1:]
-    if not args:
-        print(__doc__)
-        sys.exit(1)
+    all_modes = ["detection", "category", "instance"]
 
-    cmd = args[0]
-    mode_arg = args[1] if len(args) > 1 else None
-
-    if cmd == "build":
-        cmd_build(mode_arg)
-    elif cmd == "show":
-        cmd_show(mode_arg)
-    elif cmd == "eval":
-        cmd_eval(mode_arg)
+    # Accept mode as CLI arg or env var, else run all three
+    if len(sys.argv) > 1:
+        modes = [sys.argv[1]]
     else:
-        print(__doc__)
-        sys.exit(1)
+        env_mode = os.environ.get("TRAINING_MODE")
+        modes = [env_mode] if env_mode else all_modes
+
+    for mode in modes:
+        if mode not in all_modes:
+            print(f"[!] Unknown mode '{mode}'. Choose from {all_modes}.")
+            sys.exit(1)
+        run_ensemble(mode)
 
 
 if __name__ == "__main__":

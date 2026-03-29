@@ -3,385 +3,321 @@ import csv
 import torch
 import torch.nn as nn
 import numpy as np
-from functools import partial
 from torch.utils.data import DataLoader
-from sklearn.metrics import (
-    precision_score,
-    recall_score,
-    f1_score,
-    confusion_matrix,
+from sklearn.metrics import (precision_score, 
+                             recall_score, 
+                             f1_score, 
+                             confusion_matrix
 )
 
 from data_generator import augment_batch
-from dataset import VehicleDataset, MemoryDataset, db_worker_init, preload_to_memory
+from dataset import VehicleDataset
 from models import build_model
-from preprocess import preprocess
+from preprocess import preprocess_for_training
 import config
 
 
-# =====================================================================
-# Helpers
-# =====================================================================
-
-class EarlyStopping:
-    """Stop training when a monitored metric stops improving."""
-
-    def __init__(self, patience=5, mode="max", min_delta=1e-4):
-        self.patience = patience
-        self.mode = mode
-        self.min_delta = min_delta
-        self.counter = 0
-        self.best = None
-
-    def __call__(self, value):
-        if self.best is None:
-            self.best = value
-            return False
-
-        if self.mode == "max":
-            improved = value > self.best + self.min_delta
-        else:
-            improved = value < self.best - self.min_delta
-
-        if improved:
-            self.best = value
-            self.counter = 0
-        else:
-            self.counter += 1
-
-        return self.counter >= self.patience
-
-
-def build_class_headers(cfg):
-    """Generate per-class CSV column names based on training mode."""
-    if cfg.TRAINING_MODE == "detection":
-        return ["Val_Acc_background", "Val_Acc_vehicle"]
-    elif cfg.TRAINING_MODE == "category":
-        return [f"Val_Acc_{cfg.CLASS_MAP[i]}" for i in sorted(cfg.CLASS_MAP.keys())]
-    elif cfg.TRAINING_MODE == "instance":
-        inv_map = {v: k for k, v in cfg.INSTANCE_TO_CLASS.items()}
-        return [f"Val_Acc_{inv_map[i]}" for i in range(cfg.NUM_CLASSES)]
-    return [f"Val_Acc_Class_{i}" for i in range(cfg.NUM_CLASSES)]
-
-
-# =====================================================================
-# Training & Evaluation Loops
-# =====================================================================
-
-def train_one_epoch(model, loader, optimizer, criterion, device, cfg, grad_clip=1.0):
+def train_one_epoch(
+    model, loader, optimizer, criterion, device, config, epoch
+):
     model.train()
-    running_loss = 0.0
-    running_correct = 0
-    running_samples = 0
+    total_loss = 0
+    total_correct = 0
+    total_samples = 0
 
-    for x, y, _dataset_names in loader:
+    for batch_idx, (x, y, dataset_names) in enumerate(loader):
         x, y = x.to(device), y.to(device)
 
-        if getattr(cfg, "AUGMENT_SNR", False):
-            x = augment_batch(x, snr_range=getattr(cfg, "AUGMENT_SNR_RANGE", (10, 30)))
+        # -----------------------------------------------------------------
+        # DYNAMIC SYNTHESIS: SNR Augmentation (Controlled via config)
+        # -----------------------------------------------------------------
+        if getattr(config, "AUGMENT_SNR", False):
+            current_snr_range = getattr(config, "AUGMENT_SNR_RANGE", (10, 30))
+            x = augment_batch(x, snr_range=current_snr_range)
+        # -----------------------------------------------------------------
 
-        x = preprocess(x, config=cfg)
+        # Preprocessing on the GPU
+        x = preprocess_for_training(x, config=config)
 
         optimizer.zero_grad()
         logits = model(x)
         loss = criterion(logits, y)
         loss.backward()
-
-        if grad_clip > 0:
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
-
         optimizer.step()
 
-        batch_size = y.size(0)
-        running_loss += loss.item() * batch_size
-        running_correct += (logits.argmax(dim=1) == y).sum().item()
-        running_samples += batch_size
+        total_loss += loss.item() * x.size(0)
+        total_correct += (logits.argmax(dim=1) == y).sum().item()
+        total_samples += y.size(0)
 
-    return running_loss / running_samples, running_correct / running_samples
+    return total_loss / total_samples, total_correct / total_samples
 
 
-@torch.inference_mode()
-def evaluate(model, loader, criterion, device, cfg):
+def evaluate(model, loader, criterion, device, config):
     model.eval()
-    running_loss = 0.0
+    total_loss = 0
     all_preds = []
     all_labels = []
 
-    for x, y, _dataset_names in loader:
-        x, y = x.to(device), y.to(device)
-        x = preprocess(x, config=cfg)
+    with torch.inference_mode():
+        for x, y, dataset_names in loader:
+            x, y = x.to(device), y.to(device)
 
-        logits = model(x)
-        loss = criterion(logits, y)
+            # Preprocessing on the GPU
+            x = preprocess_for_training(x, config=config)
 
-        running_loss += loss.item() * y.size(0)
-        all_preds.extend(logits.argmax(dim=1).cpu().numpy())
-        all_labels.extend(y.cpu().numpy())
+            logits = model(x)
+            loss = criterion(logits, y)
 
-    n = len(all_labels)
-    avg_loss = running_loss / n
+            total_loss += loss.item() * x.size(0)
+            preds = logits.argmax(dim=1)
 
-    preds_arr = np.array(all_preds)
-    labels_arr = np.array(all_labels)
+            all_preds.append(preds)
+            all_labels.append(y)
 
-    accuracy = (preds_arr == labels_arr).mean()
-    precision = precision_score(labels_arr, preds_arr, average="weighted", zero_division=0)
-    recall = recall_score(labels_arr, preds_arr, average="weighted", zero_division=0)
-    f1 = f1_score(labels_arr, preds_arr, average="weighted", zero_division=0)
+    all_preds = torch.cat(all_preds).cpu().numpy()
+    all_labels = torch.cat(all_labels).cpu().numpy()
+    total_samples = len(all_labels)
+    avg_loss = total_loss / total_samples
+    
+    # Calculate global metrics
+    precision = precision_score(all_labels, all_preds, average='weighted', zero_division=0)
+    recall = recall_score(all_labels, all_preds, average='weighted', zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average='weighted', zero_division=0)
+    accuracy = (np.array(all_preds) == np.array(all_labels)).mean()
 
-    cm = confusion_matrix(labels_arr, preds_arr, labels=list(range(cfg.NUM_CLASSES)))
-    with np.errstate(divide="ignore", invalid="ignore"):
+    # Calculate per-class accuracy safely using the confusion matrix
+    target_labels = list(range(config.NUM_CLASSES))
+    cm = confusion_matrix(all_labels, all_preds, labels=target_labels)
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
         per_class_acc = np.true_divide(cm.diagonal(), cm.sum(axis=1))
-        per_class_acc[np.isnan(per_class_acc)] = 0.0
+        per_class_acc[np.isnan(per_class_acc)] = 0.0 
 
     return avg_loss, accuracy, precision, recall, f1, per_class_acc
 
 
-# =====================================================================
-# Calibration (noise floor only)
-# =====================================================================
-
-def compute_noise_floor(calib_loader):
-    """5th-percentile noise floor per dataset (for synthetic background generation)."""
+def compute_noise_floors(calib_loader, config):
+    """Computes per-dataset noise floors for synthetic background augmentation."""
     all_stds = {}
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for x, _, dataset_names in calib_loader:
             window_stds = torch.std(x, dim=2)
+
             for i, ds in enumerate(dataset_names):
                 if ds not in all_stds:
                     all_stds[ds] = []
                 all_stds[ds].append(window_stds[i].unsqueeze(0))
 
-    return {
+    noise_floors = {
         ds: torch.quantile(torch.cat(stds, dim=0), q=0.05, dim=0)
         for ds, stds in all_stds.items()
     }
 
+    return noise_floors
 
-# =====================================================================
-# Main
-# =====================================================================
 
 def main():
     device = config.DEVICE
-    print(f"Using device: {device}")
-    print(f"Sensor: {config.TRAIN_SENSOR} | Mode: {config.TRAINING_MODE} | Model: {config.MODEL_NAME}")
-    print(f"Signal: {config.REF_SAMPLE_RATE} Hz × {config.SAMPLE_SECONDS}s = {config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS} samples")
-    print(f"Run ID: {config.RUN_ID}")
+    print("Using device:", device)
+
+    print(f"Starting Run ID: {config.RUN_ID}")
     print(f"Saving to: {config.RUN_DIR}")
     config.save_config_snapshot()
 
-    # ------------------------------------------------------------------
-    # Datasets & loaders
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------
+    # Datasets and loaders
+    # ------------------------------------------------------------
     train_ds = VehicleDataset(split="train", config=config)
     val_ds = VehicleDataset(split="val", config=config)
-    custom_worker_init = partial(db_worker_init, config=config)
 
     print(f"Total training samples: {len(train_ds)}")
 
     calib_size = max(1, int(len(train_ds) * 0.10))
-    calib_indices = torch.randperm(len(train_ds))[:calib_size].tolist()
-    calib_ds = torch.utils.data.Subset(train_ds, calib_indices)
+    subset_indices = torch.randperm(len(train_ds))[:calib_size].tolist()
+    calib_ds = torch.utils.data.Subset(train_ds, subset_indices)
 
     calib_loader = DataLoader(
         calib_ds,
         batch_size=config.BATCH_SIZE,
         shuffle=True,
         num_workers=config.NUM_WORKERS,
-        worker_init_fn=custom_worker_init,
+        pin_memory=True,
     )
+    print(f"Estimating noise floors from a {calib_size}-sample calibration subset...")
 
-    print(f"Estimating noise floor from a {calib_size}-sample calibration subset...")
-    noise_floors = compute_noise_floor(calib_loader)
+    noise_floors = compute_noise_floors(calib_loader, config=config)
+
+    # Pass the noise_floor dictionary to the dataset for synthetic augmentation
     train_ds.noise_floors = noise_floors
-    val_ds.noise_floors = noise_floors
-    print(f"Per-Dataset Noise Floors: {noise_floors}")
 
-    # ------------------------------------------------------------------
-    # Optional: cache all data in RAM/GPU (eliminates DB for epochs 2+)
-    # ------------------------------------------------------------------
-    if getattr(config, "CACHE_SAMPLES", False):
-        print("Pre-loading training data...")
-        train_ds = preload_to_memory(train_ds, config)
-        print("Pre-loading validation data...")
-        val_ds = preload_to_memory(val_ds, config)
+    print(f"Computed Per-Dataset Noise Floors: {noise_floors}")
 
-        # num_workers=0: data is already in memory (or on GPU),
-        # multiprocessing IPC would only add overhead.
-        # pin_memory=False: tensors are already pinned or on GPU.
-        loader_kwargs = dict(
-            batch_size=config.BATCH_SIZE,
-            num_workers=0,
-        )
-    else:
-        loader_kwargs = dict(
-            batch_size=config.BATCH_SIZE,
-            num_workers=config.NUM_WORKERS,
-            worker_init_fn=custom_worker_init,
-            persistent_workers=True,
-            pin_memory=True,
-            prefetch_factor=2,
-        )
-
-    train_loader = DataLoader(train_ds, shuffle=True, **loader_kwargs)
-    val_loader = DataLoader(val_ds, shuffle=False, **loader_kwargs)
-
-    # ------------------------------------------------------------------
-    # Save metadata
-    # ------------------------------------------------------------------
-    torch.save(
-        {
-            "model_name": config.MODEL_NAME,
-            "sensor": config.TRAIN_SENSOR,
-            "use_mel": config.USE_MEL,
-            "noise_floors": noise_floors,
-        },
-        config.META_SAVE_PATH,
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=config.BATCH_SIZE,
+        shuffle=True,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=True,
+        prefetch_factor=2,
+        persistent_workers=True,
     )
-    print(f"Saved metadata to: {config.META_SAVE_PATH}")
 
-    # ------------------------------------------------------------------
-    # Build model
-    # ------------------------------------------------------------------
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=config.BATCH_SIZE,
+        shuffle=False,
+        num_workers=config.NUM_WORKERS,
+        pin_memory=True,
+        prefetch_factor=2,
+        persistent_workers=True,
+    )
+
+    # ------------------------------------------------------------
+    # Save Metadata (Now storing dicts)
+    # ------------------------------------------------------------
+    torch.save({
+        "model_name": config.MODEL_NAME,
+        "use_mel": config.USE_MEL,
+    }, config.META_SAVE_PATH)
+
+    print(f"Saved model metadata to: {config.META_SAVE_PATH}")
+
+    # ------------------------------------------------------------
+    # Model, optimizer, loss
+    # ------------------------------------------------------------
     model = build_model(
-        input_channels=config.IN_CHANNELS,
-        num_classes=config.NUM_CLASSES,
-        config=config,
+        input_channels=config.IN_CHANNELS, num_classes=config.NUM_CLASSES, config=config
     ).to(device)
 
-    # Dummy forward pass — only needed for MiniRocket (fit_extractor)
-    # and any remaining LazyLinear modules.
-    needs_init = hasattr(model, "fit_extractor") or any(
-        isinstance(m, nn.LazyLinear) for m in model.modules()
-    )
-
-    if needs_init:
-        print("Performing dummy pass to initialize lazy modules...")
-        model.eval()
-        with torch.no_grad():
-            for x_dummy, _, _ds_names in train_loader:
-                x_dummy = x_dummy.to(device)
-                x_dummy = preprocess(x_dummy, config=config)
-                if hasattr(model, "fit_extractor"):
-                    model.fit_extractor(x_dummy)
+    print("Performing dummy pass to initialize Lazy modules...")
+    model.eval()
+    with torch.no_grad():
+        for x_dummy, _, ds_names in train_loader:
+            x_dummy = x_dummy.to(device)
+            
+            x_dummy = preprocess_for_training(x_dummy, config=config)
+            
+            if hasattr(model, 'fit_extractor'):
+                model.fit_extractor(x_dummy[:32])
+                model(x_dummy[:32])
+            else:
                 model(x_dummy)
-                break
+            break
 
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model parameters: {total_params:,} total, {trainable_params:,} trainable")
-
-    # ------------------------------------------------------------------
-    # Loss, optimizer, scheduler
-    # ------------------------------------------------------------------
     if len(config.CLASS_WEIGHTS) == config.NUM_CLASSES:
         weights = torch.tensor(config.CLASS_WEIGHTS, device=device)
         criterion = nn.CrossEntropyLoss(weight=weights)
     else:
-        print(
-            f"Warning: CLASS_WEIGHTS len ({len(config.CLASS_WEIGHTS)}) "
-            f"!= NUM_CLASSES ({config.NUM_CLASSES}). Using unweighted loss."
-        )
+        print(f"Warning: CLASS_WEIGHTS len ({len(config.CLASS_WEIGHTS)}) != NUM_CLASSES ({config.NUM_CLASSES}). Defaulting to unweighted loss.")
         criterion = nn.CrossEntropyLoss()
 
     optimizer = model.get_optimizer()
-
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=3,
+        optimizer,
+        mode="min" if getattr(config, "BEST_MODEL_METRIC", "val_acc") == "val_loss" else "max",
+        factor=0.5,
+        patience=3,
     )
 
-    # ------------------------------------------------------------------
-    # Early stopping
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------
+    # CSV Initialization & Dynamic Headers
+    # ------------------------------------------------------------
+    if config.TRAINING_MODE == "detection":
+        class_names = ["Val_Acc_background", "Val_Acc_vehicle"]
+    elif config.TRAINING_MODE == "category":
+        class_names = [f"Val_Acc_{config.CLASS_MAP[i]}" for i in sorted(config.CLASS_MAP.keys())]
+    elif config.TRAINING_MODE == "instance":
+        inv_map = {v: k for k, v in config.INSTANCE_TO_CLASS.items()}
+        class_names = [f"Val_Acc_{inv_map[i]}" for i in range(config.NUM_CLASSES)]
+    else:
+        class_names = [f"Val_Acc_Class_{i}" for i in range(config.NUM_CLASSES)]
+
+    headers = [
+        "Epoch", "Train_Loss", "Train_Acc", 
+        "Val_Loss", "Val_Acc", "Val_Precision", "Val_Recall", "Val_F1"
+    ] + class_names
+
+    with open(config.METRICS_LOG_PATH, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+
+    # ------------------------------------------------------------
+    # Training loop with Dynamic "Best Model" criteria
+    # ------------------------------------------------------------
     target_metric_name = getattr(config, "BEST_MODEL_METRIC", "val_acc")
-    es_mode = "min" if target_metric_name == "val_loss" else "max"
-    early_stopping = EarlyStopping(
-        patience=getattr(config, "EARLY_STOP_PATIENCE", 8),
-        mode=es_mode,
-    )
+    
+    if target_metric_name == "val_loss":
+        best_metric_value = float('inf')
+    else:
+        best_metric_value = 0.0
 
-    best_metric_value = float("inf") if es_mode == "min" else 0.0
-
-    # ------------------------------------------------------------------
-    # CSV logger
-    # ------------------------------------------------------------------
-    class_headers = build_class_headers(config)
-    csv_headers = [
-        "Epoch", "LR",
-        "Train_Loss", "Train_Acc",
-        "Val_Loss", "Val_Acc", "Val_Precision", "Val_Recall", "Val_F1",
-    ] + class_headers
-
-    with open(config.METRICS_LOG_PATH, "w", newline="") as f:
-        csv.writer(f).writerow(csv_headers)
-
-    # ------------------------------------------------------------------
-    # Training loop
-    # ------------------------------------------------------------------
-    grad_clip = getattr(config, "GRAD_CLIP", 1.0)
+    epochs_no_improve = 0
+    EARLY_STOP_PATIENCE = 8
 
     for epoch in range(1, config.EPOCHS + 1):
-        current_lr = optimizer.param_groups[0]["lr"]
-        print(f"\nEpoch {epoch}/{config.EPOCHS}  (lr={current_lr:.2e})")
+        print(f"\nEpoch {epoch}/{config.EPOCHS}")
 
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, optimizer, criterion,
-            device, config, grad_clip=grad_clip,
+            model, train_loader, optimizer, criterion, device, config, epoch
         )
 
         val_loss, val_acc, val_prec, val_rec, val_f1, per_class_acc = evaluate(
-            model, val_loader, criterion, device, config,
+            model, val_loader, criterion, device, config
         )
 
         print(
-            f"  Train Loss: {train_loss:.4f}  Acc: {train_acc:.4f} | "
-            f"Val Loss: {val_loss:.4f}  Acc: {val_acc:.4f}  F1: {val_f1:.4f}",
+            f"Epoch {epoch} Summary | "
+            f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f} | "
+            f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}",
             flush=True,
         )
 
-        scheduler_metric = val_loss if target_metric_name == "val_loss" else val_f1
-        old_lr = optimizer.param_groups[0]["lr"]
-        scheduler.step(scheduler_metric)
-        new_lr = optimizer.param_groups[0]["lr"]
-        if new_lr != old_lr:
-            print(f"  --> LR reduced: {old_lr:.2e} → {new_lr:.2e}")
-
         class_values = [f"{per_class_acc[i]:.4f}" for i in range(config.NUM_CLASSES)]
-        with open(config.METRICS_LOG_PATH, "a", newline="") as f:
-            csv.writer(f).writerow(
-                [epoch, f"{current_lr:.2e}",
-                 f"{train_loss:.4f}", f"{train_acc:.4f}",
-                 f"{val_loss:.4f}", f"{val_acc:.4f}",
-                 f"{val_prec:.4f}", f"{val_rec:.4f}", f"{val_f1:.4f}"]
-                + class_values
-            )
+
+        with open(config.METRICS_LOG_PATH, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            row_data = [
+                epoch, 
+                f"{train_loss:.4f}", f"{train_acc:.4f}", 
+                f"{val_loss:.4f}", f"{val_acc:.4f}",
+                f"{val_prec:.4f}", f"{val_rec:.4f}", f"{val_f1:.4f}"
+            ] + class_values
+            writer.writerow(row_data)
 
         metrics_dict = {
             "val_loss": val_loss,
             "val_acc": val_acc,
             "val_f1": val_f1,
             "val_precision": val_prec,
-            "val_recall": val_rec,
+            "val_recall": val_rec
         }
-        current_value = metrics_dict.get(target_metric_name, val_acc)
+        
+        current_metric_value = metrics_dict.get(target_metric_name, val_acc)
 
-        is_best = (
-            current_value < best_metric_value
-            if es_mode == "min"
-            else current_value > best_metric_value
-        )
+        is_best = False
+        if target_metric_name == "val_loss":
+            if current_metric_value < best_metric_value:
+                is_best = True
+        else:
+            if current_metric_value > best_metric_value:
+                is_best = True
+
         if is_best:
-            best_metric_value = current_value
+            best_metric_value = current_metric_value
+            epochs_no_improve = 0
             torch.save(model.state_dict(), config.MODEL_SAVE_PATH)
-            print(f"  --> Best model saved ({target_metric_name}: {best_metric_value:.4f})")
+            print(f"  --> New Best Model saved with {target_metric_name}: {best_metric_value:.4f}")
+        else:
+            epochs_no_improve += 1
+            print(f"  --> No improvement: {epochs_no_improve}/{EARLY_STOP_PATIENCE} epochs.")
+            if epochs_no_improve >= EARLY_STOP_PATIENCE:
+                print(f"Early stopping after {epoch} epochs.")
+                break
 
-        if early_stopping(current_value):
-            print(f"\nEarly stopping triggered after {epoch} epochs.")
-            break
+        scheduler.step(current_metric_value)
 
-    print(f"\nTraining complete. Best {target_metric_name}: {best_metric_value:.4f}")
+    print(f"\nTraining Complete. Best {target_metric_name} Achieved: {best_metric_value:.4f}")
     print(f"Model saved to {config.MODEL_SAVE_PATH}")
 
 

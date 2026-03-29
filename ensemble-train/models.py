@@ -2,8 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import numpy as np
 
-from tsai.models.MINIROCKET_Pytorch import MiniRocketFeatures
+from tsai.models.MINIROCKET_Pytorch import MiniRocketFeatures, get_minirocket_features
 
 # NOTICE: global 'config' is no longer imported
 
@@ -18,7 +19,7 @@ class DetectionCNN(nn.Module):
     def __init__(self, in_channels, num_classes, config, use_mel=True):
         super().__init__()
         self.config = config
-
+        
         self.conv1 = nn.Conv2d(
             in_channels,
             config.CHANNELS[0],
@@ -44,7 +45,7 @@ class DetectionCNN(nn.Module):
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
         return self.fc2(x)
-
+    
     def get_optimizer(self):
         return optim.Adam(self.parameters(), lr=self.config.LEARNING_RATE)
 
@@ -55,7 +56,7 @@ class ClassificationCNN(nn.Module):
     def __init__(self, in_channels, num_classes, config, use_mel=True):
         super().__init__()
         self.config = config
-
+        
         self.conv1 = nn.Conv2d(
             in_channels,
             config.CHANNELS[0],
@@ -110,7 +111,7 @@ class WaveformClassificationCNN(nn.Module):
     def __init__(self, in_channels, num_classes, config, use_mel=False):
         super().__init__()
         self.config = config
-
+        
         self.conv1 = nn.Conv1d(
             in_channels,
             config.CHANNELS[0],
@@ -153,7 +154,7 @@ class ClassificationLSTM(nn.Module):
     def __init__(self, in_channels, num_classes, config, use_mel=False):
         super().__init__()
         self.config = config
-
+        
         self.cnn_frontend = nn.Sequential(
             nn.Conv1d(
                 in_channels,
@@ -199,27 +200,20 @@ class ClassificationLSTM(nn.Module):
 # =====================================================================
 
 class _InceptionBlock(nn.Module):
-    """Bottleneck → parallel multi-scale convs + maxpool branch."""
+    """Single inception module: bottleneck → parallel multi-scale convs + maxpool branch."""
 
     def __init__(self, in_channels, nb_filters, kernels, bottleneck_size=32):
         super().__init__()
-        self.bottleneck = nn.Conv1d(
-            in_channels, bottleneck_size, kernel_size=1, bias=False
-        )
+        self.bottleneck = nn.Conv1d(in_channels, bottleneck_size, kernel_size=1, bias=False)
 
         self.conv_branches = nn.ModuleList([
-            nn.Conv1d(
-                bottleneck_size, nb_filters,
-                kernel_size=k, padding=k // 2, bias=False,
-            )
+            nn.Conv1d(bottleneck_size, nb_filters, kernel_size=k, padding=k // 2, bias=False)
             for k in kernels
         ])
 
         self.maxpool_branch = nn.Sequential(
             nn.MaxPool1d(kernel_size=3, stride=1, padding=1),
-            nn.Conv1d(
-                bottleneck_size, nb_filters, kernel_size=1, bias=False
-            ),
+            nn.Conv1d(bottleneck_size, nb_filters, kernel_size=1, bias=False),
         )
 
         self.bn = nn.BatchNorm1d(nb_filters * (len(kernels) + 1))
@@ -248,17 +242,14 @@ class InceptionTime(nn.Module):
         n_blocks = config.INCEPTION_BLOCKS
         out_channels = nb_filters * (len(kernels) + 1)
 
-        # Stem normalises T to ~200 samples so kernels stay meaningful
-        # across sample rates. stride=1 for seismic-only runs.
+        # Downsampling stem: normalises T to ~200 samples so INCEPTION_KERNELS remain
+        # meaningful regardless of REF_SAMPLE_RATE. stride=1 at seismic-only rates.
         stem_stride = getattr(config, 'INCEPTION_STEM_STRIDE', 1)
         if stem_stride > 1:
             stem_k = 2 * stem_stride - 1   # odd kernel → symmetric padding
             self.stem = nn.Sequential(
-                nn.Conv1d(
-                    in_channels, in_channels, kernel_size=stem_k,
-                    stride=stem_stride, padding=stem_stride - 1,
-                    bias=False,
-                ),
+                nn.Conv1d(in_channels, in_channels, kernel_size=stem_k,
+                          stride=stem_stride, padding=stem_stride - 1, bias=False),
                 nn.BatchNorm1d(in_channels),
                 nn.ReLU(),
             )
@@ -272,16 +263,11 @@ class InceptionTime(nn.Module):
         residual_ch = in_channels
 
         for i in range(n_blocks):
-            self.inception_blocks.append(
-                _InceptionBlock(ch, nb_filters, kernels)
-            )
+            self.inception_blocks.append(_InceptionBlock(ch, nb_filters, kernels))
             # Residual shortcut every 3 blocks
             if (i + 1) % 3 == 0:
                 self.shortcuts[str(i)] = nn.Sequential(
-                    nn.Conv1d(
-                        residual_ch, out_channels,
-                        kernel_size=1, bias=False,
-                    ),
+                    nn.Conv1d(residual_ch, out_channels, kernel_size=1, bias=False),
                     nn.BatchNorm1d(out_channels),
                 )
                 residual_ch = out_channels
@@ -312,23 +298,15 @@ class InceptionTime(nn.Module):
 class _TemporalBlock(nn.Module):
     """Dilated causal residual block used by TCN."""
 
-    def __init__(
-        self, in_channels, out_channels, kernel_size, dilation, dropout
-    ):
+    def __init__(self, in_channels, out_channels, kernel_size, dilation, dropout):
         super().__init__()
         padding = (kernel_size - 1) * dilation
 
         self.conv1 = nn.utils.weight_norm(
-            nn.Conv1d(
-                in_channels, out_channels, kernel_size,
-                dilation=dilation, padding=padding,
-            )
+            nn.Conv1d(in_channels, out_channels, kernel_size, dilation=dilation, padding=padding)
         )
         self.conv2 = nn.utils.weight_norm(
-            nn.Conv1d(
-                out_channels, out_channels, kernel_size,
-                dilation=dilation, padding=padding,
-            )
+            nn.Conv1d(out_channels, out_channels, kernel_size, dilation=dilation, padding=padding)
         )
         self.dropout = nn.Dropout(dropout)
         self.act = nn.ReLU()
@@ -368,9 +346,7 @@ class TCN(nn.Module):
         for i in range(levels):
             dilation = 2 ** i
             in_ch = in_channels if i == 0 else ch
-            layers.append(
-                _TemporalBlock(in_ch, ch, ks, dilation, dropout)
-            )
+            layers.append(_TemporalBlock(in_ch, ch, ks, dilation, dropout))
 
         self.network = nn.Sequential(*layers)
         self.gap = nn.AdaptiveAvgPool1d(1)
@@ -448,46 +424,38 @@ class BiGRU(nn.Module):
 class IterativeMiniRocket(nn.Module):
     """
     End-to-End PyTorch MiniRocket.
-    Trains a linear head over frozen random convolution features.
+    Extracts features batch-by-batch on the GPU and trains a linear head iteratively.
     Expects 1D Waveform: [B, C, T]
     """
-
     def __init__(self, in_channels, num_classes, config, use_mel=False):
         super().__init__()
         self.config = config
         self.c_in = in_channels
         self.seq_len = int(config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS)
         self.num_features = getattr(config, 'MINIROCKET_FEATURES', 10000)
-
+        
         # 1. The feature extractor (will be frozen)
-        self.mrf = MiniRocketFeatures(
-            c_in=self.c_in,
-            seq_len=self.seq_len,
-            num_features=self.num_features,
-        )
-
+        self.mrf = MiniRocketFeatures(c_in=self.c_in, seq_len=self.seq_len, num_features=self.num_features)
+        
         # 2. The Trainable Classification Head
         self.fc = nn.LazyLinear(num_classes)
         self.dropout = nn.Dropout(getattr(config, 'DROPOUT', 0.3))
-
+        
         self.is_fitted = False
 
     def fit_extractor(self, dummy_batch):
         """Calculates random dilations and biases from a small data sample."""
         if not self.is_fitted:
-            print(
-                "  -> [MiniRocket] Initializing random convolution kernels...",
-                flush=True,
-            )
+            print("  -> [MiniRocket] Initializing random convolution kernels...", flush=True)
             self.mrf.fit(dummy_batch)
             self.is_fitted = True
-
+            
             # Freeze the MRF convolutions so we ONLY train the Linear head
             for param in self.mrf.parameters():
                 param.requires_grad = False
 
     def forward(self, x):
-        # Extract MiniRocket features in chunks to avoid 32-bit index overflow
+        # 1. Extract MiniRocket features in chunks to avoid 32-bit index overflow
         chunk_size = 256
         feature_chunks = []
         with torch.no_grad():
@@ -498,17 +466,13 @@ class IterativeMiniRocket(nn.Module):
                 feature_chunks.append(f)
         features = torch.cat(feature_chunks, dim=0)
 
-        # Pass through the trainable head
+        # 2. Pass through the trainable head
         x = self.dropout(features)
         return self.fc(x)
 
     def get_optimizer(self):
-        # Only pass linear layer parameters to the optimizer
-        return optim.Adam(
-            self.fc.parameters(),
-            lr=self.config.LEARNING_RATE,
-            weight_decay=1e-3,
-        )
+        # Crucial: We only pass the linear layer parameters to the optimizer!
+        return optim.Adam(self.fc.parameters(), lr=self.config.LEARNING_RATE, weight_decay=1e-3)
 
 
 # =====================================================================
@@ -526,7 +490,6 @@ MODEL_REGISTRY = {
     "BiGRU": BiGRU,
 }
 
-
 def build_model(input_channels, num_classes, config):
     model_name = config.MODEL_NAME
 
@@ -536,8 +499,8 @@ def build_model(input_channels, num_classes, config):
     ModelClass = MODEL_REGISTRY[model_name]
 
     return ModelClass(
-        in_channels=input_channels,
-        num_classes=num_classes,
+        in_channels=input_channels, 
+        num_classes=num_classes, 
         config=config,
-        use_mel=getattr(config, 'USE_MEL', True),
+        use_mel=getattr(config, 'USE_MEL', True)
     )
