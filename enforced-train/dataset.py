@@ -116,7 +116,8 @@ class VehicleDataset(Dataset):
             sample_rate = self.config.NATIVE_SR[dataset][signal]
             expected_window = int(sample_rate * self.config.SAMPLE_SECONDS)
 
-            start = round(time * self.config.WINDOW_STEP * sample_rate)
+            step = self.config.WINDOW_STEP if self.split == "train" else self.config.SAMPLE_SECONDS
+            start = round(time * step * sample_rate)
             cached = self.table_cache[(table, run_id)]
             sensor_data = cached[:, start : start + expected_window].clone()
 
@@ -267,8 +268,9 @@ class VehicleDataset(Dataset):
 
             # 3. Map-Driven Sliding-Window Split Assignment
             split_rule = vehicle_info[2]
-            STEP = self.config.WINDOW_STEP
             WINDOW = self.config.SAMPLE_SECONDS
+            # Sliding windows only for train; eval splits use non-overlapping 1s windows
+            STEP = self.config.WINDOW_STEP if self.split == "train" else WINDOW
             valid_duration = times  # float seconds
             max_step_idx = int((valid_duration - WINDOW) / STEP)
             mid_time = valid_duration / 2.0
