@@ -224,7 +224,9 @@ class VehicleDataset(Dataset):
                 else:
                     ref_trs = table_runs
                 group_min_t = max(self.table_run_min_time[tr] for tr in ref_trs)
-                group_max_t = min(self.table_run_max_time[tr] for tr in ref_trs)
+                # End time must be the intersection across all sensors so every
+                # sensor's cache covers the full valid_duration window range.
+                group_max_t = min(self.table_run_max_time[tr] for tr in table_runs)
 
                 valid_duration = group_max_t - group_min_t
 
