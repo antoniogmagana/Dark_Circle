@@ -7,3 +7,7 @@ data:
   audio_bit_depth: "16"
   seismic_bit_depth: "24"
   accel_bit_depth: "24"
+  audio_sample_rate: "16000"
+  seismic_sample_rate: "100"
+  accel_sample_rate: "100"
+  target_rate: "16000"

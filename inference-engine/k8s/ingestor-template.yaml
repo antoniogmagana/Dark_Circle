@@ -45,3 +45,23 @@ spec:
                 configMapKeyRef:
                   name: sensor-config
                   key: accel_bit_depth
+            - name: AUDIO_SAMPLE_RATE
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: audio_sample_rate
+            - name: SEISMIC_SAMPLE_RATE
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: seismic_sample_rate
+            - name: ACCEL_SAMPLE_RATE
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: accel_sample_rate
+            - name: target_rate
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: target_rate

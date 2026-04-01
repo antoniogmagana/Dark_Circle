@@ -5,4 +5,4 @@ string sensor_id
 float64 start_time
 
 # sensor reading value
-float64[] amplitude_readings
+int32[] amplitude_readings
