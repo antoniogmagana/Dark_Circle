@@ -80,30 +80,63 @@ if [[ "${confirm,,}" != "y" ]]; then
     exit 0
 fi
 
-# --- 4. Unified Model Training Pipeline ---
+# --- 4. Sensor Selection ---
+echo ""
+echo "============================================================"
+echo " SELECT SENSORS"
+echo "============================================================"
+echo "Enter the numbers of the sensors to train (space-separated)."
+echo "Or type 'all' to select everything."
+echo ""
+echo "  1) audio"
+echo "  2) seismic"
+echo "  3) ALL SENSORS"
+echo ""
+read -p "Sensors > " sensor_input
+
+selected_sensors=()
+if [[ "$sensor_input" == *"3"* ]] || [[ "${sensor_input,,}" == *"all"* ]]; then
+    selected_sensors=("audio" "seismic")
+else
+    [[ "$sensor_input" == *"1"* ]] && selected_sensors+=("audio")
+    [[ "$sensor_input" == *"2"* ]] && selected_sensors+=("seismic")
+fi
+
+if [ ${#selected_sensors[@]} -eq 0 ]; then
+    echo ""
+    echo "[!] Error: You must select at least one sensor."
+    exit 1
+fi
+
+echo ""
+echo "Sensors to train: ${selected_sensors[*]}"
+
+# --- 5. Unified Model Training Pipeline ---
 echo ""
 for mode in "${selected_modes[@]}"; do
-    for model in "${selected_models[@]}"; do
-        CURRENT_RUN_ID=$(date +%Y%m%d_%H%M%S)
-        
-        echo "============================================================"
-        echo "STARTING RUN -> MODE: $mode | MODEL: $model | RUN_ID: $CURRENT_RUN_ID"
-        echo "============================================================"
-        
-        # Run training loop
-        RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode MODEL_NAME=$model poetry run python train.py
-        
-        # Force a 1-second delay to guarantee unique RUN_IDs
-        sleep 1 
+    for sensor in "${selected_sensors[@]}"; do
+        for model in "${selected_models[@]}"; do
+            CURRENT_RUN_ID=$(date +%Y%m%d_%H%M%S)
+
+            echo "============================================================"
+            echo "STARTING RUN -> MODE: $mode | SENSOR: $sensor | MODEL: $model | RUN_ID: $CURRENT_RUN_ID"
+            echo "============================================================"
+
+            # Run training loop
+            RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode TRAIN_SENSOR=$sensor MODEL_NAME=$model poetry run python train.py
+
+            # Force a 1-second delay to guarantee unique RUN_IDs
+            sleep 1
+        done
     done
 done
 
-# --- 5. Evaluation ---
+# --- 6. Evaluation ---
 echo "============================================================"
 echo "ALL TRAINING COMPLETE. COMMENCING BATCH EVALUATION..."
 echo "============================================================"
 
-# Run eval.py and aggregate_results.py once at the very end. 
+# Per-sensor eval, fused eval, then aggregate
 poetry run python eval.py
 poetry run python aggregate_results.py
 

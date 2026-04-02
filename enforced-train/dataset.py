@@ -5,13 +5,17 @@ import random
 import torch
 import torchaudio.transforms
 from torch.utils.data import Dataset
-from sklearn.model_selection import train_test_split
 import atexit
 from torch.utils.data import get_worker_info
 
 # Centralized imports
-from db_utils import db_connect, db_close, fetch_table_segment, get_time_bounds
-from data_generator import generate_no_vehicle_sample
+from db_utils import (
+    db_connect,
+    db_close,
+    fetch_table_segment,
+    get_time_bounds,
+    get_present_map,
+)
 
 
 def db_worker_init(worker_id, config=None):
@@ -49,6 +53,7 @@ class VehicleDataset(Dataset):
         self._get_tables()
         self._get_table_max_time()
         self._align_max_time()
+        self._get_present_maps()
         self._get_samples()
         self._preload_tables()
 
@@ -73,41 +78,6 @@ class VehicleDataset(Dataset):
         else:
             raise ValueError(f"Unknown TRAINING_MODE: {self.config.TRAINING_MODE}")
 
-        # -----------------------------------------------------------------
-        # DYNAMIC SYNTHESIS: Background Augmentation & Pure Synthetic Trap
-        # -----------------------------------------------------------------
-        is_pure_synthetic = dataset == "synthetic"
-
-        if is_pure_synthetic or (
-            getattr(self.config, "SYNTHESIZE_BACKGROUND", False)
-            and label_int == 0
-            and self.split == "train"
-            and random.random() < getattr(self.config, "SYNTHESIZE_PROBABILITY", 0.5)
-        ):
-
-            # Dynamically select the correct noise floor
-            if self.noise_floors is not None:
-                # If pure synthetic, fallback to the average of all noise floors
-                if is_pure_synthetic or dataset not in self.noise_floors:
-                    current_amplitude = torch.stack(
-                        list(self.noise_floors.values())
-                    ).mean(dim=0)
-                else:
-                    current_amplitude = self.noise_floors[dataset]
-            else:
-                # Fallback before noise floors are computed (val/test splits)
-                current_amplitude = 0.01
-
-            X = generate_no_vehicle_sample(
-                config=self.config,
-                noise_profile="environmental",
-                amplitude=current_amplitude,
-            )
-            y = torch.tensor(label_int, dtype=torch.long)
-
-            # CRITICAL: Return dataset string here
-            return X, y, dataset
-
         sensor_tensors = []
         max_time_steps = self.config.REF_SAMPLE_RATE * self.config.SAMPLE_SECONDS
 
@@ -119,7 +89,7 @@ class VehicleDataset(Dataset):
             step = self.config.WINDOW_STEP if self.split == "train" else self.config.SAMPLE_SECONDS
             start = round(time * step * sample_rate)
             cached = self.table_cache[(table, run_id)]
-            sensor_data = cached[:, start : start + expected_window].clone()
+            sensor_data = cached[:, start:start + expected_window].clone()
 
             if sensor_data.shape[1] < expected_window:
                 pad_amount = expected_window - sensor_data.shape[1]
@@ -242,6 +212,16 @@ class VehicleDataset(Dataset):
             del self.table_run_max_time[k]
             del self.table_run_min_time[k]
 
+    def _get_present_maps(self):
+        """Load per-second present flags for every valid (table, run_id)."""
+        conn, cursor = db_connect(self.config.DB_CONN_PARAMS)
+        self.present_maps = {}
+        for (table, run_id) in self.table_run_max_time:
+            self.present_maps[(table, run_id)] = get_present_map(
+                cursor, table, run_id=run_id
+            )
+        db_close(conn, cursor)
+
     def _get_samples(self):
         unique_samples = set()
 
@@ -268,6 +248,31 @@ class VehicleDataset(Dataset):
             ):
                 continue
 
+            # 2. Resolve present map for this (table, run_id)
+            # Use the first sensor's table — all sensors share the same
+            # time axis so their present maps are identical.
+            ref_signal = self.config.TRAIN_SENSORS[0]
+            ref_table = f"{dataset}_{ref_signal}_{instance}_{sensor_node}"
+            present_map = self.present_maps.get((ref_table, run_id), {})
+            is_m3nvc_bg = (dataset == "m3nvc" and instance == "background")
+
+            def _effective_label(step_idx):
+                """
+                Returns (label_str, include) for a given step index.
+                - m3nvc background is always "background" / always included.
+                - detection: all windows included; label driven by present_flag.
+                - category/instance: only present=True windows included.
+                """
+                if is_m3nvc_bg:
+                    return "background", True
+                start_sec = int(step_idx * STEP)
+                present_flag = present_map.get(start_sec, False)
+                if self.config.TRAINING_MODE == "detection":
+                    label = category_str if present_flag else "background"
+                    return label, True
+                else:
+                    return category_str, present_flag
+
             # 3. Map-Driven Sliding-Window Split Assignment
             split_rule = vehicle_info[2]
             WINDOW = self.config.SAMPLE_SECONDS
@@ -286,19 +291,24 @@ class VehicleDataset(Dataset):
             if split_rule in ("train", "val", "test"):
                 if self.split == split_rule:
                     for step_idx in range(max_step_idx + 1):
-                        unique_samples.add(
-                            (dataset, instance, sensor_node, run_id, step_idx, category_str)
-                        )
+                        label, include = _effective_label(step_idx)
+                        if include:
+                            unique_samples.add(
+                                (dataset, instance, sensor_node, run_id, step_idx, label)
+                            )
 
             elif split_rule == "split":
                 for step_idx in range(max_step_idx + 1):
+                    label, include = _effective_label(step_idx)
+                    if not include:
+                        continue
                     if self.split == "test" and _in_test(step_idx):
                         unique_samples.add(
-                            (dataset, instance, sensor_node, run_id, step_idx, category_str)
+                            (dataset, instance, sensor_node, run_id, step_idx, label)
                         )
                     elif self.split == "val" and _in_val(step_idx):
                         unique_samples.add(
-                            (dataset, instance, sensor_node, run_id, step_idx, category_str)
+                            (dataset, instance, sensor_node, run_id, step_idx, label)
                         )
 
             elif split_rule == "run":
@@ -310,18 +320,23 @@ class VehicleDataset(Dataset):
                 if run_id_int % 2 == 0:
                     if self.split == "train":
                         for step_idx in range(max_step_idx + 1):
-                            unique_samples.add(
-                                (dataset, instance, sensor_node, run_id, step_idx, category_str)
-                            )
+                            label, include = _effective_label(step_idx)
+                            if include:
+                                unique_samples.add(
+                                    (dataset, instance, sensor_node, run_id, step_idx, label)
+                                )
                 else:
                     for step_idx in range(max_step_idx + 1):
+                        label, include = _effective_label(step_idx)
+                        if not include:
+                            continue
                         if self.split == "test" and _in_test(step_idx):
                             unique_samples.add(
-                                (dataset, instance, sensor_node, run_id, step_idx, category_str)
+                                (dataset, instance, sensor_node, run_id, step_idx, label)
                             )
                         elif self.split == "val" and _in_val(step_idx):
                             unique_samples.add(
-                                (dataset, instance, sensor_node, run_id, step_idx, category_str)
+                                (dataset, instance, sensor_node, run_id, step_idx, label)
                             )
 
             else:
@@ -331,36 +346,6 @@ class VehicleDataset(Dataset):
                 )
 
         self.samples = sorted(list(unique_samples))
-
-        # -----------------------------------------------------------------
-        # CONTROLLED OVER-SAMPLING: Background Balancing
-        # -----------------------------------------------------------------
-        if (
-            self.config.TRAINING_MODE == "detection"
-            and self.split == "train"
-            and getattr(self.config, "OVERSAMPLE_BACKGROUNDS", False)
-        ):
-            # Because we stored strings, we filter by "background"
-            background_samples = [s for s in self.samples if s[5] == "background"]
-            vehicle_samples = [s for s in self.samples if s[5] != "background"]
-
-            shortfall = len(vehicle_samples) - len(background_samples)
-
-            if shortfall > 0:
-                if len(background_samples) > 0:
-                    extra_backgrounds = random.choices(background_samples, k=shortfall)
-                    self.samples.extend(extra_backgrounds)
-                else:
-                    print(
-                        f"  [+] Injecting {shortfall} purely synthetic background samples to balance classes."
-                    )
-                    dummy_samples = [
-                        ("synthetic", "noise", "none", None, i, "background")
-                        for i in range(shortfall)
-                    ]
-                    self.samples.extend(dummy_samples)
-
-                random.shuffle(self.samples)
 
     def _get_cache_path(self):
         key_data = {
@@ -377,7 +362,9 @@ class VehicleDataset(Dataset):
         return os.path.join(cache_dir, f"table_cache_{self.split}_{key_hash}.pt")
 
     def _preload_tables(self):
-        """Bulk-load all required table segments into memory to eliminate per-sample DB queries.
+        """Bulk-load all required table segments into memory.
+
+        Eliminates per-sample DB queries.
         Caches to disk so subsequent runs skip the DB load entirely."""
         cache_path = self._get_cache_path()
 
@@ -411,7 +398,9 @@ class VehicleDataset(Dataset):
 
         for i, (table, run_id) in enumerate(sorted(needed)):
             min_t = self.table_run_min_time[(table, run_id)]
-            rows = fetch_table_segment(cursor, table, from_time=min_t, run_id=run_id)
+            rows = fetch_table_segment(
+                cursor, table, from_time=min_t, run_id=run_id
+            )
             if rows:
                 self.table_cache[(table, run_id)] = torch.tensor(
                     rows, dtype=torch.float32

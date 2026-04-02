@@ -18,7 +18,7 @@ def sanitize_name(name, max_length=25):
 
 def db_connect(db_conn_params):
     try:
-        # Unpacks the passed dictionary 
+        # Unpacks the passed dictionary
         conn = psycopg2.connect(**db_conn_params)
         conn.autocommit = True
         cursor = conn.cursor()
@@ -34,6 +34,37 @@ def db_close(conn, cursor):
 
 
 # ---------------------------------------------------------------------
+# 0. Per-second present map from the labeled present column
+# ---------------------------------------------------------------------
+def get_present_map(cursor, table_name, run_id=None):
+    """
+    Returns {int(second): bool} for each 1-second labeled block in the table.
+    Queries the 'present' column added by sample_parse.py.
+    Returns an empty dict on error (default missing keys to True).
+    """
+    try:
+        if run_id is not None:
+            query = sql.SQL(
+                "SELECT FLOOR(time_stamp)::int AS sec, BOOL_AND(present) "
+                "FROM {table} WHERE run_id = {run_id} "
+                "GROUP BY sec ORDER BY sec"
+            ).format(
+                table=sql.Identifier(table_name),
+                run_id=sql.Literal(run_id),
+            )
+        else:
+            query = sql.SQL(
+                "SELECT FLOOR(time_stamp)::int AS sec, BOOL_AND(present) "
+                "FROM {table} GROUP BY sec ORDER BY sec"
+            ).format(table=sql.Identifier(table_name))
+        cursor.execute(query)
+        return {row[0]: row[1] for row in cursor.fetchall()}
+    except Exception as e:
+        print(f"[WARN] Could not fetch present map for {table_name}: {e}")
+        return {}
+
+
+# ---------------------------------------------------------------------
 # 1. Time bounds WITH optional run_id filtering
 # ---------------------------------------------------------------------
 def get_time_bounds(cursor, table_name, run_id=None):
@@ -43,7 +74,9 @@ def get_time_bounds(cursor, table_name, run_id=None):
     """
 
     if run_id is None:
-        query = sql.SQL("SELECT MIN(time_stamp), MAX(time_stamp) FROM {table}").format(
+        query = sql.SQL(
+            "SELECT MIN(time_stamp), MAX(time_stamp) FROM {table}"
+        ).format(
             table=sql.Identifier(table_name)
         )
     else:
@@ -109,7 +142,9 @@ def fetch_table_segment(cursor, table_name, from_time, run_id=None):
 # ---------------------------------------------------------------------
 # 3. Fetch N samples starting at a timestamp WITH optional run_id
 # ---------------------------------------------------------------------
-def fetch_sensor_batch(cursor, table_name, sample_count, start_time, run_id=None):
+def fetch_sensor_batch(
+    cursor, table_name, sample_count, start_time, run_id=None
+):
     """
     Fetches `sample_count` rows starting at `start_time`.
     Uses the B-tree index on time_stamp (and run_id if present).

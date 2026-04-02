@@ -59,7 +59,9 @@ if not DB_CONN_PARAMS["password"]:
 #   "instance"   -> each vehicle instance is its own class
 TRAINING_MODE = os.environ.get("TRAINING_MODE")
 if not TRAINING_MODE:
-    TRAINING_MODE = input('Enter Training Mode ["detection", "category", "instance"]: ')
+    TRAINING_MODE = input(
+        'Enter Training Mode ["detection", "category", "instance"]: '
+    )
 
 # Reproducible instance-level class IDs
 INSTANCE_SEED = 0
@@ -76,8 +78,9 @@ BEST_MODEL_METRIC = "val_f1"
 # "iobt" "focal" "m3nvc"
 TRAIN_DATASETS = ["iobt", "focal", "m3nvc"]
 
-# "audio" "seismic" "accel"
-TRAIN_SENSORS = ["audio", "seismic"]  # accel can be added later
+# "audio" "seismic" "accel" — one sensor per training run
+TRAIN_SENSOR = os.environ.get("TRAIN_SENSOR", "audio")
+TRAIN_SENSORS = [TRAIN_SENSOR]
 
 # Derived: audio=1, seismic=1, accel=3
 IN_CHANNELS = len(TRAIN_SENSORS) + (2 if "accel" in TRAIN_SENSORS else 0)
@@ -93,7 +96,9 @@ NATIVE_SR = {
 }
 
 # Global reference sample rate for all sensors/datasets
-REF_SAMPLE_RATE = max(NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_SENSORS)
+REF_SAMPLE_RATE = max(
+    NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_SENSORS
+)
 
 # Bit depth per sensor type (hardware spec)
 BIT_DEPTH_MAP = {"audio": 16, "seismic": 24, "accel": 24}
@@ -195,13 +200,16 @@ if not MODEL_NAME:
     MODEL_NAME = input("Enter Model Name: ")
 
 # 1. Generate or Retrieve RUN_ID
-# If evaluating, we can pass RUN_ID="20260308_2032". Otherwise, it generates a new timestamp.
+# If evaluating, pass RUN_ID="20260308_2032".
+# Otherwise a new timestamp is generated.
 RUN_ID = os.environ.get("RUN_ID")
 if not RUN_ID:
     RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-# 2. Build the nested directory structure
-RUN_DIR = os.path.join("saved_models", TRAINING_MODE, MODEL_NAME, RUN_ID)
+# 2. Build the nested directory structure (includes sensor for per-sensor runs)
+RUN_DIR = os.path.join(
+    "saved_models", TRAINING_MODE, TRAIN_SENSOR, MODEL_NAME, RUN_ID
+)
 CACHE_DIR = os.path.join("saved_models", "cache")
 
 # 3. Define the specific file paths inside that new folder
@@ -233,22 +241,13 @@ HOP_LENGTH = 256
 BATCH_MODE = True
 
 # =====================================================================
-# 7. DATA AUGMENTATION & SYNTHESIS
+# 7. DATA AUGMENTATION
 # =====================================================================
-# Toggle to dynamically inject generated background noise during training
-SYNTHESIZE_BACKGROUND = True
-
-# The probability (0.0 to 1.0) of adding a SYNTHETIC background sample
-SYNTHESIZE_PROBABILITY = 0.5
-
 # Toggle to dynamically add noise to the raw waveform during training
 AUGMENT_SNR = True
 
 # The minimum and maximum SNR (in decibels) to apply when augmenting
 AUGMENT_SNR_RANGE = (10, 30)
-
-# add extra synthetic background samples
-OVERSAMPLE_BACKGROUNDS = True
 
 # =====================================================================
 # 8. MODEL HYPERPARAMETERS & CONTROL FLOW
@@ -334,13 +333,13 @@ elif MODEL_NAME == "InceptionTime":
         19,
         39,
     ]  # kernel sizes (9≈45ms, 19≈95ms, 39≈195ms at 200Hz post-stem)
-    INCEPTION_BLOCKS = 3  # number of inception modules; residual shortcut every 3
+    INCEPTION_BLOCKS = 3  # inception modules; residual shortcut every 3
     HIDDEN = 256
     DROPOUT = 0.3
     # Stem stride normalises T to ~200 samples before the inception blocks.
     # At seismic-only rates (SEQ_LEN≈200), stride=1 → Identity (no change).
-    # At audio rates (SEQ_LEN=16000), stride=80 → 200 post-stem samples, keeping
-    # INCEPTION_KERNELS meaningful and intermediate tensors small enough for B=128.
+    # At audio rates (SEQ_LEN=16000), stride=80 -> 200 post-stem samples,
+    # keeping INCEPTION_KERNELS meaningful and tensors small (B=128).
     INCEPTION_STEM_STRIDE = max(1, SEQ_LEN // 200)
 
 # --- TCN ---
