@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_batch
+from multiprocessing import Pool
 from pathlib import Path
 from typing import Optional, Tuple, List
 import matplotlib
@@ -129,8 +130,14 @@ def process_m3nvc_audio(df):
     for (scene_id, run_id), group in df.groupby(["scene_id", "run_id"]):
         amplitudes = group["amplitude"].values
         labels = label_windows(amplitudes, M3NVC_RATES["audio"])
-        present_arr = np.repeat(labels, window_size)[: len(group)]
-        df.loc[group.index, "present"] = present_arr
+        if len(labels) == 0:
+            continue
+        present_arr = np.repeat(labels, window_size)
+        # Pad trailing samples (incomplete final window) with last label
+        if len(present_arr) < len(group):
+            pad = np.full(len(group) - len(present_arr), present_arr[-1])
+            present_arr = np.concatenate([present_arr, pad])
+        df.loc[group.index, "present"] = present_arr[: len(group)]
     return df
 
 
@@ -140,20 +147,23 @@ def process_m3nvc_seismic(df):
     for (scene_id, run_id), group in df.groupby(["scene_id", "run_id"]):
         amplitudes = group["amplitude"].values
         labels = label_windows(amplitudes, M3NVC_RATES["seismic"])
-        present_arr = np.repeat(labels, window_size)[: len(group)]
-        df.loc[group.index, "present"] = present_arr
+        if len(labels) == 0:
+            continue
+        present_arr = np.repeat(labels, window_size)
+        if len(present_arr) < len(group):
+            pad = np.full(len(group) - len(present_arr), present_arr[-1])
+            present_arr = np.concatenate([present_arr, pad])
+        df.loc[group.index, "present"] = present_arr[: len(group)]
     return df
 
 
-def process_table(conn, cursor, table):
+def process_table(table):
+    conn, cursor = db_connect()
     # extract table designations
     table_type = table.split("_")
     # Add default false column for vehicle presence
     query = f"""ALTER TABLE {table} 
-    ADD COLUMN IF NOT EXISTS present BOOLEAN NOT NULL DEFAULT TRUE;"""
-    cursor.execute(query)
-    query = f"""
-    UPDATE {table} SET present = TRUE;"""
+    ADD COLUMN IF NOT EXISTS present BOOLEAN NOT NULL DEFAULT FALSE;"""
     cursor.execute(query)
 
     # create dataframe for table
@@ -195,28 +205,42 @@ def process_table(conn, cursor, table):
         print(f"table {table} schema not found")
 
     if update:
-        records = list(zip(df["present"].tolist(), df["sample_id"].tolist()))
+        records = list(zip(df["sample_id"].tolist(), df["present"].tolist()))
+        cursor.execute(
+            "CREATE TEMP TABLE _present_update "
+            "(sample_id BIGINT, present BOOLEAN) ON COMMIT DROP;"
+        )
         execute_batch(
             cursor,
-            f"UPDATE {table} SET present = %s WHERE sample_id = %s",
+            "INSERT INTO _present_update VALUES (%s, %s)",
             records,
-            page_size=1000,
+            page_size=10000,
+        )
+        cursor.execute(
+            f"UPDATE {table} t SET present = u.present "
+            f"FROM _present_update u WHERE t.sample_id = u.sample_id;"
         )
         print(f"table {table} update complete")
     else:
         print(f"skipping table {table}")
 
-    # save changes
-    conn.commit()
+
+def process_table_worker(table):
+    conn, cursor = db_connect()
+    try:
+        process_table(conn, cursor, table)
+    finally:
+        db_close(conn, cursor)
 
 
 def main():
-    # connect to db
     conn, cursor = db_connect()
-    # get table list
     tables = get_table_list(conn, cursor)
-    for table in tables:
-        process_table(conn, cursor, table)
+    db_close(conn, cursor)
+
+    workers = min(8, len(tables))
+    with Pool(processes=workers) as pool:
+        pool.map(process_table_worker, tables)
 
 
 if __name__ == "__main__":
