@@ -226,11 +226,7 @@ def process_table(table):
 
 
 def process_table_worker(table):
-    conn, cursor = db_connect()
-    try:
-        process_table(conn, cursor, table)
-    finally:
-        db_close(conn, cursor)
+    process_table(table)
 
 
 def main():
