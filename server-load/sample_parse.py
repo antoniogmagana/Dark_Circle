@@ -158,7 +158,7 @@ def process_m3nvc_seismic(df):
 
 
 def process_table(table):
-    conn, cursor = db_connect()
+    conn, cursor = db_connect()  # conn kept for db_close at end
     # extract table designations
     table_type = table.split("_")
     # Add default false column for vehicle presence
@@ -176,7 +176,8 @@ def process_table(table):
         cols = "sample_id, scene_id, run_id, amplitude"
     else:
         cols = "*"
-    df = pd.read_sql_query(f"SELECT {cols} FROM {table};", conn)
+    cursor.execute(f"SELECT {cols} FROM {table};")
+    df = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
     update = False
 
     if table_type[0] in ["iobt", "focal"]:
@@ -207,9 +208,10 @@ def process_table(table):
     if update:
         records = list(zip(df["sample_id"].tolist(), df["present"].tolist()))
         cursor.execute(
-            "CREATE TEMP TABLE _present_update "
-            "(sample_id BIGINT, present BOOLEAN) ON COMMIT DROP;"
+            "CREATE TEMP TABLE IF NOT EXISTS _present_update "
+            "(sample_id BIGINT, present BOOLEAN);"
         )
+        cursor.execute("TRUNCATE _present_update;")
         execute_batch(
             cursor,
             "INSERT INTO _present_update VALUES (%s, %s)",
