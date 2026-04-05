@@ -114,9 +114,13 @@ def crl_loss(out: dict, batch_t: dict, availability: torch.Tensor,
         recon_total = recon_total / n_present
 
     # 2. KL divergence — vehicle (standard normal prior)
-    kl_veh = -0.5 * torch.sum(
+    # Free-bits: clamp per-dimension KL to a minimum to prevent all
+    # z_veh dimensions from simultaneously collapsing to the prior.
+    FREE_BITS = 0.5  # nats per dimension
+    kl_veh_per_dim = -0.5 * (
         1 + logvar_veh - mu_veh.pow(2) - logvar_veh.exp()
-    ) / B
+    )  # [B, z_veh_dim]
+    kl_veh = kl_veh_per_dim.clamp(min=FREE_BITS).sum() / B
 
     # 3. KL divergence — environment (sensor-domain conditional prior)
     prior_mu     = out["prior_mu_env"]
@@ -186,6 +190,9 @@ def train_crl_phase(
         model.train()
         epoch_loss = epoch_recon = epoch_kl_veh = epoch_kl_env = epoch_slow = 0.0
 
+        # KL annealing: ramp beta from 0 → beta_kl over first 10 epochs
+        beta_kl_annealed = min(1.0, epoch / 10.0) * beta_kl
+
         for batch_idx, batch in enumerate(train_loader):
             batch_t, batch_next, avail, domain_ids, _, _ = batch
 
@@ -197,7 +204,7 @@ def train_crl_phase(
             optimizer.zero_grad()
             out = model(batch_t, batch_next, avail, domain_ids)
             loss, recon, kl_v, kl_e, slow = crl_loss(
-                out, batch_t, avail, beta_kl, lambda_slow
+                out, batch_t, avail, beta_kl_annealed, lambda_slow
             )
             loss.backward()
             optimizer.step()

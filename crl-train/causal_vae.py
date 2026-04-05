@@ -202,7 +202,7 @@ class MultiModalCausalVAE(nn.Module):
         pooled = pooled + self.avail_embed(avail_idx)        # [B, feat_dim]
 
         mu     = self.fc_mu(pooled)
-        logvar = self.fc_logvar(pooled)
+        logvar = self.fc_logvar(pooled).clamp(min=-4.0)
         return mu, logvar
 
     def encode(
@@ -279,8 +279,14 @@ class MultiModalCausalVAE(nn.Module):
         mu_t, logvar_t = self._fuse(batch_t, availability)
         z_t = self.reparameterize(mu_t, logvar_t)
 
-        # Decode t
-        x_recon_t = self.decode(z_t, availability)
+        # Decode t — stop-gradient on z_env so reconstruction loss flows
+        # through z_veh only, preventing z_veh posterior collapse.
+        z_decode = torch.cat(
+            [z_t[:, :self.z_veh_dim],
+             z_t[:, self.z_veh_dim:].detach()],
+            dim=1,
+        )
+        x_recon_t = self.decode(z_decode, availability)
 
         # Encode t+1 (mean only — used for slow loss on z_env)
         mu_next, _ = self._fuse(batch_next, availability)
