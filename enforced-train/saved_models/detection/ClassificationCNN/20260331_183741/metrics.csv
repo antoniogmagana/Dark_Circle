@@ -1,0 +1,2 @@
+Epoch,Train_Loss,Train_Acc,Val_Loss,Val_Acc,Val_Precision,Val_Recall,Val_F1,Val_Acc_background,Val_Acc_vehicle
+1,0.0235,0.9319,0.2112,0.9370,0.9828,0.9370,0.9547,0.9351,0.9370

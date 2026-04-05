@@ -1,0 +1,321 @@
+{
+    "BATCH_SIZE": 128,
+    "EPOCHS": 50,
+    "NUM_WORKERS": 32,
+    "LOG_INTERVAL": 10,
+    "CHECKPOINT_DIR": "./checkpoints",
+    "EVAL_RESULTS_DIR": "./eval_results",
+    "EVAL_STEPS": 200,
+    "DEVICE": "cuda",
+    "DB_CONN_PARAMS": {
+        "dbname": "lvc_db",
+        "user": "lvc_toolkit",
+        "password": "@WSXCDE#2wsxcde3",
+        "host": "localhost",
+        "port": 5432
+    },
+    "TRAINING_MODE": "instance",
+    "INSTANCE_SEED": 0,
+    "BEST_MODEL_METRIC": "val_f1",
+    "TRAIN_DATASETS": [
+        "iobt",
+        "focal",
+        "m3nvc"
+    ],
+    "TRAIN_SENSORS": [
+        "audio",
+        "seismic"
+    ],
+    "IN_CHANNELS": 2,
+    "ACOUSTIC_SR": 16000,
+    "NATIVE_SR": {
+        "iobt": {
+            "audio": 16000,
+            "seismic": 100,
+            "accel": 100
+        },
+        "focal": {
+            "audio": 16000,
+            "seismic": 100,
+            "accel": 100
+        },
+        "m3nvc": {
+            "audio": 1600,
+            "seismic": 200,
+            "accel": 200
+        }
+    },
+    "REF_SAMPLE_RATE": 16000,
+    "BIT_DEPTH_MAP": {
+        "audio": 16,
+        "seismic": 24,
+        "accel": 24
+    },
+    "ADC_SCALE_MAP": {
+        "audio": 32768,
+        "seismic": 8388608,
+        "accel": 8388608
+    },
+    "CHANNEL_ADC_SCALES": [
+        32768,
+        8388608
+    ],
+    "CLASS_MAP": {
+        "0": "pedestrian",
+        "1": "light",
+        "2": "sport",
+        "3": "utility"
+    },
+    "DATASET_VEHICLE_MAP": {
+        "iobt": {
+            "polaris0150pm": [
+                "light",
+                "polaris",
+                "train"
+            ],
+            "polaris0215pm": [
+                "light",
+                "polaris",
+                "val"
+            ],
+            "polaris0235pm_nolineofsig": [
+                "light",
+                "polaris",
+                "test"
+            ],
+            "warhog1135am": [
+                "light",
+                "warhog",
+                "train"
+            ],
+            "warhog1149am": [
+                "light",
+                "warhog",
+                "val"
+            ],
+            "warhog_nolineofsight": [
+                "light",
+                "warhog",
+                "test"
+            ],
+            "silverado0255pm": [
+                "utility",
+                "pickup",
+                "train"
+            ],
+            "silverado0315pm": [
+                "utility",
+                "pickup",
+                "split"
+            ]
+        },
+        "focal": {
+            "walk": [
+                "pedestrian",
+                "walk",
+                "train"
+            ],
+            "walk2": [
+                "pedestrian",
+                "walk",
+                "split"
+            ],
+            "bicycle": [
+                "pedestrian",
+                "bicycle",
+                "train"
+            ],
+            "bicycle2": [
+                "pedestrian",
+                "bicycle",
+                "split"
+            ],
+            "motor": [
+                "light",
+                "motorcycle",
+                "train"
+            ],
+            "motor2": [
+                "light",
+                "motorcycle",
+                "split"
+            ],
+            "scooter": [
+                "light",
+                "scooter",
+                "train"
+            ],
+            "scooter2": [
+                "light",
+                "scooter",
+                "split"
+            ],
+            "forester": [
+                "utility",
+                "forester",
+                "train"
+            ],
+            "forester2": [
+                "utility",
+                "forester",
+                "split"
+            ],
+            "mustang": [
+                "sport",
+                "mustang",
+                "train"
+            ],
+            "mustang0528": [
+                "sport",
+                "mustang",
+                "val"
+            ],
+            "mustang2": [
+                "sport",
+                "mustang",
+                "test"
+            ],
+            "pickup": [
+                "utility",
+                "pickup",
+                "train"
+            ],
+            "pickup2": [
+                "utility",
+                "pickup",
+                "split"
+            ],
+            "tesla": [
+                "sport",
+                "ev",
+                "train"
+            ],
+            "tesla2": [
+                "sport",
+                "ev",
+                "split"
+            ]
+        },
+        "m3nvc": {
+            "background": [
+                "background",
+                "background",
+                "run"
+            ],
+            "cx30": [
+                "utility",
+                "cx30",
+                "run"
+            ],
+            "miata": [
+                "sport",
+                "miata",
+                "run"
+            ],
+            "mustang": [
+                "sport",
+                "mustang",
+                "run"
+            ],
+            "gle350": [
+                "utility",
+                "gle350",
+                "run"
+            ]
+        }
+    },
+    "ALL_INSTANCES": [
+        "background",
+        "bicycle",
+        "cx30",
+        "ev",
+        "forester",
+        "gle350",
+        "miata",
+        "motorcycle",
+        "mustang",
+        "pickup",
+        "polaris",
+        "scooter",
+        "walk",
+        "warhog"
+    ],
+    "INSTANCE_TO_CLASS": {
+        "bicycle": 0,
+        "polaris": 1,
+        "pickup": 2,
+        "gle350": 3,
+        "scooter": 4,
+        "cx30": 5,
+        "ev": 6,
+        "motorcycle": 7,
+        "mustang": 8,
+        "forester": 9,
+        "background": 10,
+        "walk": 11,
+        "miata": 12,
+        "warhog": 13
+    },
+    "CLASS_WEIGHTS": [],
+    "NUM_CLASSES": 14,
+    "MODEL_NAME": "DetectionCNN",
+    "RUN_ID": "20260401_081057",
+    "RUN_DIR": "saved_models/instance/DetectionCNN/20260401_081057",
+    "CACHE_DIR": "saved_models/cache",
+    "MODEL_SAVE_PATH": "saved_models/instance/DetectionCNN/20260401_081057/best_model.pth",
+    "META_SAVE_PATH": "saved_models/instance/DetectionCNN/20260401_081057/meta.pt",
+    "IMG_SAVE_PATH": "saved_models/instance/DetectionCNN/20260401_081057/conf_matrix.png",
+    "JSON_LOG_PATH": "saved_models/instance/DetectionCNN/20260401_081057/hyperparameters.json",
+    "METRICS_LOG_PATH": "saved_models/instance/DetectionCNN/20260401_081057/metrics.csv",
+    "TRAIN_STEPS_PER_EPOCH": 50,
+    "VAL_STEPS_PER_EPOCH": 16,
+    "SAMPLE_SECONDS": 1,
+    "WINDOW_STEP": 0.7,
+    "MEL_BINS": 64,
+    "MEL_HOP_LENGTH": 512,
+    "MEL_TOP_DB": 80,
+    "NOISE_KERNEL_SIZE": 51,
+    "N_FFT": 1024,
+    "HOP_LENGTH": 256,
+    "BATCH_MODE": true,
+    "SYNTHESIZE_BACKGROUND": true,
+    "SYNTHESIZE_PROBABILITY": 0.5,
+    "AUGMENT_SNR": true,
+    "AUGMENT_SNR_RANGE": [
+        10,
+        30
+    ],
+    "OVERSAMPLE_BACKGROUNDS": true,
+    "BASE_LR": 0.001,
+    "BASE_DROPOUT": 0.3,
+    "SEQ_LEN": 16000,
+    "LEARNING_RATE": 0.001,
+    "CHANNELS": [
+        16,
+        32
+    ],
+    "KERNELS": [
+        5,
+        3
+    ],
+    "STRIDES": [
+        2,
+        1
+    ],
+    "PADS": [
+        2,
+        1
+    ],
+    "HIDDEN": 64,
+    "SHAPE_MAP": {
+        "DetectionCNN": "2D",
+        "ClassificationCNN": "2D",
+        "WaveformClassificationCNN": "1D",
+        "ClassificationLSTM": "1D",
+        "IterativeMiniRocket": "1D",
+        "InceptionTime": "1D",
+        "TCN": "1D",
+        "BiGRU": "1D"
+    },
+    "USE_MEL": true
+}

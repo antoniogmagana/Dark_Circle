@@ -1,0 +1,16 @@
+Run Directory: 20260329_121810
+Mode: category | Model: TCN
+----------------------------------------
+Accuracy: 0.6359
+MCC: 0.3921
+ROC-AUC: 0.8394
+Precision: 0.6524
+Recall: 0.6359
+F1-Score: 0.6059
+Latency: 0.3388 ms/sample
+
+Per-Class Accuracy:
+  pedestrian (0): 0.1578
+  light (1): 0.1568
+  sport (2): 0.8397
+  utility (3): 0.5970

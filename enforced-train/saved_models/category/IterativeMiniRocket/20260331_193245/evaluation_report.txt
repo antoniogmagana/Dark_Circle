@@ -1,0 +1,16 @@
+Run Directory: 20260331_193245
+Mode: category | Model: IterativeMiniRocket
+----------------------------------------
+Accuracy: 0.4037
+MCC: 0.0439
+ROC-AUC: 0.6855
+Precision: 0.3645
+Recall: 0.4037
+F1-Score: 0.3076
+Latency: 0.7749 ms/sample
+
+Per-Class Accuracy:
+  pedestrian (0): 0.3223
+  light (1): 0.0000
+  sport (2): 0.7996
+  utility (3): 0.0387

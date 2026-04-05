@@ -1,0 +1,2 @@
+Epoch,Train_Loss,Train_Acc,Val_Loss,Val_Acc,Val_Precision,Val_Recall,Val_F1,Val_Acc_bicycle,Val_Acc_polaris,Val_Acc_pickup,Val_Acc_gle350,Val_Acc_scooter,Val_Acc_cx30,Val_Acc_ev,Val_Acc_motorcycle,Val_Acc_mustang,Val_Acc_forester,Val_Acc_background,Val_Acc_walk,Val_Acc_miata,Val_Acc_warhog
+1,1.8453,0.3067,2.0072,0.3266,0.2972,0.3266,0.2737,0.0282,0.0000,0.0030,0.1175,0.0000,0.4926,0.0100,0.5803,0.6090,0.4534,0.5928,0.0000,0.1931,0.0000

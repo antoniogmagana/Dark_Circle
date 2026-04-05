@@ -1,0 +1,16 @@
+Run Directory: 20260329_080109
+Mode: category | Model: InceptionTime
+----------------------------------------
+Accuracy: 0.7314
+MCC: 0.5703
+ROC-AUC: 0.9264
+Precision: 0.7540
+Recall: 0.7314
+F1-Score: 0.7154
+Latency: 0.1510 ms/sample
+
+Per-Class Accuracy:
+  pedestrian (0): 0.6199
+  light (1): 0.1886
+  sport (2): 0.7658
+  utility (3): 0.8454

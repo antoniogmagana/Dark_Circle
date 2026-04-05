@@ -1,0 +1,52 @@
+============================================================
+ENSEMBLE EVALUATION REPORT
+Mode: category | Timestamp: 2026-03-29 17:38:16
+============================================================
+
+ENSEMBLE COMPOSITION
+------------------------------------------------------------
+Model                          Run ID                   F1   Weight
+------------------------------------------------------------
+InceptionTime                  20260329_120048      0.7225   0.1355
+ClassificationCNN              20260329_073503      0.7212   0.1353
+ClassificationLSTM             20260329_074336      0.7067   0.1326
+BiGRU                          20260329_132254      0.7033   0.1319
+WaveformClassificationCNN      20260329_102354      0.6857   0.1286
+DetectionCNN                   20260329_100136      0.6722   0.1261
+TCN                            20260329_121810      0.6059   0.1136
+IterativeMiniRocket            20260329_104952      0.5139   0.0964
+
+INDIVIDUAL MODEL TEST METRICS
+------------------------------------------------------------
+Model                             Acc      F1     MCC     AUC
+------------------------------------------------------------
+InceptionTime                  0.7392  0.7225  0.5785  0.9290
+ClassificationCNN              0.7328  0.7212  0.5624  0.9214
+ClassificationLSTM             0.7189  0.7067  0.5444  0.9156
+BiGRU                          0.7147  0.7033  0.5381  0.9095
+WaveformClassificationCNN      0.6956  0.6857  0.5071  0.8985
+DetectionCNN                   0.6840  0.6722  0.4854  0.8941
+TCN                            0.6359  0.6059  0.3921  0.8394
+IterativeMiniRocket            0.5423  0.5139  0.2437  0.7664
+
+ENSEMBLE METRICS (Pooled Confidence)
+------------------------------------------------------------
+Accuracy:    0.7646
+MCC:         0.6152
+Precision:   0.7822
+Recall:      0.7646
+F1-Score:    0.7503
+ROC-AUC:     0.9413
+
+Per-Class Accuracy:
+  pedestrian (0): 0.4570
+  light (1): 0.3007
+  sport (2): 0.8655
+  utility (3): 0.8161
+
+ENSEMBLE LIFT
+------------------------------------------------------------
+Best Individual:  InceptionTime (F1: 0.7225)
+Ensemble F1:      0.7503
+Lift:             +0.0279 (+3.86%)
+============================================================

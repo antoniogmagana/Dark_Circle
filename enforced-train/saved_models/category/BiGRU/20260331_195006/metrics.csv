@@ -1,0 +1,2 @@
+Epoch,Train_Loss,Train_Acc,Val_Loss,Val_Acc,Val_Precision,Val_Recall,Val_F1,Val_Acc_pedestrian,Val_Acc_light,Val_Acc_sport,Val_Acc_utility
+1,0.7838,0.5527,1.0565,0.5714,0.5465,0.5714,0.5303,0.0006,0.1510,0.7256,0.6252

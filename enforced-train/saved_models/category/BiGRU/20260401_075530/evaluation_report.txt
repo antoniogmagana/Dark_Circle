@@ -1,0 +1,16 @@
+Run Directory: 20260401_075530
+Mode: category | Model: BiGRU
+----------------------------------------
+Accuracy: 0.6556
+MCC: 0.4595
+ROC-AUC: 0.8777
+Precision: 0.6877
+Recall: 0.6556
+F1-Score: 0.6452
+Latency: 0.0646 ms/sample
+
+Per-Class Accuracy:
+  pedestrian (0): 0.5436
+  light (1): 0.1974
+  sport (2): 0.6728
+  utility (3): 0.7706

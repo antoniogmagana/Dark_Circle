@@ -1,0 +1,26 @@
+Run Directory: 20260331_202118
+Mode: instance | Model: TCN
+----------------------------------------
+Accuracy: 0.2883
+MCC: 0.1766
+ROC-AUC: 0.7288
+Precision: 0.3528
+Recall: 0.2883
+F1-Score: 0.2394
+Latency: 0.2402 ms/sample
+
+Per-Class Accuracy:
+  bicycle (0): 0.4150
+  polaris (1): 0.0000
+  pickup (2): 0.0520
+  gle350 (3): 0.0928
+  scooter (4): 0.0000
+  cx30 (5): 0.4183
+  ev (6): 0.0019
+  motorcycle (7): 0.4663
+  mustang (8): 0.6292
+  forester (9): 0.0625
+  background (10): 0.8406
+  walk (11): 0.0000
+  miata (12): 0.0703
+  warhog (13): 0.0000
