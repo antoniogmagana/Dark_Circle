@@ -190,8 +190,10 @@ def train_crl_phase(
         model.train()
         epoch_loss = epoch_recon = epoch_kl_veh = epoch_kl_env = epoch_slow = 0.0
 
-        # KL annealing: ramp beta from 0 → beta_kl over first 10 epochs
-        beta_kl_annealed = min(1.0, epoch / 10.0) * beta_kl
+        # KL annealing: ramp beta from 0.1 → beta_kl over first 10 epochs.
+        # Never drops to 0 — ensures KL always regularises logvar in both
+        # directions, preventing both collapse and explosion.
+        beta_kl_annealed = min(1.0, 0.1 + epoch / 10.0) * beta_kl
 
         for batch_idx, batch in enumerate(train_loader):
             batch_t, batch_next, avail, domain_ids, _, _ = batch

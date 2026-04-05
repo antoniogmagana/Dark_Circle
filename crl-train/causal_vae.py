@@ -143,9 +143,11 @@ class MultiModalCausalVAE(nn.Module):
             )
             for mod in MODALITIES
         })
+        # Decoders take only z_veh — reconstruction loss must flow through
+        # z_veh, preventing the decoder from using z_env as a shortcut.
         self.decoders = nn.ModuleDict({
             mod: ModalityDecoder(
-                z_total=self.z_total,
+                z_total=self.z_veh_dim,
                 out_channels=MODALITY_CHANNELS[mod],
                 out_len=out_len,
             )
@@ -202,7 +204,7 @@ class MultiModalCausalVAE(nn.Module):
         pooled = pooled + self.avail_embed(avail_idx)        # [B, feat_dim]
 
         mu     = self.fc_mu(pooled)
-        logvar = self.fc_logvar(pooled).clamp(min=-4.0)
+        logvar = self.fc_logvar(pooled).clamp(min=-4.0, max=4.0)
         return mu, logvar
 
     def encode(
@@ -240,16 +242,16 @@ class MultiModalCausalVAE(nn.Module):
     # Decoding
     # ------------------------------------------------------------------
 
-    def decode(self, z: torch.Tensor, availability: torch.Tensor) -> dict:
+    def decode(self, z_veh: torch.Tensor, availability: torch.Tensor) -> dict:
         """
-        Decode z for all available modalities.
+        Decode z_veh for all available modalities.
 
         Returns {mod: reconstructed Tensor [B, C, T]} for present modalities.
         """
         recons = {}
         for i, mod in enumerate(MODALITIES):
             if availability[:, i].any():
-                recons[mod] = self.decoders[mod](z)
+                recons[mod] = self.decoders[mod](z_veh)
         return recons
 
     # ------------------------------------------------------------------
@@ -279,14 +281,9 @@ class MultiModalCausalVAE(nn.Module):
         mu_t, logvar_t = self._fuse(batch_t, availability)
         z_t = self.reparameterize(mu_t, logvar_t)
 
-        # Decode t — stop-gradient on z_env so reconstruction loss flows
-        # through z_veh only, preventing z_veh posterior collapse.
-        z_decode = torch.cat(
-            [z_t[:, :self.z_veh_dim],
-             z_t[:, self.z_veh_dim:].detach()],
-            dim=1,
-        )
-        x_recon_t = self.decode(z_decode, availability)
+        # Decode from z_veh only — z_env is excluded from reconstruction
+        # so the decoder cannot use it as a shortcut.
+        x_recon_t = self.decode(z_t[:, :self.z_veh_dim], availability)
 
         # Encode t+1 (mean only — used for slow loss on z_env)
         mu_next, _ = self._fuse(batch_next, availability)
