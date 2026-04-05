@@ -10,6 +10,11 @@ from sklearn.metrics import (
     f1_score,
     confusion_matrix,
 )
+from data_generator import augment_batch
+from dataset import VehicleDataset
+from models import build_model
+from preprocess import preprocess_for_training
+import config
 
 
 class EpochShuffleSampler(Sampler):
@@ -34,16 +39,7 @@ class EpochShuffleSampler(Sampler):
         return len(self.dataset)
 
 
-from data_generator import augment_batch
-from dataset import VehicleDataset
-from models import build_model
-from preprocess import preprocess_for_training
-import config
-
-
-def train_one_epoch(
-    model, loader, optimizer, criterion, device, config, epoch
-):
+def train_one_epoch(model, loader, optimizer, criterion, device, config, epoch):
     model.train()
     total_loss = 0
     total_correct = 0
@@ -105,21 +101,17 @@ def evaluate(model, loader, criterion, device, config):
 
     # Calculate global metrics
     precision = precision_score(
-        all_labels, all_preds, average='weighted', zero_division=0
+        all_labels, all_preds, average="weighted", zero_division=0
     )
-    recall = recall_score(
-        all_labels, all_preds, average='weighted', zero_division=0
-    )
-    f1 = f1_score(
-        all_labels, all_preds, average='weighted', zero_division=0
-    )
+    recall = recall_score(all_labels, all_preds, average="weighted", zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
     accuracy = (np.array(all_preds) == np.array(all_labels)).mean()
 
     # Calculate per-class accuracy safely using the confusion matrix
     target_labels = list(range(config.NUM_CLASSES))
     cm = confusion_matrix(all_labels, all_preds, labels=target_labels)
 
-    with np.errstate(divide='ignore', invalid='ignore'):
+    with np.errstate(divide="ignore", invalid="ignore"):
         per_class_acc = np.true_divide(cm.diagonal(), cm.sum(axis=1))
         per_class_acc[np.isnan(per_class_acc)] = 0.0
 
@@ -168,10 +160,13 @@ def main():
     # ------------------------------------------------------------
     # Save Metadata (Now storing dicts)
     # ------------------------------------------------------------
-    torch.save({
-        "model_name": config.MODEL_NAME,
-        "use_mel": config.USE_MEL,
-    }, config.META_SAVE_PATH)
+    torch.save(
+        {
+            "model_name": config.MODEL_NAME,
+            "use_mel": config.USE_MEL,
+        },
+        config.META_SAVE_PATH,
+    )
 
     print(f"Saved model metadata to: {config.META_SAVE_PATH}")
 
@@ -192,7 +187,7 @@ def main():
 
             x_dummy = preprocess_for_training(x_dummy, config=config)
 
-            if hasattr(model, 'fit_extractor'):
+            if hasattr(model, "fit_extractor"):
                 model.fit_extractor(x_dummy[:32])
                 model(x_dummy[:32])
             else:
@@ -213,7 +208,11 @@ def main():
     optimizer = model.get_optimizer()
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
-        mode="min" if getattr(config, "BEST_MODEL_METRIC", "val_acc") == "val_loss" else "max",
+        mode=(
+            "min"
+            if getattr(config, "BEST_MODEL_METRIC", "val_acc") == "val_loss"
+            else "max"
+        ),
         factor=0.5,
         patience=3,
     )
@@ -224,7 +223,9 @@ def main():
     if config.TRAINING_MODE == "detection":
         class_names = ["Val_Acc_background", "Val_Acc_vehicle"]
     elif config.TRAINING_MODE == "category":
-        class_names = [f"Val_Acc_{config.CLASS_MAP[i]}" for i in sorted(config.CLASS_MAP.keys())]
+        class_names = [
+            f"Val_Acc_{config.CLASS_MAP[i]}" for i in sorted(config.CLASS_MAP.keys())
+        ]
     elif config.TRAINING_MODE == "instance":
         inv_map = {v: k for k, v in config.INSTANCE_TO_CLASS.items()}
         class_names = [f"Val_Acc_{inv_map[i]}" for i in range(config.NUM_CLASSES)]
@@ -232,11 +233,17 @@ def main():
         class_names = [f"Val_Acc_Class_{i}" for i in range(config.NUM_CLASSES)]
 
     headers = [
-        "Epoch", "Train_Loss", "Train_Acc",
-        "Val_Loss", "Val_Acc", "Val_Precision", "Val_Recall", "Val_F1"
+        "Epoch",
+        "Train_Loss",
+        "Train_Acc",
+        "Val_Loss",
+        "Val_Acc",
+        "Val_Precision",
+        "Val_Recall",
+        "Val_F1",
     ] + class_names
 
-    with open(config.METRICS_LOG_PATH, mode='w', newline='') as f:
+    with open(config.METRICS_LOG_PATH, mode="w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(headers)
 
@@ -246,7 +253,7 @@ def main():
     target_metric_name = getattr(config, "BEST_MODEL_METRIC", "val_acc")
 
     if target_metric_name == "val_loss":
-        best_metric_value = float('inf')
+        best_metric_value = float("inf")
     else:
         best_metric_value = 0.0
     best_val_f1 = 0.0
@@ -275,13 +282,17 @@ def main():
 
         class_values = [f"{per_class_acc[i]:.4f}" for i in range(config.NUM_CLASSES)]
 
-        with open(config.METRICS_LOG_PATH, mode='a', newline='') as f:
+        with open(config.METRICS_LOG_PATH, mode="a", newline="") as f:
             writer = csv.writer(f)
             row_data = [
                 epoch,
-                f"{train_loss:.4f}", f"{train_acc:.4f}",
-                f"{val_loss:.4f}", f"{val_acc:.4f}",
-                f"{val_prec:.4f}", f"{val_rec:.4f}", f"{val_f1:.4f}"
+                f"{train_loss:.4f}",
+                f"{train_acc:.4f}",
+                f"{val_loss:.4f}",
+                f"{val_acc:.4f}",
+                f"{val_prec:.4f}",
+                f"{val_rec:.4f}",
+                f"{val_f1:.4f}",
             ] + class_values
             writer.writerow(row_data)
 
@@ -290,7 +301,7 @@ def main():
             "val_acc": val_acc,
             "val_f1": val_f1,
             "val_precision": val_prec,
-            "val_recall": val_rec
+            "val_recall": val_rec,
         }
 
         current_metric_value = metrics_dict.get(target_metric_name, val_acc)

@@ -427,6 +427,63 @@ def load_m3nvc_dataset(conn, cursor, root_path):
 
 
 # ==========================================
+# Parquet Reload
+# ==========================================
+
+
+def load_from_parquet(conn, cursor, parquet_dir):
+    """
+    Rebuilds the database from flat parquet files produced by file_parse.py.
+
+    File naming convention: {dataset}_{signal}_{vehicle}_{sensor}.parquet
+    The filename is used directly as the table name.
+    unix_timestamp is dropped before COPY (not a DB column).
+    scene_ids must be pre-populated in the DB before loading m3nvc files.
+    """
+    schema_map = {
+        ("iobt",  "audio"):   "standard",
+        ("focal", "audio"):   "standard",
+        ("iobt",  "seismic"): "standard",
+        ("focal", "seismic"): "standard",
+        ("focal", "accel"):   "triaxial",
+        ("m3nvc", "audio"):   "m3nvc_audio",
+        ("m3nvc", "seismic"): "m3nvc_seismic",
+    }
+
+    for p in sorted(Path(parquet_dir).glob("*.parquet")):
+        table_name = p.stem  # filename without extension = table name
+        parts = table_name.split("_")
+        if len(parts) < 3:
+            print(f"Skipping {p.name}: cannot parse dataset/signal from name")
+            continue
+
+        dataset = parts[0]
+        signal = parts[1]
+        schema_type = schema_map.get((dataset, signal))
+        if not schema_type:
+            print(f"Skipping {p.name}: unknown dataset/signal combination")
+            continue
+
+        # Everything after "dataset_signal_" is "vehicle_sensor"
+        # Sensor is always the last underscore-delimited segment (e.g. rs1, rs2)
+        remainder = "_".join(parts[2:])
+        *vehicle_parts, sensor = remainder.rsplit("_", 1)
+        vehicle = "_".join(vehicle_parts)
+
+        df = pd.read_parquet(p)
+        df = df.drop(columns=["unix_timestamp"], errors="ignore")
+
+        created = create_dynamic_table(
+            conn, cursor, dataset, signal, vehicle, sensor, schema_type
+        )
+        if not created:
+            continue
+
+        copy_to_postgres(conn, cursor, df, created, tuple(df.columns))
+        print(f"  Loaded {len(df):,} rows → {created}")
+
+
+# ==========================================
 # Main Execution
 # ==========================================
 
