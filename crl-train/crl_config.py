@@ -114,3 +114,8 @@ NUM_WORKERS         = 4
 EARLY_STOP_PATIENCE = 8
 LR_FACTOR           = 0.5
 LR_PATIENCE         = 3
+
+# VICReg weights for z_veh objective
+LAMBDA_VIC_INV = 25.0  # invariance: same vehicle, adjacent windows -> same z_veh
+LAMBDA_VIC_VAR = 25.0  # variance: per-dim std > 1 across batch
+LAMBDA_VIC_COV = 1.0   # covariance: decorrelate z_veh dimensions

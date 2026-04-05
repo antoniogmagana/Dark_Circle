@@ -2,9 +2,10 @@
 Two-phase CRL training pipeline.
 
 Phase 1 (--phase crl):
-  Trains MultiModalCausalVAE with self-supervised objectives only
-  (reconstruction + KL_veh + KL_env + temporal slowness).
-  No class labels used. Best checkpoint saved by val reconstruction loss.
+  Trains MultiModalCausalVAE with self-supervised objectives only.
+  z_veh is trained with VICReg (invariance + variance + covariance).
+  z_env is trained with KL divergence (iVAE prior) + temporal slowness.
+  No class labels used. Best checkpoint saved by val loss.
 
 Phase 2 (--phase downstream):
   Loads frozen CRL encoder; trains DetectionHead (binary) and
@@ -26,11 +27,11 @@ from torch.utils.data import DataLoader
 from causal_dataset import MultiModalCausalDataset, collate_multimodal
 from causal_vae import MultiModalCausalVAE
 from crl_config import (
-    MODALITIES,
     Z_VEH_DIM, Z_ENV_DIM, MODALITY_FEATURE_DIM,
     BATCH_SIZE, CRL_EPOCHS, DOWNSTREAM_EPOCHS, LEARNING_RATE,
     LAMBDA_SLOW, BETA_KL, NUM_WORKERS, EARLY_STOP_PATIENCE,
     LR_FACTOR, LR_PATIENCE, CLASS_MAP,
+    LAMBDA_VIC_INV, LAMBDA_VIC_VAR, LAMBDA_VIC_COV,
 )
 
 
@@ -74,70 +75,83 @@ class ClassificationHead(nn.Module):
 # CRL loss
 # ---------------------------------------------------------------------------
 
-def crl_loss(out: dict, batch_t: dict, availability: torch.Tensor,
-             beta_kl: float, lambda_slow: float) -> tuple:
+def _vicreg_loss(
+    z_t: torch.Tensor,
+    z_next: torch.Tensor,
+    lambda_inv: float,
+    lambda_var: float,
+    lambda_cov: float,
+) -> tuple:
+    """
+    VICReg objective for z_veh.
+
+    z_t, z_next: [B, D] deterministic vehicle embeddings for window t and t+1.
+
+    Returns (vic_total, inv, var, cov).
+    """
+    B, D = z_t.shape
+
+    # Invariance: same vehicle, adjacent windows should map to same z_veh
+    inv = F.mse_loss(z_t, z_next)
+
+    # Variance: per-dimension std across batch should stay above 1
+    # Operates on both views independently
+    def _var_loss(z):
+        std = z.std(dim=0)  # [D]
+        return F.relu(1.0 - std).mean()
+
+    var = _var_loss(z_t) + _var_loss(z_next)
+
+    # Covariance: off-diagonal entries of cov(z) should be ~0
+    def _cov_loss(z):
+        z_centered = z - z.mean(dim=0)
+        cov = (z_centered.T @ z_centered) / (B - 1)  # [D, D]
+        off_diag = cov.pow(2).sum() - cov.diagonal().pow(2).sum()
+        return off_diag / D
+
+    cov = _cov_loss(z_t) + _cov_loss(z_next)
+
+    total = lambda_inv * inv + lambda_var * var + lambda_cov * cov
+    return total, inv, var, cov
+
+
+def crl_loss(out: dict, beta_kl: float, lambda_slow: float) -> tuple:
     """
     Compute CRL objective.
 
-    Returns (total_loss, recon_loss, kl_veh_loss, kl_env_loss, slow_loss).
+    z_veh: VICReg (invariance + variance + covariance) — no KL, no recon.
+    z_env: KL divergence against iVAE prior + temporal slowness.
+
+    Returns (total, vic_inv, vic_var, vic_cov, kl_env, slow).
     """
-    mu_t     = out["mu_t"]
-    logvar_t = out["logvar_t"]
-    z_t      = out["z_t"]
-    B        = mu_t.size(0)
-
-    # Split latent into vehicle and environment parts
-    z_veh_dim = mu_t.size(1) - out["prior_mu_env"].size(1)
-    mu_veh, mu_env         = mu_t[:, :z_veh_dim],     mu_t[:, z_veh_dim:]
-    logvar_veh, logvar_env = logvar_t[:, :z_veh_dim], logvar_t[:, z_veh_dim:]
-
-    # 1. Reconstruction loss — averaged over available modalities
-    recon_total = torch.tensor(0.0, device=mu_t.device)
-    n_present   = 0
-    for i, mod in enumerate(MODALITIES):
-        if mod not in out["x_recon_t"]:
-            continue
-        x_orig = batch_t.get(mod)
-        if x_orig is None:
-            continue
-        mask   = availability[:, i].float()
-        n_mods = mask.sum().item()
-        if n_mods == 0:
-            continue
-        recon_mod = (
-            F.mse_loss(out["x_recon_t"][mod], x_orig, reduction="none")
-            .mean(dim=(1, 2))                   # [B]
-        )
-        recon_total = recon_total + (recon_mod * mask).sum() / n_mods
-        n_present   += 1
-    if n_present > 0:
-        recon_total = recon_total / n_present
-
-    # 2. KL divergence — vehicle (standard normal prior)
-    # Free-bits: clamp per-dimension KL to a minimum to prevent all
-    # z_veh dimensions from simultaneously collapsing to the prior.
-    FREE_BITS = 0.5  # nats per dimension
-    kl_veh_per_dim = -0.5 * (
-        1 + logvar_veh - mu_veh.pow(2) - logvar_veh.exp()
-    )  # [B, z_veh_dim]
-    kl_veh = kl_veh_per_dim.clamp(min=FREE_BITS).sum() / B
-
-    # 3. KL divergence — environment (sensor-domain conditional prior)
-    prior_mu     = out["prior_mu_env"]
+    z_veh_t    = out["z_veh_t"]
+    z_veh_next = out["z_veh_next"]
+    mu_env     = out["mu_env_t"]
+    logvar_env = out["logvar_env_t"]
+    z_env_t    = out["z_env_t"]
+    z_env_next = out["z_env_next"]
+    prior_mu   = out["prior_mu_env"]
     prior_logvar = out["prior_logvar_env"]
-    logvar_diff  = prior_logvar - logvar_env
+    B = z_veh_t.size(0)
+
+    # 1. VICReg on z_veh
+    vic_total, vic_inv, vic_var, vic_cov = _vicreg_loss(
+        z_veh_t, z_veh_next,
+        LAMBDA_VIC_INV, LAMBDA_VIC_VAR, LAMBDA_VIC_COV,
+    )
+
+    # 2. KL divergence — environment (sensor-domain conditional prior)
+    logvar_diff = prior_logvar - logvar_env
     kl_env = 0.5 * torch.sum(
         logvar_diff - 1
         + (logvar_env.exp() + (mu_env - prior_mu).pow(2)) / prior_logvar.exp()
     ) / B
 
-    # 4. Temporal slow loss — z_env only (not z_veh)
-    z_env_t    = z_t[:, z_veh_dim:]
-    z_env_next = out["z_env_next"]
-    slow       = F.mse_loss(z_env_t, z_env_next) * lambda_slow
+    # 3. Temporal slow loss — z_env only
+    slow = F.mse_loss(z_env_t, z_env_next) * lambda_slow
 
-    total = recon_total + beta_kl * (kl_veh + kl_env) + slow
-    return total, recon_total, kl_veh, kl_env, slow
+    total = vic_total + beta_kl * kl_env + slow
+    return total, vic_inv, vic_var, vic_cov, kl_env, slow
 
 
 # ---------------------------------------------------------------------------
@@ -181,46 +195,50 @@ def train_crl_phase(
 
     metrics_path = save_dir / "crl_metrics.csv"
     with open(metrics_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["epoch", "train_loss", "val_loss",
-                          "recon", "kl_veh", "kl_env", "slow"])
+        csv.writer(f).writerow([
+            "epoch", "train_loss", "val_loss",
+            "vic_inv", "vic_var", "vic_cov", "kl_env", "slow",
+        ])
 
     print("\n=== Phase 1: CRL Pre-training ===")
     for epoch in range(epochs):
         model.train()
-        epoch_loss = epoch_recon = epoch_kl_veh = epoch_kl_env = epoch_slow = 0.0
+        epoch_loss = epoch_inv = epoch_var = epoch_cov = 0.0
+        epoch_kl_env = epoch_slow = 0.0
 
-        # KL annealing: ramp beta from 0.1 → beta_kl over first 10 epochs.
-        # Never drops to 0 — ensures KL always regularises logvar in both
-        # directions, preventing both collapse and explosion.
+        # KL annealing on z_env: ramp from 0.1 to 1.0 over first 10 epochs
         beta_kl_annealed = min(1.0, 0.1 + epoch / 10.0) * beta_kl
 
         for batch_idx, batch in enumerate(train_loader):
             batch_t, batch_next, avail, domain_ids, _, _ = batch
 
-            batch_t    = {m: v.to(device) if v is not None else None for m, v in batch_t.items()}
-            batch_next = {m: v.to(device) if v is not None else None for m, v in batch_next.items()}
+            batch_t    = {m: v.to(device) if v is not None else None
+                          for m, v in batch_t.items()}
+            batch_next = {m: v.to(device) if v is not None else None
+                          for m, v in batch_next.items()}
             avail      = avail.to(device)
             domain_ids = domain_ids.to(device)
 
             optimizer.zero_grad()
             out = model(batch_t, batch_next, avail, domain_ids)
-            loss, recon, kl_v, kl_e, slow = crl_loss(
-                out, batch_t, avail, beta_kl_annealed, lambda_slow
+            loss, vic_inv, vic_var, vic_cov, kl_e, slow = crl_loss(
+                out, beta_kl_annealed, lambda_slow
             )
             loss.backward()
             optimizer.step()
 
             epoch_loss    += loss.item()
-            epoch_recon   += recon.item()
-            epoch_kl_veh  += kl_v.item()
+            epoch_inv     += vic_inv.item()
+            epoch_var     += vic_var.item()
+            epoch_cov     += vic_cov.item()
             epoch_kl_env  += kl_e.item()
             epoch_slow    += slow.item()
 
             if batch_idx % 50 == 0:
                 print(f"  Epoch {epoch} | Batch {batch_idx} | "
-                      f"Recon: {recon:.3f} | KL_veh: {kl_v:.3f} | "
-                      f"KL_env: {kl_e:.3f} | Slow: {slow:.3f}")
+                      f"Inv: {vic_inv:.3f} | Var: {vic_var:.3f} | "
+                      f"Cov: {vic_cov:.3f} | KL_env: {kl_e:.3f} | "
+                      f"Slow: {slow:.3f}")
 
         n = len(train_loader)
         train_avg = epoch_loss / n
@@ -234,7 +252,7 @@ def train_crl_phase(
         with open(metrics_path, "a", newline="") as f:
             csv.writer(f).writerow([
                 epoch, train_avg, val_loss,
-                epoch_recon / n, epoch_kl_veh / n,
+                epoch_inv / n, epoch_var / n, epoch_cov / n,
                 epoch_kl_env / n, epoch_slow / n,
             ])
 
@@ -269,7 +287,7 @@ def _eval_crl(
         avail      = avail.to(device)
         domain_ids = domain_ids.to(device)
         out  = model(batch_t, batch_next, avail, domain_ids)
-        loss, *_ = crl_loss(out, batch_t, avail, beta_kl, lambda_slow)
+        loss, *_ = crl_loss(out, beta_kl, lambda_slow)
         total += loss.item()
     model.train()
     return total / len(loader)
