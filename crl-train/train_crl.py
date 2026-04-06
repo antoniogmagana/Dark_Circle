@@ -93,6 +93,7 @@ class ClassificationHead(nn.Module):
 def _vicreg_loss(
     z_t: torch.Tensor,
     z_next: torch.Tensor,
+    mask: torch.Tensor,
     lambda_inv: float,
     lambda_var: float,
     lambda_cov: float,
@@ -109,28 +110,35 @@ def _vicreg_loss(
     # Invariance: same vehicle, adjacent windows should map to same z_veh
     inv = F.mse_loss(z_t, z_next)
 
-    # Variance: per-dimension std across batch should stay above 1
-    # Operates on both views independently
-    def _var_loss(z):
-        std = z.std(dim=0)  # [D]
-        return F.relu(1.0 - std).mean()
+    # Apply Variance and Covariance strictly to vehicle representations
+    if mask.sum() > 1:
+        z_t_m = z_t[mask]
+        z_next_m = z_next[mask]
 
-    var = _var_loss(z_t) + _var_loss(z_next)
+        def _var_loss(z):
+            std = z.std(dim=0)  # [D]
+            return F.relu(1.0 - std).mean()
 
-    # Covariance: off-diagonal entries of cov(z) should be ~0
-    def _cov_loss(z):
-        z_centered = z - z.mean(dim=0)
-        cov = (z_centered.T @ z_centered) / max(B - 1, 1)  # [D, D]
-        off_diag = cov.pow(2).sum() - cov.diagonal().pow(2).sum()
-        return off_diag / D
+        var = _var_loss(z_t_m) + _var_loss(z_next_m)
 
-    cov = _cov_loss(z_t) + _cov_loss(z_next)
+        def _cov_loss(z):
+            z_centered = z - z.mean(dim=0)
+            cov = (z_centered.T @ z_centered) / (z.shape[0] - 1)  # [D, D]
+            off_diag = cov.pow(2).sum() - cov.diagonal().pow(2).sum()
+            return off_diag / D
+
+        cov = _cov_loss(z_t_m) + _cov_loss(z_next_m)
+    else:
+        var = torch.tensor(0.0, device=z_t.device)
+        cov = torch.tensor(0.0, device=z_t.device)
 
     total = lambda_inv * inv + lambda_var * var + lambda_cov * cov
     return total, inv, var, cov
 
 
-def crl_loss(out: dict, beta_kl: float, lambda_slow: float) -> tuple:
+def crl_loss(
+    out: dict, det_labels: torch.Tensor, beta_kl: float, lambda_slow: float
+) -> tuple:
     """
     Compute CRL objective.
 
@@ -149,10 +157,13 @@ def crl_loss(out: dict, beta_kl: float, lambda_slow: float) -> tuple:
     prior_logvar = out["prior_logvar_env"]
     B = z_veh_t.size(0)
 
+    mask = det_labels == 1
+
     # 1. VICReg on z_veh
     vic_total, vic_inv, vic_var, vic_cov = _vicreg_loss(
         z_veh_t,
         z_veh_next,
+        mask,
         LAMBDA_VIC_INV,
         LAMBDA_VIC_VAR,
         LAMBDA_VIC_COV,
@@ -243,7 +254,7 @@ def train_crl_phase(
         beta_kl_annealed = min(1.0, 0.1 + epoch / 10.0) * beta_kl
 
         for batch_idx, batch in enumerate(train_loader):
-            batch_t, batch_next, avail, domain_ids, _, _ = batch
+            batch_t, batch_next, avail, domain_ids, _, det_labels = batch
 
             batch_t = {
                 m: v.to(device) if v is not None else None for m, v in batch_t.items()
@@ -254,11 +265,20 @@ def train_crl_phase(
             }
             avail = avail.to(device)
             domain_ids = domain_ids.to(device)
+            det_labels = det_labels.to(device)
+
+            # Domain Dropout: Randomly assign 5% of training samples to the __UNKNOWN__ (0) domain.
+            # This forces the model to learn a broad, generalized prior for unseen environments,
+            # preventing massive KL divergence spikes when evaluating zero-shot validation domains.
+            drop_mask = torch.rand(domain_ids.shape, device=device) < 0.05
+            domain_ids = torch.where(
+                drop_mask, torch.zeros_like(domain_ids), domain_ids
+            )
 
             optimizer.zero_grad()
             out = model(batch_t, batch_next, avail, domain_ids)
             loss, vic_inv, vic_var, vic_cov, kl_e, slow = crl_loss(
-                out, beta_kl_annealed, lambda_slow
+                out, det_labels, beta_kl_annealed, lambda_slow
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -327,7 +347,7 @@ def _eval_crl(
     model.eval()
     total = 0.0
     for batch in loader:
-        batch_t, batch_next, avail, domain_ids, _, _ = batch
+        batch_t, batch_next, avail, domain_ids, _, det_labels = batch
         batch_t = {
             m: v.to(device) if v is not None else None for m, v in batch_t.items()
         }
@@ -336,8 +356,9 @@ def _eval_crl(
         }
         avail = avail.to(device)
         domain_ids = domain_ids.to(device)
+        det_labels = det_labels.to(device)
         out = model(batch_t, batch_next, avail, domain_ids)
-        loss, *_ = crl_loss(out, beta_kl, lambda_slow)
+        loss, *_ = crl_loss(out, det_labels, beta_kl, lambda_slow)
         total += loss.item()
     model.train()
     return total / len(loader)
@@ -601,6 +622,7 @@ def build_loaders(
         num_workers=num_workers,
         collate_fn=collate_multimodal,
         pin_memory=True,
+        drop_last=True,
     )
     return train_loader, val_loader, train_ds.num_sensor_domains, train_ds._domain_to_id
 
@@ -620,7 +642,7 @@ def main():
             args.batch_size,
             args.num_workers,
             args.modalities,
-            filter_present=True,
+            filter_present=False,
             domain_map=None,
         )
         with open(meta_path, "w") as f:
