@@ -111,8 +111,8 @@ def _vicreg_loss(
     inv = F.mse_loss(z_t, z_next)
 
     # Apply Variance and Covariance strictly to vehicle representations
-    # Require > 4 samples to compute stable variance and prevent covariance explosion
-    if mask.sum() > 4:
+        # Require > Z_VEH_DIM samples to compute stable variance and prevent covariance explosion
+        if mask.sum() > Z_VEH_DIM:
         z_t_m = z_t[mask]
         z_next_m = z_next[mask]
 
@@ -318,10 +318,11 @@ def train_crl_phase(
         train_avg = epoch_loss / n
 
         # Validation
-        val_loss = _eval_crl(model, val_loader, device, beta_kl, lambda_slow)
+        val_loss, val_inv, val_var, val_cov, val_kl, val_slow = _eval_crl(model, val_loader, device, beta_kl, lambda_slow)
         scheduler.step(val_loss)
 
         print(f"==== Epoch {epoch} | Train: {train_avg:.4f} | Val: {val_loss:.4f} ====")
+        print(f"     Val Components   | Inv: {val_inv:.3f} | Var: {val_var:.3f} | Cov: {val_cov:.3f} | KL: {val_kl:.3f} | Slow: {val_slow:.3f}")
 
         with open(metrics_path, "a", newline="") as f:
             csv.writer(f).writerow(
@@ -358,9 +359,9 @@ def _eval_crl(
     device: torch.device,
     beta_kl: float,
     lambda_slow: float,
-) -> float:
+) -> tuple:
     model.eval()
-    total = 0.0
+    total_loss = total_inv = total_var = total_cov = total_kl = total_slow = 0.0
     for batch in loader:
         batch_t, batch_next, avail, domain_ids, _, det_labels, int_t, int_next = batch
         batch_t = {
@@ -375,10 +376,16 @@ def _eval_crl(
         int_t = int_t.to(device)
         int_next = int_next.to(device)
         out = model(batch_t, batch_next, avail, domain_ids, int_t)
-        loss, *_ = crl_loss(out, det_labels, int_t, int_next, beta_kl, lambda_slow)
-        total += loss.item()
+        loss, vic_inv, vic_var, vic_cov, kl_e, slow = crl_loss(out, det_labels, int_t, int_next, beta_kl, lambda_slow)
+        total_loss += loss.item()
+        total_inv += vic_inv.item()
+        total_var += vic_var.item()
+        total_cov += vic_cov.item()
+        total_kl += kl_e.item()
+        total_slow += slow.item()
     model.train()
-    return total / len(loader)
+    n = len(loader)
+    return total_loss / n, total_inv / n, total_var / n, total_cov / n, total_kl / n, total_slow / n
 
 
 # ---------------------------------------------------------------------------
