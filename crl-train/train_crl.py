@@ -90,51 +90,40 @@ class ClassificationHead(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-def _vicreg_loss(
+def _crl_contrastive_loss(
     z_t: torch.Tensor,
     z_next: torch.Tensor,
     mask: torch.Tensor,
-    lambda_inv: float,
-    lambda_var: float,
-    lambda_cov: float,
+    temperature: float = 0.1,
 ) -> tuple:
     """
-    VICReg objective for z_veh.
-
-    z_t, z_next: [B, D] deterministic vehicle embeddings for window t and t+1.
-
-    Returns (vic_total, inv, var, cov).
+    Contrastive (InfoNCE) objective for z_veh.
+    Replaces VICReg to prevent z^4 covariance explosions.
     """
-    B, D = z_t.shape
+    # 1. InfoNCE for vehicles (push different vehicles apart, keep same together)
+    if mask.sum() > 1:
+        z_t_m = F.normalize(z_t[mask], dim=-1)
+        z_next_m = F.normalize(z_next[mask], dim=-1)
 
-    # Invariance: same vehicle, adjacent windows should map to same z_veh
-    inv = F.mse_loss(z_t, z_next)
+        sim = torch.matmul(z_t_m, z_next_m.T) / temperature
+        labels = torch.arange(sim.size(0), device=z_t.device)
 
-    # Apply Variance and Covariance strictly to vehicle representations
-    # Require > Z_VEH_DIM samples to compute stable variance and prevent covariance explosion
-    if mask.sum() > Z_VEH_DIM:
-        z_t_m = z_t[mask]
-        z_next_m = z_next[mask]
-
-        def _var_loss(z):
-            std = z.std(dim=0)  # [D]
-            return F.relu(1.0 - std).mean()
-
-        var = _var_loss(z_t_m) + _var_loss(z_next_m)
-
-        def _cov_loss(z):
-            z_centered = z - z.mean(dim=0)
-            cov = (z_centered.T @ z_centered) / (z.shape[0] - 1)  # [D, D]
-            off_diag = cov.pow(2).sum() - cov.diagonal().pow(2).sum()
-            return off_diag / D
-
-        cov = _cov_loss(z_t_m) + _cov_loss(z_next_m)
+        loss_t = F.cross_entropy(sim, labels)
+        loss_next = F.cross_entropy(sim.T, labels)
+        nce_loss = (loss_t + loss_next) / 2.0
     else:
-        var = torch.tensor(0.0, device=z_t.device)
-        cov = torch.tensor(0.0, device=z_t.device)
+        nce_loss = torch.tensor(0.0, device=z_t.device)
 
-    total = lambda_inv * inv + lambda_var * var + lambda_cov * cov
-    return total, inv, var, cov
+    # 2. L2 Invariance for background windows to prevent drift
+    bg_mask = ~mask
+    if bg_mask.sum() > 0:
+        bg_inv = F.mse_loss(z_t[bg_mask], z_next[bg_mask])
+    else:
+        bg_inv = torch.tensor(0.0, device=z_t.device)
+
+    total = nce_loss + bg_inv
+    # Return mapped to existing log format (total, inv, var, cov)
+    return total, bg_inv, nce_loss, torch.tensor(0.0, device=z_t.device)
 
 
 def crl_loss(
@@ -165,14 +154,12 @@ def crl_loss(
 
     mask = det_labels == 1
 
-    # 1. VICReg on z_veh
-    vic_total, vic_inv, vic_var, vic_cov = _vicreg_loss(
+    # 1. Contrastive Loss on z_veh
+    vic_total, vic_inv, vic_var, vic_cov = _crl_contrastive_loss(
         z_veh_t,
         z_veh_next,
         mask,
-        LAMBDA_VIC_INV,
-        LAMBDA_VIC_VAR,
-        LAMBDA_VIC_COV,
+        temperature=0.1,
     )
 
     # 2. KL divergence — environment (sensor-domain conditional prior)
@@ -334,11 +321,11 @@ def train_crl_phase(
                     epoch,
                     train_avg,
                     val_loss,
-                    epoch_inv / n,
-                    epoch_var / n,
-                    epoch_cov / n,
-                    epoch_kl_env / n,
-                    epoch_slow / n,
+                    val_inv,
+                    val_var,
+                    val_cov,
+                    val_kl,
+                    val_slow,
                 ]
             )
 
