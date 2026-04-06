@@ -28,6 +28,7 @@ from crl_config import MODALITIES, MODALITY_CHANNELS
 # Modality encoder
 # ---------------------------------------------------------------------------
 
+
 class ModalityEncoder(nn.Module):
     """
     1D CNN encoder for a single sensor modality.
@@ -61,6 +62,7 @@ class ModalityEncoder(nn.Module):
 # Availability embedding
 # ---------------------------------------------------------------------------
 
+
 def _availability_idx(availability: torch.Tensor) -> torch.Tensor:
     """
     Map a [B, num_modalities] bool tensor to a scalar index per sample.
@@ -79,6 +81,7 @@ def _availability_idx(availability: torch.Tensor) -> torch.Tensor:
 # ---------------------------------------------------------------------------
 # MultiModalCausalVAE
 # ---------------------------------------------------------------------------
+
 
 class MultiModalCausalVAE(nn.Module):
     """
@@ -99,16 +102,18 @@ class MultiModalCausalVAE(nn.Module):
         super().__init__()
         self.z_veh_dim = z_veh_dim
         self.z_env_dim = z_env_dim
-        self.feat_dim  = modality_feat_dim
+        self.feat_dim = modality_feat_dim
 
         # Per-modality encoders
-        self.encoders = nn.ModuleDict({
-            mod: ModalityEncoder(
-                in_channels=MODALITY_CHANNELS[mod],
-                out_dim=modality_feat_dim,
-            )
-            for mod in MODALITIES
-        })
+        self.encoders = nn.ModuleDict(
+            {
+                mod: ModalityEncoder(
+                    in_channels=MODALITY_CHANNELS[mod],
+                    out_dim=modality_feat_dim,
+                )
+                for mod in MODALITIES
+            }
+        )
 
         # Availability embedding: 2^num_modalities possible subsets
         num_subsets = 2 ** len(MODALITIES)
@@ -118,11 +123,11 @@ class MultiModalCausalVAE(nn.Module):
         self.fc_veh = nn.Linear(modality_feat_dim, z_veh_dim)
 
         # z_env: VAE projection
-        self.fc_mu_env     = nn.Linear(modality_feat_dim, z_env_dim)
+        self.fc_mu_env = nn.Linear(modality_feat_dim, z_env_dim)
         self.fc_logvar_env = nn.Linear(modality_feat_dim, z_env_dim)
 
         # iVAE conditional prior for z_env, conditioned on sensor domain
-        self.env_prior_mu     = nn.Embedding(num_sensor_domains, z_env_dim)
+        self.env_prior_mu = nn.Embedding(num_sensor_domains, z_env_dim)
         self.env_prior_logvar = nn.Embedding(num_sensor_domains, z_env_dim)
 
     # ------------------------------------------------------------------
@@ -147,7 +152,7 @@ class MultiModalCausalVAE(nn.Module):
             logvar_env [B, z_env_dim]
         """
         B = availability.shape[0]
-        feat_sum    = torch.zeros(B, self.feat_dim, device=availability.device)
+        feat_sum = torch.zeros(B, self.feat_dim, device=availability.device)
         avail_count = availability.float().sum(dim=1, keepdim=True).clamp(min=1.0)
 
         for i, mod in enumerate(MODALITIES):
@@ -155,17 +160,17 @@ class MultiModalCausalVAE(nn.Module):
             if x is None:
                 continue
             mask = availability[:, i].float().unsqueeze(1)  # [B, 1]
-            feat = self.encoders[mod](x)                     # [B, feat_dim]
+            feat = self.encoders[mod](x)  # [B, feat_dim]
             feat_sum = feat_sum + feat * mask
 
         pooled = feat_sum / avail_count  # masked mean [B, feat_dim]
 
         # Condition on which modalities are available
-        avail_idx = _availability_idx(availability)      # [B]
-        pooled    = pooled + self.avail_embed(avail_idx) # [B, feat_dim]
+        avail_idx = _availability_idx(availability)  # [B]
+        pooled = pooled + self.avail_embed(avail_idx)  # [B, feat_dim]
 
-        z_veh      = self.fc_veh(pooled)
-        mu_env     = self.fc_mu_env(pooled)
+        z_veh = self.fc_veh(pooled)
+        mu_env = self.fc_mu_env(pooled)
         logvar_env = self.fc_logvar_env(pooled).clamp(min=-4.0, max=4.0)
         return z_veh, mu_env, logvar_env
 
@@ -223,16 +228,16 @@ class MultiModalCausalVAE(nn.Module):
         z_env_next = mu_env_next
 
         # iVAE prior for z_env conditioned on sensor domain
-        prior_mu_env     = self.env_prior_mu(domain_ids)
-        prior_logvar_env = self.env_prior_logvar(domain_ids)
+        prior_mu_env = self.env_prior_mu(domain_ids)
+        prior_logvar_env = self.env_prior_logvar(domain_ids).clamp(min=-4.0, max=4.0)
 
         return {
-            "z_veh_t":          z_veh_t,
-            "z_veh_next":       z_veh_next,
-            "mu_env_t":         mu_env_t,
-            "logvar_env_t":     logvar_env_t,
-            "z_env_t":          z_env_t,
-            "z_env_next":       z_env_next,
-            "prior_mu_env":     prior_mu_env,
+            "z_veh_t": z_veh_t,
+            "z_veh_next": z_veh_next,
+            "mu_env_t": mu_env_t,
+            "logvar_env_t": logvar_env_t,
+            "z_env_t": z_env_t,
+            "z_env_next": z_env_next,
+            "prior_mu_env": prior_mu_env,
             "prior_logvar_env": prior_logvar_env,
         }

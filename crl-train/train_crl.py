@@ -120,7 +120,7 @@ def _vicreg_loss(
     # Covariance: off-diagonal entries of cov(z) should be ~0
     def _cov_loss(z):
         z_centered = z - z.mean(dim=0)
-        cov = (z_centered.T @ z_centered) / (B - 1)  # [D, D]
+        cov = (z_centered.T @ z_centered) / max(B - 1, 1)  # [D, D]
         off_diag = cov.pow(2).sum() - cov.diagonal().pow(2).sum()
         return off_diag / D
 
@@ -261,6 +261,7 @@ def train_crl_phase(
                 out, beta_kl_annealed, lambda_slow
             )
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
 
             epoch_loss += loss.item()
@@ -591,6 +592,7 @@ def build_loaders(
         num_workers=num_workers,
         collate_fn=collate_multimodal,
         pin_memory=True,
+        drop_last=True,
     )
     val_loader = DataLoader(
         val_ds,
