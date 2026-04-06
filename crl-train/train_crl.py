@@ -138,7 +138,12 @@ def _vicreg_loss(
 
 
 def crl_loss(
-    out: dict, det_labels: torch.Tensor, beta_kl: float, lambda_slow: float
+    out: dict,
+    det_labels: torch.Tensor,
+    int_t: torch.Tensor,
+    int_next: torch.Tensor,
+    beta_kl: float,
+    lambda_slow: float,
 ) -> tuple:
     """
     Compute CRL objective.
@@ -183,7 +188,12 @@ def crl_loss(
     )
 
     # 3. Temporal slow loss — z_env only
-    slow = F.mse_loss(z_env_t, z_env_next) * lambda_slow
+    # Masked out if artificial interventions actively changed the environment
+    slow_mask = int_t == int_next
+    if slow_mask.sum() > 0:
+        slow = F.mse_loss(z_env_t[slow_mask], z_env_next[slow_mask]) * lambda_slow
+    else:
+        slow = torch.tensor(0.0, device=z_env_t.device)
 
     total = vic_total + beta_kl * kl_env + slow
     return total, vic_inv, vic_var, vic_cov, kl_env, slow
@@ -255,7 +265,9 @@ def train_crl_phase(
         beta_kl_annealed = min(1.0, 0.1 + epoch / 10.0) * beta_kl
 
         for batch_idx, batch in enumerate(train_loader):
-            batch_t, batch_next, avail, domain_ids, _, det_labels = batch
+            batch_t, batch_next, avail, domain_ids, _, det_labels, int_t, int_next = (
+                batch
+            )
 
             batch_t = {
                 m: v.to(device) if v is not None else None for m, v in batch_t.items()
@@ -267,6 +279,8 @@ def train_crl_phase(
             avail = avail.to(device)
             domain_ids = domain_ids.to(device)
             det_labels = det_labels.to(device)
+            int_t = int_t.to(device)
+            int_next = int_next.to(device)
 
             # Domain Dropout: Randomly assign 5% of training samples to the __UNKNOWN__ (0) domain.
             # This forces the model to learn a broad, generalized prior for unseen environments,
@@ -277,9 +291,9 @@ def train_crl_phase(
             )
 
             optimizer.zero_grad()
-            out = model(batch_t, batch_next, avail, domain_ids)
+            out = model(batch_t, batch_next, avail, domain_ids, int_t)
             loss, vic_inv, vic_var, vic_cov, kl_e, slow = crl_loss(
-                out, det_labels, beta_kl_annealed, lambda_slow
+                out, det_labels, int_t, int_next, beta_kl_annealed, lambda_slow
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -348,7 +362,7 @@ def _eval_crl(
     model.eval()
     total = 0.0
     for batch in loader:
-        batch_t, batch_next, avail, domain_ids, _, det_labels = batch
+        batch_t, batch_next, avail, domain_ids, _, det_labels, int_t, int_next = batch
         batch_t = {
             m: v.to(device) if v is not None else None for m, v in batch_t.items()
         }
@@ -358,8 +372,10 @@ def _eval_crl(
         avail = avail.to(device)
         domain_ids = domain_ids.to(device)
         det_labels = det_labels.to(device)
-        out = model(batch_t, batch_next, avail, domain_ids)
-        loss, *_ = crl_loss(out, det_labels, beta_kl, lambda_slow)
+        int_t = int_t.to(device)
+        int_next = int_next.to(device)
+        out = model(batch_t, batch_next, avail, domain_ids, int_t)
+        loss, *_ = crl_loss(out, det_labels, int_t, int_next, beta_kl, lambda_slow)
         total += loss.item()
     model.train()
     return total / len(loader)
@@ -428,7 +444,7 @@ def train_downstream_phase(
         n_det = n_cls = 0
 
         for batch in train_loader:
-            (batch_t, _, avail, domain_ids, cat_labels, det_labels) = batch
+            (batch_t, _, avail, domain_ids, cat_labels, det_labels, _, _) = batch
 
             batch_t = {
                 m: v.to(device) if v is not None else None for m, v in batch_t.items()
@@ -520,7 +536,7 @@ def _eval_downstream(
     cls_preds, cls_true = [], []
 
     for batch in loader:
-        batch_t, _, avail, _, cat_labels, det_labels = batch
+        batch_t, _, avail, _, cat_labels, det_labels, _, _ = batch
         batch_t = {
             m: v.to(device) if v is not None else None for m, v in batch_t.items()
         }

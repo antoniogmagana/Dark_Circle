@@ -130,6 +130,10 @@ class MultiModalCausalVAE(nn.Module):
         self.env_prior_mu = nn.Embedding(num_sensor_domains, z_env_dim)
         self.env_prior_logvar = nn.Embedding(num_sensor_domains, z_env_dim)
 
+        # Interventional prior for artificial noise (0=Clean, 1=Rain, 2=Wind, 3=Thunder, 4=Birds)
+        self.int_prior_mu = nn.Embedding(5, z_env_dim)
+        self.int_prior_logvar = nn.Embedding(5, z_env_dim)
+
     # ------------------------------------------------------------------
     # Encoding
     # ------------------------------------------------------------------
@@ -205,6 +209,7 @@ class MultiModalCausalVAE(nn.Module):
         batch_next: dict,
         availability: torch.Tensor,
         domain_ids: torch.Tensor,
+        int_t: torch.Tensor = None,
     ) -> dict:
         """
         Full forward pass for CRL pre-training.
@@ -236,6 +241,13 @@ class MultiModalCausalVAE(nn.Module):
         is_unknown = (domain_ids == 0).unsqueeze(1).float()
         prior_mu_env = prior_mu_env * (1.0 - is_unknown)
         prior_logvar_env = prior_logvar_env * (1.0 - is_unknown)
+
+        # Shift the prior dynamically based on the applied artificial noise
+        if int_t is not None:
+            prior_mu_env = prior_mu_env + self.int_prior_mu(int_t)
+            prior_logvar_env = prior_logvar_env + self.int_prior_logvar(int_t).clamp(
+                min=-2.0, max=2.0
+            )
 
         return {
             "z_veh_t": z_veh_t,

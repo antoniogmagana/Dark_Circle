@@ -114,7 +114,7 @@ def run_detection_eval(
     all_preds, all_true, all_probs = [], [], []
 
     for batch in loader:
-        batch_t, _, avail, _, _cat_labels, det_labels = batch
+        batch_t, _, avail, _, _cat_labels, det_labels, _, _ = batch
         batch_t = _to_device(batch_t, device)
         avail = avail.to(device)
 
@@ -204,7 +204,7 @@ def run_classification_eval(
     all_preds, all_true = [], []
 
     for batch in loader:
-        batch_t, _, avail, _, cat_labels, _ = batch
+        batch_t, _, avail, _, cat_labels, _, _, _ = batch
         cls_mask = cat_labels >= 0
         if not cls_mask.any():
             continue

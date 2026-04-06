@@ -371,10 +371,57 @@ class MultiModalCausalDataset(Dataset):
         return self._resamplers[key](tensor)
 
     # ------------------------------------------------------------------
+    # Interventional Noise Injection
+    # ------------------------------------------------------------------
+
+    def apply_intervention(
+        self, tensor: torch.Tensor, intervention_id: int, sr: int
+    ) -> torch.Tensor:
+        if intervention_id == 0:
+            return tensor
+
+        L = tensor.shape[-1]
+        t = torch.linspace(0, L / sr, L, dtype=torch.float32)
+
+        if intervention_id == 1:
+            # White Noise (Rain / Sensor Static)
+            noise = torch.randn(L)
+        elif intervention_id == 2:
+            # Brown Noise (Wind / Low-Frequency Rumble)
+            noise = torch.cumsum(torch.randn(L), dim=0)
+            noise = noise - noise.mean()  # Remove DC drift
+        elif intervention_id == 3:
+            # Low-Frequency Oscillation (Thunder / Distant Heavy Traffic)
+            noise = torch.sin(2 * torch.pi * 3 * t) + torch.sin(
+                2 * torch.pi * 8 * t + 1.5
+            )
+            noise = noise * (torch.randn(L) * 0.2 + 1.0)
+        elif intervention_id == 4:
+            # High-Frequency Chirps (Birds / Insects / Mechanical Squeaks)
+            freq = torch.linspace(sr / 8, sr / 3, L)
+            noise = torch.sin(2 * torch.pi * freq * t)
+            noise = noise * torch.exp(-((t - 0.5) ** 2) / 0.02)  # Gaussian burst
+        else:
+            noise = torch.zeros(L)
+
+        noise = noise.unsqueeze(0)  # [1, L]
+        if tensor.shape[0] > 1:
+            noise = noise.expand(tensor.shape[0], -1)  # Expand for 3-axis accel
+
+        # RMS Scaling: Set noise to ~20% of signal energy, with a floor for pure silence
+        signal_rms = torch.sqrt(torch.mean(tensor**2) + 1e-8)
+        noise_rms = torch.sqrt(torch.mean(noise**2) + 1e-8)
+        target_rms = torch.clamp(signal_rms * 0.20, min=1e-4)
+
+        return tensor + noise * (target_rms / noise_rms)
+
+    # ------------------------------------------------------------------
     # Window extraction
     # ------------------------------------------------------------------
 
-    def _get_window(self, stem: str, seg_key: SegKey, w: int, mod: str) -> torch.Tensor:
+    def _get_window(
+        self, stem: str, seg_key: SegKey, w: int, mod: str, intervention_id: int
+    ) -> torch.Tensor:
         """Extract the w-th 1-second window within a segment and resample."""
         entry = self._cache[(stem, seg_key)]
         arr = entry["data"]
@@ -384,8 +431,8 @@ class MultiModalCausalDataset(Dataset):
         chunk = arr[:, start : start + win_len]  # [C, win_len]
         tensor = torch.from_numpy(chunk.copy())
 
-        # Zero-mean center the 1-second window to remove DC offset / thermal drift
-        tensor = tensor - tensor.mean(dim=-1, keepdim=True)
+        if self.is_train and intervention_id > 0:
+            tensor = self.apply_intervention(tensor, intervention_id, native_sr)
 
         return self._resample(tensor, native_sr, TARGET_SR[mod])  # [C, target_sr]
 
@@ -401,6 +448,16 @@ class MultiModalCausalDataset(Dataset):
         dataset, vehicle, rs_node, seg_key = group_key
         mod_file_map = self._group_files[group_key]  # {mod: (stem, seg_key)}
 
+        # Interventional logic: 60% chance to inject artificial noise during training
+        if self.is_train and torch.rand(1).item() < 0.60:
+            int_t = torch.randint(1, 5, (1,)).item()
+            int_next = torch.randint(1, 5, (1,)).item()
+            if int_next == int_t:
+                int_next = (int_next % 4) + 1  # Force t and t+1 to have different noise
+        else:
+            int_t = 0
+            int_next = 0
+
         modality_t: dict = {}
         modality_next: dict = {}
         availability: dict = {}
@@ -408,8 +465,8 @@ class MultiModalCausalDataset(Dataset):
         for mod in MODALITIES:
             if mod in available_mods and mod in mod_file_map:
                 stem, sk = mod_file_map[mod]
-                modality_t[mod] = self._get_window(stem, sk, w, mod)
-                modality_next[mod] = self._get_window(stem, sk, w + 1, mod)
+                modality_t[mod] = self._get_window(stem, sk, w, mod, int_t)
+                modality_next[mod] = self._get_window(stem, sk, w + 1, mod, int_next)
                 availability[mod] = True
             else:
                 modality_t[mod] = None
@@ -432,6 +489,8 @@ class MultiModalCausalDataset(Dataset):
             domain_id,
             category_label,
             detection_label,
+            int_t,
+            int_next,
         )
 
     # ------------------------------------------------------------------
@@ -464,6 +523,8 @@ def collate_multimodal(batch):
         domain_ids,
         cat_labels,
         det_labels,
+        int_t_list,
+        int_next_list,
     ) = zip(*batch)
 
     mod_shapes = {}
@@ -491,5 +552,16 @@ def collate_multimodal(batch):
     domain_ids = torch.tensor(domain_ids, dtype=torch.long)
     cat_labels = torch.tensor(cat_labels, dtype=torch.long)
     det_labels = torch.tensor(det_labels, dtype=torch.long)
+    int_t = torch.tensor(int_t_list, dtype=torch.long)
+    int_next = torch.tensor(int_next_list, dtype=torch.long)
 
-    return batch_t, batch_next, avail_tensor, domain_ids, cat_labels, det_labels
+    return (
+        batch_t,
+        batch_next,
+        avail_tensor,
+        domain_ids,
+        cat_labels,
+        det_labels,
+        int_t,
+        int_next,
+    )
