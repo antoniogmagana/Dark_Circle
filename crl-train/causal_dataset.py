@@ -35,10 +35,16 @@ import torchaudio
 from pathlib import Path
 from torch.utils.data import Dataset
 from crl_config import (
-    NATIVE_SR, REF_SR, SAMPLE_SECONDS,
-    DATASET_VEHICLE_MAP, CATEGORY_TO_IDX,
-    LABEL_BACKGROUND, LABEL_MULTI,
-    ADC_SCALE, MODALITY_CHANNELS, MODALITIES,
+    NATIVE_SR,
+    REF_SR,
+    SAMPLE_SECONDS,
+    DATASET_VEHICLE_MAP,
+    CATEGORY_TO_IDX,
+    LABEL_BACKGROUND,
+    LABEL_MULTI,
+    ADC_SCALE,
+    MODALITY_CHANNELS,
+    MODALITIES,
 )
 
 
@@ -65,8 +71,8 @@ def parse_filename(stem: str):
     rs_match = _RS_RE.search(rest)
     if not rs_match:
         return None
-    rs_node = rest[rs_match.start() + 1:]   # "rs1"
-    vehicle = rest[:rs_match.start()]        # "cx30_miata"
+    rs_node = rest[rs_match.start() + 1 :]  # "rs1"
+    vehicle = rest[: rs_match.start()]  # "cx30_miata"
     return dataset, sensor, vehicle, rs_node
 
 
@@ -108,6 +114,7 @@ SegKey = type(None) | tuple
 # Dataset
 # ---------------------------------------------------------------------------
 
+
 class MultiModalCausalDataset(Dataset):
     """
     Args:
@@ -124,10 +131,12 @@ class MultiModalCausalDataset(Dataset):
         parquet_dir: str,
         filter_present: bool = False,
         include_modalities: list = None,
+        domain_map: dict = None,
     ):
         self.parquet_dir = Path(parquet_dir)
         self.filter_present = filter_present
         self.include_modalities = set(include_modalities or MODALITIES)
+        self.is_train = domain_map is None
 
         # RAM cache: (stem, seg_key) → {"data": np.ndarray [C,T],
         #                               "present": np.ndarray bool,
@@ -139,7 +148,9 @@ class MultiModalCausalDataset(Dataset):
         self._resamplers: dict = {}
 
         # (dataset, rs_node[, run_id]) → int
-        self._domain_to_id: dict = {}
+        self._domain_to_id: dict = (
+            domain_map.copy() if domain_map is not None else {"__UNKNOWN__": 0}
+        )
 
         # Index: (group_key, window_idx, available_mods, category_label, domain_id)
         # group_key = (dataset, vehicle, rs_node, seg_key)
@@ -150,8 +161,10 @@ class MultiModalCausalDataset(Dataset):
 
         print(f"Building index from {self.parquet_dir} ...")
         self._build_index()
-        print(f"  {len(self._index)} window pairs indexed across "
-              f"{len(self._domain_to_id)} sensor domains.")
+        print(
+            f"  {len(self._index)} window pairs indexed across "
+            f"{len(self._domain_to_id)} sensor domains."
+        )
 
     # ------------------------------------------------------------------
     # Index construction
@@ -163,7 +176,7 @@ class MultiModalCausalDataset(Dataset):
             raise FileNotFoundError(f"No parquet files in {self.parquet_dir}")
 
         # Pass 1: group parquet files by (dataset, vehicle, rs_node)
-        file_groups: dict = {}   # (dataset, vehicle, rs_node) → {sensor: stem}
+        file_groups: dict = {}  # (dataset, vehicle, rs_node) → {sensor: stem}
         for p in parquet_files:
             parsed = parse_filename(p.stem)
             if parsed is None:
@@ -182,7 +195,7 @@ class MultiModalCausalDataset(Dataset):
 
             # Load each sensor modality; collect all (stem, seg_key, n_windows)
             # per modality.  seg_key = None for focal/iobt.
-            mod_segments: dict = {}   # modality → {seg_key: (stem, n_windows)}
+            mod_segments: dict = {}  # modality → {seg_key: (stem, n_windows)}
             for sensor, stem in sensor_stems.items():
                 p = self.parquet_dir / f"{stem}.parquet"
                 segs = self._load_file(p, stem, sensor, dataset)
@@ -200,19 +213,22 @@ class MultiModalCausalDataset(Dataset):
             for seg_key in sorted(all_seg_keys):
                 group_key = (dataset, vehicle, rs_node, seg_key)
 
-                # Build domain ID: include run_id for m3nvc
+                # Build domain ID: include scene_id and run_id for m3nvc
                 if seg_key is not None:
-                    run_id   = seg_key[1]    # (scene_id, run_id)
-                    dkey = (dataset, rs_node, run_id)
+                    scene_id, run_id = seg_key
+                    dkey = (dataset, rs_node, scene_id, run_id)
                 else:
                     dkey = (dataset, rs_node)
+
                 if dkey not in self._domain_to_id:
-                    self._domain_to_id[dkey] = len(self._domain_to_id)
-                domain_id = self._domain_to_id[dkey]
+                    if self.is_train:
+                        self._domain_to_id[dkey] = len(self._domain_to_id)
+
+                domain_id = self._domain_to_id.get(dkey, 0)
 
                 # Determine available modalities for this seg_key and min windows
                 available_mods = []
-                min_windows    = None
+                min_windows = None
                 group_file_map = {}
                 for sensor, segs in mod_segments.items():
                     if seg_key in segs:
@@ -231,12 +247,14 @@ class MultiModalCausalDataset(Dataset):
                 for w in range(min_windows - 1):
                     if self.filter_present:
                         first_mod = next(iter(available_mods))
-                        stem, sk  = group_file_map[first_mod]
-                        entry     = self._cache[(stem, sk)]
-                        win_len   = int(entry["native_sr"] * SAMPLE_SECONDS)
-                        row_idx   = w * win_len
-                        if (row_idx < len(entry["present"])
-                                and not entry["present"][row_idx]):
+                        stem, sk = group_file_map[first_mod]
+                        entry = self._cache[(stem, sk)]
+                        win_len = int(entry["native_sr"] * SAMPLE_SECONDS)
+                        row_idx = w * win_len
+                        if (
+                            row_idx < len(entry["present"])
+                            and not entry["present"][row_idx]
+                        ):
                             continue
 
                     self._index.append(
@@ -271,7 +289,7 @@ class MultiModalCausalDataset(Dataset):
         # For seismic m3nvc files there is a single-value 'channel' column;
         # we just ignore it — amplitude is already per-channel.
 
-        has_segments = ("scene_id" in df.columns and "run_id" in df.columns)
+        has_segments = "scene_id" in df.columns and "run_id" in df.columns
 
         result = {}
 
@@ -292,7 +310,7 @@ class MultiModalCausalDataset(Dataset):
                 if n_windows >= 2:
                     result[seg_key] = (stem, n_windows)
         else:
-            seg_key   = None
+            seg_key = None
             cache_key = (stem, None)
             if cache_key not in self._cache:
                 entry = self._df_to_entry(df, sensor, native_sr)
@@ -314,7 +332,7 @@ class MultiModalCausalDataset(Dataset):
             required = ["accel_x_ew", "accel_y_ns", "accel_z_ud"]
             if not all(c in df.columns for c in required):
                 return None
-            arr = df[required].to_numpy(dtype=np.float32).T   # [3, T]
+            arr = df[required].to_numpy(dtype=np.float32).T  # [3, T]
         else:
             if "amplitude" not in df.columns:
                 return None
@@ -349,14 +367,14 @@ class MultiModalCausalDataset(Dataset):
 
     def _get_window(self, stem: str, seg_key: SegKey, w: int) -> torch.Tensor:
         """Extract the w-th 1-second window within a segment and resample."""
-        entry   = self._cache[(stem, seg_key)]
-        arr     = entry["data"]
+        entry = self._cache[(stem, seg_key)]
+        arr = entry["data"]
         native_sr = entry["native_sr"]
         win_len = int(native_sr * SAMPLE_SECONDS)
-        start   = w * win_len
-        chunk   = arr[:, start: start + win_len]        # [C, win_len]
-        tensor  = torch.from_numpy(chunk.copy())
-        return self._resample(tensor, native_sr)        # [C, REF_SR]
+        start = w * win_len
+        chunk = arr[:, start : start + win_len]  # [C, win_len]
+        tensor = torch.from_numpy(chunk.copy())
+        return self._resample(tensor, native_sr)  # [C, REF_SR]
 
     # ------------------------------------------------------------------
     # __len__ / __getitem__
@@ -368,29 +386,29 @@ class MultiModalCausalDataset(Dataset):
     def __getitem__(self, idx):
         group_key, w, available_mods, category_label, domain_id = self._index[idx]
         dataset, vehicle, rs_node, seg_key = group_key
-        mod_file_map = self._group_files[group_key]   # {mod: (stem, seg_key)}
+        mod_file_map = self._group_files[group_key]  # {mod: (stem, seg_key)}
 
-        modality_t: dict    = {}
+        modality_t: dict = {}
         modality_next: dict = {}
-        availability: dict  = {}
+        availability: dict = {}
 
         for mod in MODALITIES:
             if mod in available_mods and mod in mod_file_map:
-                stem, sk           = mod_file_map[mod]
-                modality_t[mod]    = self._get_window(stem, sk, w)
+                stem, sk = mod_file_map[mod]
+                modality_t[mod] = self._get_window(stem, sk, w)
                 modality_next[mod] = self._get_window(stem, sk, w + 1)
-                availability[mod]  = True
+                availability[mod] = True
             else:
-                modality_t[mod]    = None
+                modality_t[mod] = None
                 modality_next[mod] = None
-                availability[mod]  = False
+                availability[mod] = False
 
         # detection_label: present flag at window w from the first available modality
-        first_mod   = next(m for m in MODALITIES if availability[m])
-        stem, sk    = mod_file_map[first_mod]
-        entry       = self._cache[(stem, sk)]
-        win_len     = int(entry["native_sr"] * SAMPLE_SECONDS)
-        row_idx     = w * win_len
+        first_mod = next(m for m in MODALITIES if availability[m])
+        stem, sk = mod_file_map[first_mod]
+        entry = self._cache[(stem, sk)]
+        win_len = int(entry["native_sr"] * SAMPLE_SECONDS)
+        row_idx = w * win_len
         present_arr = entry["present"]
         detection_label = int(present_arr[row_idx]) if row_idx < len(present_arr) else 0
 
@@ -416,6 +434,7 @@ class MultiModalCausalDataset(Dataset):
 # Collate function
 # ---------------------------------------------------------------------------
 
+
 def collate_multimodal(batch):
     """
     Collate a list of (modality_t, modality_next, availability,
@@ -425,8 +444,14 @@ def collate_multimodal(batch):
     availability is returned as a bool tensor [B, num_modalities] ordered
     by the MODALITIES list.
     """
-    modality_t_list, modality_next_list, avail_list, \
-        domain_ids, cat_labels, det_labels = zip(*batch)
+    (
+        modality_t_list,
+        modality_next_list,
+        avail_list,
+        domain_ids,
+        cat_labels,
+        det_labels,
+    ) = zip(*batch)
 
     mod_shapes = {}
     for mod in MODALITIES:
@@ -439,12 +464,11 @@ def collate_multimodal(batch):
         shape = mod_shapes.get(mod)
         if shape is None:
             return None
-        return torch.stack([
-            d[mod] if d[mod] is not None else torch.zeros(shape)
-            for d in dicts
-        ])
+        return torch.stack(
+            [d[mod] if d[mod] is not None else torch.zeros(shape) for d in dicts]
+        )
 
-    batch_t    = {mod: stack_mod(modality_t_list, mod)    for mod in MODALITIES}
+    batch_t = {mod: stack_mod(modality_t_list, mod) for mod in MODALITIES}
     batch_next = {mod: stack_mod(modality_next_list, mod) for mod in MODALITIES}
 
     avail_tensor = torch.tensor(
