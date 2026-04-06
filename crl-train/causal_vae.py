@@ -231,6 +231,12 @@ class MultiModalCausalVAE(nn.Module):
         prior_mu_env = self.env_prior_mu(domain_ids)
         prior_logvar_env = self.env_prior_logvar(domain_ids).clamp(min=-4.0, max=4.0)
 
+        # Force __UNKNOWN__ domain (id=0) to act as a standard normal prior N(0, I).
+        # This mathematically caps the KL divergence penalty for zero-shot environments.
+        is_unknown = (domain_ids == 0).unsqueeze(1).float()
+        prior_mu_env = prior_mu_env * (1.0 - is_unknown)
+        prior_logvar_env = prior_logvar_env * (1.0 - is_unknown)
+
         return {
             "z_veh_t": z_veh_t,
             "z_veh_next": z_veh_next,

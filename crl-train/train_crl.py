@@ -111,7 +111,8 @@ def _vicreg_loss(
     inv = F.mse_loss(z_t, z_next)
 
     # Apply Variance and Covariance strictly to vehicle representations
-    if mask.sum() > 1:
+    # Require > 4 samples to compute stable variance and prevent covariance explosion
+    if mask.sum() > 4:
         z_t_m = z_t[mask]
         z_next_m = z_next[mask]
 

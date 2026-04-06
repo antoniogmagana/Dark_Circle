@@ -383,6 +383,10 @@ class MultiModalCausalDataset(Dataset):
         start = w * win_len
         chunk = arr[:, start : start + win_len]  # [C, win_len]
         tensor = torch.from_numpy(chunk.copy())
+
+        # Zero-mean center the 1-second window to remove DC offset / thermal drift
+        tensor = tensor - tensor.mean(dim=-1, keepdim=True)
+
         return self._resample(tensor, native_sr, TARGET_SR[mod])  # [C, target_sr]
 
     # ------------------------------------------------------------------
