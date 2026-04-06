@@ -1,0 +1,53 @@
+# Inference — Detection Node
+# Subscribes to NATS sensor.data, runs WaveformClassificationCNN,
+# publishes DetectionResult to NATS detection.result.
+#
+# Model artifacts (best_model.pth, meta.pt, hyperparameters.json) must be
+# written to the PVC before the pod starts. Populate from:
+#   model-train/saved_models/detection/WaveformClassificationCNN/<RUN_ID>/
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infer-detect
+  labels:
+    app: infer-detect
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: infer-detect
+  template:
+    metadata:
+      labels:
+        app: infer-detect
+    spec:
+      containers:
+        - name: infer-detect
+          image: your-registry/infer-detect:latest   # update with your registry
+          env:
+            - name: NATS_URL
+              value: "nats://nats-service:4222"
+            - name: MODEL_DIR
+              value: "/app/model"
+          volumeMounts:
+            - name: model
+              mountPath: /app/model
+              readOnly: true
+      volumes:
+        - name: model
+          persistentVolumeClaim:
+            claimName: infer-detect-model-pvc
+---
+# PVC for detection model artifacts.
+# Access mode: ReadWriteOnce (single-node); upgrade to ReadOnlyMany if
+# using a CSI driver that supports it (e.g. NFS, EFS).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: infer-detect-model-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Mi

@@ -1,0 +1,28 @@
+# Egress Node
+# Subscribes to NATS detection.result and classification.result,
+# bridges results back to ROS2 on /inference_result.
+# One instance per sensor array (SENSOR_ARRAY names the ROS2 node).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: egress
+  labels:
+    app: egress
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: egress
+  template:
+    metadata:
+      labels:
+        app: egress
+    spec:
+      containers:
+        - name: egress
+          image: your-registry/egress:latest   # update with your registry
+          env:
+            - name: NATS_URL
+              value: "nats://nats-service:4222"
+            - name: SENSOR_ARRAY
+              value: "default"                  # update with your sensor array ID

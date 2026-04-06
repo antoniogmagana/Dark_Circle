@@ -1,2 +1,9 @@
-# Role for Discovery Node
-# Grants permissions to create, list, watch, and delete Deployments
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: discovery-role
+  namespace: default
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "delete"]

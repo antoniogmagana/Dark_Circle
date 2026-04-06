@@ -1,0 +1,67 @@
+# Static Ingestor deployment — for standalone use or manual testing.
+# In production the Discovery Node creates per-sensor-array Ingestors
+# dynamically from ingestor-template.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestor
+  labels:
+    app: ingestor
+    sensor-array: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingestor
+      sensor-array: default
+  template:
+    metadata:
+      labels:
+        app: ingestor
+        sensor-array: default
+    spec:
+      containers:
+        - name: ingestor
+          image: your-registry/ingestor:latest   # update with your registry
+          env:
+            - name: NATS_URL
+              value: "nats://nats-service:4222"
+            - name: SENSOR_ARRAY
+              value: "default"                    # update with your sensor array ID
+            - name: SENSOR_TOPICS
+              value: ""                           # update with comma-separated ROS2 topics
+            - name: AUDIO_BIT_DEPTH
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: audio_bit_depth
+            - name: SEISMIC_BIT_DEPTH
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: seismic_bit_depth
+            - name: ACCEL_BIT_DEPTH
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: accel_bit_depth
+            - name: AUDIO_SAMPLE_RATE
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: audio_sample_rate
+            - name: SEISMIC_SAMPLE_RATE
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: seismic_sample_rate
+            - name: ACCEL_SAMPLE_RATE
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: accel_sample_rate
+            - name: TARGET_RATE
+              valueFrom:
+                configMapKeyRef:
+                  name: sensor-config
+                  key: target_rate
