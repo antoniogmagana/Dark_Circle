@@ -5,7 +5,8 @@ import sys
 from pathlib import Path
 import numpy as np
 import pytest
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock, MagicMock, AsyncMock, patch
+import asyncio
 
 # Add src to Python path for imports
 INFERENCE_ENGINE_ROOT = Path(__file__).parent.parent
@@ -92,20 +93,41 @@ def mock_ros2_node():
     """Mock ROS2 node for testing."""
     node = MagicMock()
     node.get_logger.return_value = MagicMock()
-    node.create_subscription = MagicMock()
-    node.create_publisher = MagicMock()
-    node.create_timer = MagicMock()
+    node.create_subscription = MagicMock(return_value=MagicMock())
+    node.create_publisher = MagicMock(return_value=MagicMock())
+    node.create_timer = MagicMock(return_value=MagicMock())
+    
+    # Mock get_topic_names_and_types for Discovery node testing
+    node.get_topic_names_and_types.return_value = [
+        ('/sensor_array_01/acoustic', ['ros2_interfaces/msg/RawSensorReading']),
+        ('/sensor_array_01/seismic', ['ros2_interfaces/msg/RawSensorReading']),
+    ]
+    
     return node
 
 
 @pytest.fixture
 def mock_nats_client():
-    """Mock NATS client for testing."""
-    client = MagicMock()
-    client.connect = MagicMock()
-    client.subscribe = MagicMock()
-    client.publish = MagicMock()
-    client.close = MagicMock()
+    """Mock async NATS client for testing."""
+    client = AsyncMock()
+    
+    # Mock async methods
+    client.connect = AsyncMock()
+    client.subscribe = AsyncMock(return_value=MagicMock())
+    client.publish = AsyncMock()
+    client.close = AsyncMock()
+    
+    # Mock connection state
+    client.is_connected = True
+    
+    # Store published messages for verification in tests
+    client._published_messages = []
+    
+    async def publish_spy(subject, data):
+        client._published_messages.append({'subject': subject, 'data': data})
+    
+    client.publish.side_effect = publish_spy
+    
     return client
 
 
@@ -113,10 +135,38 @@ def mock_nats_client():
 def mock_k8s_client():
     """Mock Kubernetes API client for testing."""
     client = MagicMock()
+    
+    # Mock deployment operations
     client.create_namespaced_deployment = MagicMock()
     client.delete_namespaced_deployment = MagicMock()
-    client.list_namespaced_deployment = MagicMock()
+    
+    # Mock list_namespaced_deployment with realistic response
+    mock_deployment = MagicMock()
+    mock_deployment.metadata.labels = {'sensor-array': 'sensor_array_01', 'app': 'ingestor'}
+    
+    mock_list_response = MagicMock()
+    mock_list_response.items = [mock_deployment]
+    client.list_namespaced_deployment.return_value = mock_list_response
+    
     return client
+
+
+@pytest.fixture
+def mock_ros2_message():
+    """Mock ROS2 RawSensorReading message."""
+    msg = MagicMock()
+    msg.sensor_id = "sensor_array_01.aud"
+    msg.start_time = 1700000000.0
+    msg.amplitude_readings = np.random.randint(-32768, 32767, size=100, dtype=np.int16).tolist()
+    return msg
+
+
+@pytest.fixture
+def mock_ros2_inference_result():
+    """Mock ROS2 InferenceResult message class."""
+    InferenceResult = MagicMock()
+    InferenceResult.return_value = MagicMock()
+    return InferenceResult
 
 
 # ============================================================================

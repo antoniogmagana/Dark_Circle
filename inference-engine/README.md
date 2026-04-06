@@ -135,6 +135,45 @@ poetry run python scripts/compile_protos.py
 
 ---
 
+## Testing
+
+**Test Suite Status: ✅ 97/97 tests passing (100% complete)**
+
+The inference engine has comprehensive test coverage across all nodes:
+
+```bash
+# Run all tests (excluding CUDA-dependent test_buffer.py)
+pytest tests/ --ignore=tests/test_buffer.py -v
+
+# Run integration and inference tests
+pytest tests/test_discovery.py tests/test_ingestor.py tests/test_egress.py \
+       tests/test_infer_detect.py tests/test_infer_classify.py -v
+
+# Run by node
+pytest tests/test_discovery.py -v       # 13 tests (Discovery)
+pytest tests/test_ingestor.py -v        # 17 tests (Ingestor)
+pytest tests/test_egress.py -v          # 21 tests (Egress)
+pytest tests/test_infer_detect.py -v    # 23 tests (Vehicle Detection)
+pytest tests/test_infer_classify.py -v  # 23 tests (Vehicle Classification)
+
+# Run by category
+pytest -m unit -v         # Unit tests only
+pytest -m integration -v  # Integration tests only
+pytest -m asyncio -v      # Async tests only
+```
+
+**Test Coverage:**
+- **Discovery Node** (13 tests): Topic discovery, K8s orchestration, configuration, error handling
+- **Ingestor Node** (17 tests): Channel mapping, ROS2 subscriptions, buffer integration, NATS publishing, ADC normalization
+- **Egress Node** (21 tests): Protobuf conversion, NATS subscriptions, ROS2 publishing, edge cases
+- **Infer Detect Node** (23 tests): Model loading (CUDA/MPS/CPU), binary detection, tensor preprocessing, NATS integration
+- **Infer Classify Node** (23 tests): Multi-class classification, Mel spectrograms, CLASS_MAP, confidence scoring
+- **SensorBuffer** (33 tests): Comprehensive buffering logic in `test_buffer.py` (requires CUDA)
+
+See [tests/README.md](tests/README.md) for detailed test documentation.
+
+---
+
 ## Build and Deploy
 
 **Prerequisites:** Docker, kubectl configured against your cluster.
