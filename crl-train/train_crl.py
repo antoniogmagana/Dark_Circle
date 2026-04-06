@@ -159,7 +159,7 @@ def crl_loss(
         z_veh_t,
         z_veh_next,
         mask,
-        temperature=0.1,
+        temperature=0.5,  # Softened from 0.1 to allow similar vehicles to loosely cluster
     )
 
     # 2. KL divergence — environment (sensor-domain conditional prior)
@@ -417,9 +417,22 @@ def train_downstream_phase(
 
     # Class weights for imbalanced categories (detection: background heavy)
     det_weight = torch.tensor([1.0, 5.0], device=device)  # upweight vehicle
-    cls_weight = torch.tensor(
-        [1.0, 1.0, 1.0, 1.0], device=device
-    )  # update after profiling
+
+    # Dynamically profile the dataset for inverse-frequency class weights
+    print("  Profiling dataset for classification weights...")
+    class_counts = torch.zeros(len(CLASS_MAP), dtype=torch.float32, device=device)
+    for item in train_loader.dataset._index:
+        cat_label = item[3]  # index 3 holds the category_label
+        if cat_label >= 0:
+            class_counts[cat_label] += 1
+
+    total_valid = class_counts.sum()
+    if total_valid > 0:
+        cls_weight = total_valid / (len(CLASS_MAP) * class_counts.clamp(min=1.0))
+    else:
+        cls_weight = torch.ones(len(CLASS_MAP), device=device)
+
+    print(f"  Calculated class weights: {cls_weight.cpu().numpy().round(3)}")
 
     det_criterion = nn.CrossEntropyLoss(weight=det_weight)
     cls_criterion = nn.CrossEntropyLoss(weight=cls_weight)
