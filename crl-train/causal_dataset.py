@@ -48,6 +48,13 @@ from crl_config import (
 )
 
 
+# Target sample rates per modality to avoid massive upsampling of low-freq sensors
+TARGET_SR = {
+    "audio": 16000,
+    "seismic": 200,
+    "accel": 200,
+}
+
 # ---------------------------------------------------------------------------
 # Filename parsing
 # ---------------------------------------------------------------------------
@@ -351,13 +358,15 @@ class MultiModalCausalDataset(Dataset):
     # Resampling
     # ------------------------------------------------------------------
 
-    def _resample(self, tensor: torch.Tensor, orig_sr: int) -> torch.Tensor:
-        if orig_sr == REF_SR:
+    def _resample(
+        self, tensor: torch.Tensor, orig_sr: int, target_sr: int
+    ) -> torch.Tensor:
+        if orig_sr == target_sr:
             return tensor
-        key = (orig_sr, REF_SR)
+        key = (orig_sr, target_sr)
         if key not in self._resamplers:
             self._resamplers[key] = torchaudio.transforms.Resample(
-                orig_freq=orig_sr, new_freq=REF_SR
+                orig_freq=orig_sr, new_freq=target_sr
             )
         return self._resamplers[key](tensor)
 
@@ -365,7 +374,7 @@ class MultiModalCausalDataset(Dataset):
     # Window extraction
     # ------------------------------------------------------------------
 
-    def _get_window(self, stem: str, seg_key: SegKey, w: int) -> torch.Tensor:
+    def _get_window(self, stem: str, seg_key: SegKey, w: int, mod: str) -> torch.Tensor:
         """Extract the w-th 1-second window within a segment and resample."""
         entry = self._cache[(stem, seg_key)]
         arr = entry["data"]
@@ -374,7 +383,7 @@ class MultiModalCausalDataset(Dataset):
         start = w * win_len
         chunk = arr[:, start : start + win_len]  # [C, win_len]
         tensor = torch.from_numpy(chunk.copy())
-        return self._resample(tensor, native_sr)  # [C, REF_SR]
+        return self._resample(tensor, native_sr, TARGET_SR[mod])  # [C, target_sr]
 
     # ------------------------------------------------------------------
     # __len__ / __getitem__
@@ -395,8 +404,8 @@ class MultiModalCausalDataset(Dataset):
         for mod in MODALITIES:
             if mod in available_mods and mod in mod_file_map:
                 stem, sk = mod_file_map[mod]
-                modality_t[mod] = self._get_window(stem, sk, w)
-                modality_next[mod] = self._get_window(stem, sk, w + 1)
+                modality_t[mod] = self._get_window(stem, sk, w, mod)
+                modality_next[mod] = self._get_window(stem, sk, w + 1, mod)
                 availability[mod] = True
             else:
                 modality_t[mod] = None

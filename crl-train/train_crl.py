@@ -564,12 +564,19 @@ def parse_args():
 
 
 def build_loaders(
-    data_dir, val_dir, batch_size, num_workers, modalities, filter_present=False
+    data_dir,
+    val_dir,
+    batch_size,
+    num_workers,
+    modalities,
+    filter_present=False,
+    domain_map=None,
 ):
     train_ds = MultiModalCausalDataset(
         parquet_dir=data_dir,
         filter_present=filter_present,
         include_modalities=modalities,
+        domain_map=domain_map,
     )
     val_ds = MultiModalCausalDataset(
         parquet_dir=val_dir,
@@ -593,7 +600,7 @@ def build_loaders(
         collate_fn=collate_multimodal,
         pin_memory=True,
     )
-    return train_loader, val_loader, train_ds.num_sensor_domains
+    return train_loader, val_loader, train_ds.num_sensor_domains, train_ds._domain_to_id
 
 
 def main():
@@ -602,17 +609,36 @@ def main():
     save_dir = Path(args.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    train_loader, val_loader, num_domains = build_loaders(
-        args.data_dir,
-        args.val_dir,
-        args.batch_size,
-        args.num_workers,
-        args.modalities,
-    )
+    meta_path = save_dir / "crl_meta.json"
 
-    # Save domain metadata for evaluation script
-    with open(save_dir / "crl_meta.json", "w") as f:
-        json.dump({"num_domains": num_domains}, f)
+    if args.phase in ("crl", "full"):
+        train_loader, val_loader, num_domains, _ = build_loaders(
+            args.data_dir,
+            args.val_dir,
+            args.batch_size,
+            args.num_workers,
+            args.modalities,
+            filter_present=True,
+            domain_map=None,
+        )
+        with open(meta_path, "w") as f:
+            json.dump({"num_domains": num_domains}, f)
+    else:
+        if meta_path.exists():
+            with open(meta_path, "r") as f:
+                num_domains = json.load(f)["num_domains"]
+        else:
+            raise FileNotFoundError(f"Missing {meta_path}. Run --phase crl first.")
+
+        train_loader, val_loader, _, _ = build_loaders(
+            args.data_dir,
+            args.val_dir,
+            args.batch_size,
+            args.num_workers,
+            args.modalities,
+            filter_present=False,
+            domain_map={"__UNKNOWN__": 0},
+        )
 
     model = MultiModalCausalVAE(
         num_sensor_domains=num_domains,
@@ -640,6 +666,20 @@ def main():
         )
 
     if args.phase in ("downstream", "full"):
+        if args.phase == "full":
+            print(
+                "\nRebuilding data loaders with filter_present=False for downstream phase..."
+            )
+            train_loader, val_loader, _, _ = build_loaders(
+                args.data_dir,
+                args.val_dir,
+                args.batch_size,
+                args.num_workers,
+                args.modalities,
+                filter_present=False,
+                domain_map={"__UNKNOWN__": 0},
+            )
+
         crl_ckpt = save_dir / "crl_best.pth"
         if crl_ckpt.exists():
             model.load_state_dict(torch.load(crl_ckpt, map_location=device))
