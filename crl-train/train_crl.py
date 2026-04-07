@@ -94,23 +94,38 @@ def _crl_contrastive_loss(
     z_t: torch.Tensor,
     z_next: torch.Tensor,
     mask: torch.Tensor,
+    cat_labels: torch.Tensor,
     temperature: float = 0.1,
 ) -> tuple:
     """
-    Contrastive (InfoNCE) objective for z_veh.
+    Supervised Contrastive (SupCon) objective for z_veh.
     Replaces VICReg to prevent z^4 covariance explosions.
     """
-    # 1. InfoNCE for vehicles (push different vehicles apart, keep same together)
+    # 1. SupCon for vehicles
     if mask.sum() > 1:
         z_t_m = F.normalize(z_t[mask], dim=-1)
         z_next_m = F.normalize(z_next[mask], dim=-1)
+        labels_m = cat_labels[mask]
 
         sim = torch.matmul(z_t_m, z_next_m.T) / temperature
-        labels = torch.arange(sim.size(0), device=z_t.device)
 
-        loss_t = F.cross_entropy(sim, labels)
-        loss_next = F.cross_entropy(sim.T, labels)
-        nce_loss = (loss_t + loss_next) / 2.0
+        # Base positive mask: windows of the exact same class
+        pos_mask = (labels_m.unsqueeze(1) == labels_m.unsqueeze(0)).float()
+
+        # Mask out invalid labels (-1 background, -2 multi-vehicle) from creating false clusters.
+        # If invalid, they fall back to standard InfoNCE (only attract their own index).
+        valid_labels = labels_m >= 0
+        valid_pair_mask = valid_labels.unsqueeze(1) & valid_labels.unsqueeze(0)
+        diag_mask = torch.eye(sim.size(0), device=sim.device)
+        pos_mask = torch.where(valid_pair_mask, pos_mask, diag_mask)
+
+        log_prob_t = F.log_softmax(sim, dim=1)
+        loss_t = -(pos_mask * log_prob_t).sum(dim=1) / pos_mask.sum(dim=1)
+
+        log_prob_next = F.log_softmax(sim.T, dim=1)
+        loss_next = -(pos_mask.T * log_prob_next).sum(dim=1) / pos_mask.sum(dim=0)
+
+        nce_loss = (loss_t.mean() + loss_next.mean()) / 2.0
     else:
         nce_loss = torch.tensor(0.0, device=z_t.device)
 
@@ -129,6 +144,7 @@ def _crl_contrastive_loss(
 def crl_loss(
     out: dict,
     det_labels: torch.Tensor,
+    cat_labels: torch.Tensor,
     int_t: torch.Tensor,
     int_next: torch.Tensor,
     beta_kl: float,
@@ -159,7 +175,8 @@ def crl_loss(
         z_veh_t,
         z_veh_next,
         mask,
-        temperature=0.5,  # Softened from 0.1 to allow similar vehicles to loosely cluster
+        cat_labels,
+        temperature=0.1,  # Restored to 0.1 since SupCon handles clustering explicitly
     )
 
     # 2. KL divergence — environment (sensor-domain conditional prior)
@@ -252,9 +269,16 @@ def train_crl_phase(
         beta_kl_annealed = min(1.0, 0.1 + epoch / 10.0) * beta_kl
 
         for batch_idx, batch in enumerate(train_loader):
-            batch_t, batch_next, avail, domain_ids, _, det_labels, int_t, int_next = (
-                batch
-            )
+            (
+                batch_t,
+                batch_next,
+                avail,
+                domain_ids,
+                cat_labels,
+                det_labels,
+                int_t,
+                int_next,
+            ) = batch
 
             batch_t = {
                 m: v.to(device) if v is not None else None for m, v in batch_t.items()
@@ -265,6 +289,7 @@ def train_crl_phase(
             }
             avail = avail.to(device)
             domain_ids = domain_ids.to(device)
+            cat_labels = cat_labels.to(device)
             det_labels = det_labels.to(device)
             int_t = int_t.to(device)
             int_next = int_next.to(device)
@@ -280,7 +305,13 @@ def train_crl_phase(
             optimizer.zero_grad()
             out = model(batch_t, batch_next, avail, domain_ids, int_t)
             loss, vic_inv, vic_var, vic_cov, kl_e, slow = crl_loss(
-                out, det_labels, int_t, int_next, beta_kl_annealed, lambda_slow
+                out,
+                det_labels,
+                cat_labels,
+                int_t,
+                int_next,
+                beta_kl_annealed,
+                lambda_slow,
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -354,7 +385,16 @@ def _eval_crl(
     model.eval()
     total_loss = total_inv = total_var = total_cov = total_kl = total_slow = 0.0
     for batch in loader:
-        batch_t, batch_next, avail, domain_ids, _, det_labels, int_t, int_next = batch
+        (
+            batch_t,
+            batch_next,
+            avail,
+            domain_ids,
+            cat_labels,
+            det_labels,
+            int_t,
+            int_next,
+        ) = batch
         batch_t = {
             m: v.to(device) if v is not None else None for m, v in batch_t.items()
         }
@@ -363,12 +403,13 @@ def _eval_crl(
         }
         avail = avail.to(device)
         domain_ids = domain_ids.to(device)
+        cat_labels = cat_labels.to(device)
         det_labels = det_labels.to(device)
         int_t = int_t.to(device)
         int_next = int_next.to(device)
         out = model(batch_t, batch_next, avail, domain_ids, int_t)
         loss, vic_inv, vic_var, vic_cov, kl_e, slow = crl_loss(
-            out, det_labels, int_t, int_next, beta_kl, lambda_slow
+            out, det_labels, cat_labels, int_t, int_next, beta_kl, lambda_slow
         )
         total_loss += loss.item()
         total_inv += vic_inv.item()
