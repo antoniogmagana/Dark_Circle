@@ -33,5 +33,5 @@ poetry.lock
 GEMINI.md
 
 #large folders
-data/
+data_files/
 cache/

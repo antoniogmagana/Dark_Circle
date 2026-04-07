@@ -81,4 +81,4 @@ def split_dataset(parsed_dir="./parsed", train_ratio=0.85):
 
 if __name__ == "__main__":
     # Point this to your parsed data directory
-    split_dataset(parsed_dir="../data/parsed")
+    split_dataset(parsed_dir="../data_files/parsed")
