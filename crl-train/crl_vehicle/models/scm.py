@@ -26,9 +26,7 @@ class SCM(nn.Module):
         # Learnable adjacency matrix A_raw (d_z × d_z).
         # A[i, j] = weight of edge z_j → z_i.
         # Initialised near zero → sparse graph at the start of training.
-        self.A_raw = nn.Parameter(
-            torch.zeros(d_z, d_z) + 0.01 * torch.randn(d_z, d_z)
-        )
+        self.A_raw = nn.Parameter(torch.randn(d_z, d_z) * 0.3)
 
         # Per-variable causal mechanisms: f_i : R^d_z → R
         self.mechanisms = nn.ModuleList([

@@ -318,6 +318,7 @@ class Trainer:
             "scm_l1",
             "beta",
             "acyclic_w",
+            "l1_w",
         ]
         with open(metrics_path, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=fieldnames).writeheader()
@@ -326,6 +327,7 @@ class Trainer:
         for epoch in range(epochs):
             self.loss_fn.update_beta(epoch)
             self.loss_fn.update_lambda_acyclic(epoch)
+            self.loss_fn.update_lambda_l1(epoch)
             train_metrics = self._train_epoch(loader_known, loader_pairs, epoch)
             # Annealing val loss — for logging only (non-stationary across epochs)
             val_metrics = self._eval_crl(val_loader)

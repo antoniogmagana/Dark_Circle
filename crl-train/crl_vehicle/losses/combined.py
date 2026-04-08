@@ -44,6 +44,7 @@ class CombinedLoss(nn.Module):
         self.cfg = config
         self.current_beta = config.beta_start
         self.current_lambda_acyclic = 0.0
+        self.current_lambda_l1 = 0.0
 
     def update_beta(self, epoch: int):
         """Call once per epoch before the training loop."""
@@ -52,6 +53,12 @@ class CombinedLoss(nn.Module):
             self.cfg.beta_start
             + t * (self.cfg.beta_end - self.cfg.beta_start)
         )
+
+    def update_lambda_l1(self, epoch: int):
+        """Linearly ramp lambda_l1 from 0 → cfg.lambda_l1_graph over
+        lambda_l1_graph_anneal_epochs.  Call once per epoch."""
+        t = min(epoch / max(self.cfg.lambda_l1_graph_anneal_epochs, 1), 1.0)
+        self.current_lambda_l1 = t * self.cfg.lambda_l1_graph
 
     def update_lambda_acyclic(self, epoch: int):
         """
@@ -180,11 +187,12 @@ class CombinedLoss(nn.Module):
             loss_audio
             + loss_seismic
             + self.current_lambda_acyclic * L_acyclic
-            + self.cfg.lambda_l1_graph * L_l1_graph
+            + self.current_lambda_l1 * L_l1_graph
             + self.cfg.lambda_interv * L_interv
             + self.cfg.lambda_task * (L_task + L_det)
         )
         metrics["total"] = total.item()
         metrics["beta"] = beta
         metrics["acyclic_w"] = self.current_lambda_acyclic
+        metrics["l1_w"] = self.current_lambda_l1
         return total, metrics
