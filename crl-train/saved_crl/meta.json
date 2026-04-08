@@ -1,0 +1,8 @@
+{
+  "sensors": [
+    "audio",
+    "seismic"
+  ],
+  "d_z": 10,
+  "n_epochs": 100
+}
