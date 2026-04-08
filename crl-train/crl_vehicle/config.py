@@ -222,7 +222,8 @@ class CRLConfig:
     lambda_interv:        float = 2.0
     lambda_disent:        float = 0.5
     lambda_task:          float = 1.0
-    lambda_acyclic:       float = 1.0
+    lambda_acyclic:              float = 1.0
+    lambda_acyclic_anneal_epochs: int  = 20  # ramp 0 → lambda_acyclic over this many epochs
 
     # Curriculum
     unknown_interv_start_epoch: int = 10

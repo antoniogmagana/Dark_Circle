@@ -43,6 +43,7 @@ class CombinedLoss(nn.Module):
         super().__init__()
         self.cfg = config
         self.current_beta = config.beta_start
+        self.current_lambda_acyclic = 0.0
 
     def update_beta(self, epoch: int):
         """Call once per epoch before the training loop."""
@@ -51,6 +52,18 @@ class CombinedLoss(nn.Module):
             self.cfg.beta_start
             + t * (self.cfg.beta_end - self.cfg.beta_start)
         )
+
+    def update_lambda_acyclic(self, epoch: int):
+        """
+        Linearly ramp lambda_acyclic from 0 → cfg.lambda_acyclic over
+        lambda_acyclic_anneal_epochs.  Call once per epoch alongside update_beta.
+
+        Starting at 0 lets causal edges form and carry gradient signal before
+        NOTEARS penalises them — preventing the trivial zero-adjacency collapse
+        that occurs when the acyclicity penalty is at full strength from epoch 0.
+        """
+        t = min(epoch / max(self.cfg.lambda_acyclic_anneal_epochs, 1), 1.0)
+        self.current_lambda_acyclic = t * self.cfg.lambda_acyclic
 
     def _modality_terms(
         self, outputs: dict, mod: str, interv_mask: torch.Tensor | None, beta: float
@@ -163,10 +176,11 @@ class CombinedLoss(nn.Module):
         total = (
             loss_audio
             + loss_seismic
-            + self.cfg.lambda_acyclic * L_acyclic
+            + self.current_lambda_acyclic * L_acyclic
             + self.cfg.lambda_interv * L_interv
             + self.cfg.lambda_task * (L_task + L_det)
         )
         metrics["total"] = total.item()
         metrics["beta"] = beta
+        metrics["acyclic_w"] = self.current_lambda_acyclic
         return total, metrics

@@ -16,7 +16,7 @@ dependencies = [
     "seaborn (>=0.13.0)",
     "matplotlib (>=3.9.0)",
     # Linux specific wheel
-    "mamba-ssm @ https://github.com/state-spaces/mamba/releases/download/v2.2.4/mamba_ssm-2.2.4+cu12torch2.4cxx11abiFALSE-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux'",
+    #"mamba-ssm @ https://github.com/state-spaces/mamba/releases/download/v2.2.4/mamba_ssm-2.2.4+cu12torch2.4cxx11abiFALSE-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux'",
     # Mac specific git source
     # "mamba-ssm @ git+https://github.com/purohit10saurabh/mamba-ssm-macos.git ; sys_platform == 'darwin'",
     # Causal-conv1d (required sibling)
