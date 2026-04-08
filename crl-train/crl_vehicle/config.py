@@ -211,7 +211,7 @@ class CRLConfig:
     warmup_epochs:        int   = 5
     cosine_period:        int   = 20
     n_epochs:             int   = 100
-    num_workers:          int   = 4
+    num_workers:          int   = 8
     early_stop_patience:  int   = 10
 
     # Loss weights

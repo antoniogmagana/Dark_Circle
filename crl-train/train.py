@@ -72,6 +72,8 @@ def build_loaders(
         collate_fn=collate_single,
         pin_memory=True,
         drop_last=True,
+        prefetch_factor=4,
+        persistent_workers=True,
     )
     val_loader = DataLoader(
         val_ds,
@@ -81,6 +83,8 @@ def build_loaders(
         collate_fn=collate_single,
         pin_memory=True,
         drop_last=False,
+        prefetch_factor=4,
+        persistent_workers=True,
     )
 
     pair_loader = None
@@ -95,6 +99,8 @@ def build_loaders(
                 collate_fn=collate_pairs,
                 pin_memory=True,
                 drop_last=True,
+                prefetch_factor=4,
+                persistent_workers=True,
             )
             print(f"  Pair dataset: {len(pair_ds)} consecutive pairs.")
         else:

@@ -44,13 +44,12 @@ class KnownInterventionHandler(nn.Module):
         """
         B = interv_idx.shape[0]
         mask = torch.zeros(B, self.d_z, device=device)
-        for b in range(B):
-            idx = interv_idx[b].item()
-            if idx > 0:
-                # Map intervention type 1..N_INTERVENTIONS to a noise dim.
-                # Cycle within the noise block if N_INTERVENTIONS > d_z_noise.
-                noise_dim = (idx - 1) % (self.d_z - self.noise_start)
-                mask[b, self.noise_start + noise_dim] = 1.0
+        active = interv_idx > 0
+        if active.any():
+            # Map intervention type 1..N_INTERVENTIONS to a noise dim.
+            # Cycle within the noise block if N_INTERVENTIONS > d_z_noise.
+            noise_dim = (interv_idx[active] - 1) % (self.d_z - self.noise_start)
+            mask[active, self.noise_start + noise_dim] = 1.0
         return mask
 
     def forward(

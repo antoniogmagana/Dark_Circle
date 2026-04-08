@@ -58,7 +58,10 @@ class SCM(nn.Module):
         """
         A = self.adjacency()
         M = A * A                                        # element-wise square
-        E = torch.linalg.matrix_exp(M.cpu()).to(A.device)  # MPS lacks this op
+        if A.device.type == "mps":
+            E = torch.linalg.matrix_exp(M.cpu()).to(A.device)  # MPS lacks this op
+        else:
+            E = torch.linalg.matrix_exp(M)
         return torch.trace(E) - self.d_z                # scalar
 
     def forward(
