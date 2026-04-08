@@ -174,6 +174,7 @@ class CRLModel(nn.Module):
 
         # Acyclicity loss from shared SCM
         outputs["acyclicity"] = self.scm.acyclicity_loss()
+        outputs["scm_l1"] = self.scm.A_raw.abs().sum()
 
         # Downstream logits (using seismic if available, else audio)
         ref_sensor = "seismic" if "seismic" in self.sensors else self.sensors[0]
@@ -246,6 +247,7 @@ class CRLModel(nn.Module):
                 outputs["interv_targets"] = targets
 
         outputs["acyclicity"] = self.scm.acyclicity_loss()
+        outputs["scm_l1"] = self.scm.A_raw.abs().sum()
         return outputs
 
     def crl_parameters(self):
@@ -313,6 +315,7 @@ class Trainer:
             "causal_audio",
             "causal_seismic",
             "acyclic",
+            "scm_l1",
             "beta",
             "acyclic_w",
         ]

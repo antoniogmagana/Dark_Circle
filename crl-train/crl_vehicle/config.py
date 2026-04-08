@@ -224,6 +224,7 @@ class CRLConfig:
     lambda_task:          float = 1.0
     lambda_acyclic:              float = 1.0
     lambda_acyclic_anneal_epochs: int  = 20  # ramp 0 → lambda_acyclic over this many epochs
+    lambda_l1_graph:             float = 0.01  # L1 sparsity on SCM adjacency weights
 
     # Curriculum
     unknown_interv_start_epoch: int = 10

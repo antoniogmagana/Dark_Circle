@@ -42,12 +42,13 @@ class SCM(nn.Module):
 
     def adjacency(self) -> torch.Tensor:
         """
-        Soft adjacency matrix with diagonal forced to 0 (no self-loops).
-        Returns (d_z, d_z) with values in (0, 1).
+        Raw real-valued adjacency matrix with diagonal forced to 0 (no self-loops).
+        Unbounded weights allow genuine non-trivial DAGs; sparsity is encouraged
+        by an L1 penalty on A_raw in the combined loss rather than by sigmoid
+        bounding (which collapses to the empty graph via NOTEARS gradients).
         """
-        A = torch.sigmoid(self.A_raw)
-        diag_mask = torch.eye(self.d_z, device=A.device)
-        return A * (1.0 - diag_mask)
+        diag_mask = torch.eye(self.d_z, device=self.A_raw.device)
+        return self.A_raw * (1.0 - diag_mask)
 
     def acyclicity_loss(self) -> torch.Tensor:
         """

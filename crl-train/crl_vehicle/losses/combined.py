@@ -143,6 +143,9 @@ class CombinedLoss(nn.Module):
         L_acyclic = outputs.get("acyclicity", torch.tensor(0.0))
         metrics["acyclic"] = L_acyclic.item() if torch.is_tensor(L_acyclic) else float(L_acyclic)
 
+        L_l1_graph = outputs.get("scm_l1", torch.tensor(0.0))
+        metrics["scm_l1"] = L_l1_graph.item() if torch.is_tensor(L_l1_graph) else float(L_l1_graph)
+
         _dev = L_acyclic.device if torch.is_tensor(L_acyclic) else torch.device("cpu")
 
         # --- Unknown intervention classifier ---
@@ -177,6 +180,7 @@ class CombinedLoss(nn.Module):
             loss_audio
             + loss_seismic
             + self.current_lambda_acyclic * L_acyclic
+            + self.cfg.lambda_l1_graph * L_l1_graph
             + self.cfg.lambda_interv * L_interv
             + self.cfg.lambda_task * (L_task + L_det)
         )
