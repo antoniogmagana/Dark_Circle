@@ -2,8 +2,8 @@
 SCM — Structural Causal Model over the latent space z.
 
 Learns a weighted DAG adjacency matrix A (d_z × d_z) and a per-variable
-causal mechanism f_i.  The NOTEARS acyclicity constraint h(A) = 0 is
-enforced as a soft penalty during training.
+causal mechanism f_i.  Acyclicity is enforced by construction via strict
+lower-triangular parameterization — no penalty term required.
 
 One SCM instance is shared across modalities (same causal graph).
 """
@@ -25,7 +25,8 @@ class SCM(nn.Module):
 
         # Learnable adjacency matrix A_raw (d_z × d_z).
         # A[i, j] = weight of edge z_j → z_i.
-        # Initialised near zero → sparse graph at the start of training.
+        # Only the strict lower triangle is used; upper triangle and diagonal
+        # are zeroed out, guaranteeing a DAG by construction.
         self.A_raw = nn.Parameter(torch.randn(d_z, d_z) * 0.3)
 
         # Per-variable causal mechanisms: f_i : R^d_z → R
@@ -40,28 +41,10 @@ class SCM(nn.Module):
 
     def adjacency(self) -> torch.Tensor:
         """
-        Raw real-valued adjacency matrix with diagonal forced to 0 (no self-loops).
-        Unbounded weights allow genuine non-trivial DAGs; sparsity is encouraged
-        by an L1 penalty on A_raw in the combined loss rather than by sigmoid
-        bounding (which collapses to the empty graph via NOTEARS gradients).
+        Strict lower-triangular adjacency matrix — acyclic by construction.
+        A[i, j] = weight of edge z_j → z_i (j < i only).
         """
-        diag_mask = torch.eye(self.d_z, device=self.A_raw.device)
-        return self.A_raw * (1.0 - diag_mask)
-
-    def acyclicity_loss(self) -> torch.Tensor:
-        """
-        NOTEARS constraint: h(A) = tr(e^{A ∘ A}) - d = 0 iff A is a DAG.
-        Returns a scalar; = 0 for a perfect DAG, > 0 if cycles remain.
-        Gradient clipping (max_norm=1.0 in the trainer) is important here
-        since this term can spike early when the graph is still cyclic.
-        """
-        A = self.adjacency()
-        M = A * A                                        # element-wise square
-        if A.device.type == "mps":
-            E = torch.linalg.matrix_exp(M.cpu()).to(A.device)  # MPS lacks this op
-        else:
-            E = torch.linalg.matrix_exp(M)
-        return torch.trace(E) - self.d_z                # scalar
+        return torch.tril(self.A_raw, diagonal=-1)
 
     def forward(
         self,

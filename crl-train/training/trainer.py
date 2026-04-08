@@ -172,8 +172,6 @@ class CRLModel(nn.Module):
             outputs[f"x_hat_{sensor}"] = x_hat
             outputs[f"x_target_{sensor}"] = x_target
 
-        # Acyclicity loss from shared SCM
-        outputs["acyclicity"] = self.scm.acyclicity_loss()
         outputs["scm_l1"] = self.scm.A_raw.abs().sum()
 
         # Downstream logits (using seismic if available, else audio)
@@ -246,7 +244,6 @@ class CRLModel(nn.Module):
                 )  # +1 for "no-interv" class 0
                 outputs["interv_targets"] = targets
 
-        outputs["acyclicity"] = self.scm.acyclicity_loss()
         outputs["scm_l1"] = self.scm.A_raw.abs().sum()
         return outputs
 
@@ -314,10 +311,8 @@ class Trainer:
             "kl_seismic",
             "causal_audio",
             "causal_seismic",
-            "acyclic",
             "scm_l1",
             "beta",
-            "acyclic_w",
             "l1_w",
         ]
         with open(metrics_path, "w", newline="") as f:
@@ -326,7 +321,6 @@ class Trainer:
         print("\n=== CRL Pre-training ===")
         for epoch in range(epochs):
             self.loss_fn.update_beta(epoch)
-            self.loss_fn.update_lambda_acyclic(epoch)
             self.loss_fn.update_lambda_l1(epoch)
             train_metrics = self._train_epoch(loader_known, loader_pairs, epoch)
             # Annealing val loss — for logging only (non-stationary across epochs)
@@ -354,9 +348,9 @@ class Trainer:
                 f"train={train_metrics.get('total', 0):.4f} "
                 f"val={val_metrics.get('total', 0):.4f} "
                 f"val_ckpt={val_ckpt_metrics.get('total', 0):.4f} "
-                f"acyclic={val_metrics.get('acyclic', 0):.3f} "
+                f"scm_l1={val_metrics.get('scm_l1', 0):.3f} "
                 f"β={self.loss_fn.current_beta:.2f} "
-                f"λ_acyc={self.loss_fn.current_lambda_acyclic:.2f}"
+                f"λ_l1={self.loss_fn.current_lambda_l1:.4f}"
             )
 
             val_ckpt = val_ckpt_metrics.get("total", float("inf"))

@@ -15,7 +15,6 @@ Expected keys in the `outputs` dict (built by the Trainer per forward pass):
         avail_{mod}       : (B,) bool   availability mask
 
     Shared (one SCM per experiment):
-        acyclicity        : scalar  — shared SCM acyclicity loss
         interv_mask       : (B, d_z) or None
         interv_logits     : (B, n_targets) or None  — unknown interv cls
         interv_targets    : (B,) long or None
@@ -43,7 +42,6 @@ class CombinedLoss(nn.Module):
         super().__init__()
         self.cfg = config
         self.current_beta = config.beta_start
-        self.current_lambda_acyclic = 0.0
         self.current_lambda_l1 = 0.0
 
     def update_beta(self, epoch: int):
@@ -59,18 +57,6 @@ class CombinedLoss(nn.Module):
         lambda_l1_graph_anneal_epochs.  Call once per epoch."""
         t = min(epoch / max(self.cfg.lambda_l1_graph_anneal_epochs, 1), 1.0)
         self.current_lambda_l1 = t * self.cfg.lambda_l1_graph
-
-    def update_lambda_acyclic(self, epoch: int):
-        """
-        Linearly ramp lambda_acyclic from 0 → cfg.lambda_acyclic over
-        lambda_acyclic_anneal_epochs.  Call once per epoch alongside update_beta.
-
-        Starting at 0 lets causal edges form and carry gradient signal before
-        NOTEARS penalises them — preventing the trivial zero-adjacency collapse
-        that occurs when the acyclicity penalty is at full strength from epoch 0.
-        """
-        t = min(epoch / max(self.cfg.lambda_acyclic_anneal_epochs, 1), 1.0)
-        self.current_lambda_acyclic = t * self.cfg.lambda_acyclic
 
     def _modality_terms(
         self, outputs: dict, mod: str, interv_mask: torch.Tensor | None, beta: float
@@ -146,14 +132,11 @@ class CombinedLoss(nn.Module):
         metrics.update(m_audio)
         metrics.update(m_seismic)
 
-        # --- Acyclicity (shared SCM) ---
-        L_acyclic = outputs.get("acyclicity", torch.tensor(0.0))
-        metrics["acyclic"] = L_acyclic.item() if torch.is_tensor(L_acyclic) else float(L_acyclic)
-
+        # --- Graph sparsity (L1 on lower-triangular adjacency weights) ---
         L_l1_graph = outputs.get("scm_l1", torch.tensor(0.0))
         metrics["scm_l1"] = L_l1_graph.item() if torch.is_tensor(L_l1_graph) else float(L_l1_graph)
 
-        _dev = L_acyclic.device if torch.is_tensor(L_acyclic) else torch.device("cpu")
+        _dev = L_l1_graph.device if torch.is_tensor(L_l1_graph) else torch.device("cpu")
 
         # --- Unknown intervention classifier ---
         L_interv = torch.zeros((), device=_dev)
@@ -186,13 +169,11 @@ class CombinedLoss(nn.Module):
         total = (
             loss_audio
             + loss_seismic
-            + self.current_lambda_acyclic * L_acyclic
             + self.current_lambda_l1 * L_l1_graph
             + self.cfg.lambda_interv * L_interv
             + self.cfg.lambda_task * (L_task + L_det)
         )
         metrics["total"] = total.item()
         metrics["beta"] = beta
-        metrics["acyclic_w"] = self.current_lambda_acyclic
         metrics["l1_w"] = self.current_lambda_l1
         return total, metrics
