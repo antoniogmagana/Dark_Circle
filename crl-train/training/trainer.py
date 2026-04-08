@@ -303,7 +303,7 @@ class Trainer:
     ):
         metrics_path = self.save_dir / "crl_metrics.csv"
         fieldnames = [
-            "epoch", "train_total", "val_total",
+            "epoch", "train_total", "val_total", "val_ckpt",
             "recon_audio", "kl_audio", "recon_seismic", "kl_seismic",
             "causal_audio", "causal_seismic", "acyclic", "beta",
         ]
@@ -316,15 +316,20 @@ class Trainer:
             train_metrics = self._train_epoch(
                 loader_known, loader_pairs, epoch
             )
+            # Annealing val loss — for logging only (non-stationary across epochs)
             val_metrics = self._eval_crl(val_loader)
+            # Fixed-beta val loss — evaluated at beta_end so comparisons are
+            # epoch-invariant; used for checkpointing and early stopping.
+            val_ckpt_metrics = self._eval_crl(val_loader, beta_override=self.cfg.beta_end)
             self.scheduler.step()
 
             row = {
                 "epoch": epoch,
                 "train_total": train_metrics.get("total", 0.0),
                 "val_total": val_metrics.get("total", 0.0),
+                "val_ckpt": val_ckpt_metrics.get("total", 0.0),
             }
-            row.update({k: val_metrics.get(k, 0.0) for k in fieldnames[3:]})
+            row.update({k: val_metrics.get(k, 0.0) for k in fieldnames[4:]})
 
             with open(metrics_path, "a", newline="") as f:
                 csv.DictWriter(f, fieldnames=fieldnames).writerow(row)
@@ -333,20 +338,22 @@ class Trainer:
                 f"Epoch {epoch:3d} | "
                 f"train={train_metrics.get('total', 0):.4f} "
                 f"val={val_metrics.get('total', 0):.4f} "
+                f"val_ckpt={val_ckpt_metrics.get('total', 0):.4f} "
                 f"acyclic={val_metrics.get('acyclic', 0):.3f} "
                 f"β={self.loss_fn.current_beta:.2f}"
             )
 
-            val_loss = val_metrics.get("total", float("inf"))
-            if val_loss < self.best_val_loss:
-                self.best_val_loss = val_loss
+            val_ckpt = val_ckpt_metrics.get("total", float("inf"))
+            in_warmup = epoch < self.cfg.beta_anneal_epochs
+            if val_ckpt < self.best_val_loss:
+                self.best_val_loss = val_ckpt
                 self.patience_ctr = 0
                 torch.save(
                     self.model.state_dict(),
                     self.save_dir / "crl_best.pth",
                 )
-                print(f"  ✓ New best (val={val_loss:.4f})")
-            else:
+                print(f"  ✓ New best (val_ckpt={val_ckpt:.4f})")
+            elif not in_warmup:
                 self.patience_ctr += 1
                 if self.patience_ctr >= self.cfg.early_stop_patience:
                     print(f"  Early stopping at epoch {epoch}.")
@@ -407,13 +414,15 @@ class Trainer:
         return {k: v / max(n_batches, 1) for k, v in total_metrics.items()}
 
     @torch.no_grad()
-    def _eval_crl(self, loader: DataLoader) -> dict:
+    def _eval_crl(
+        self, loader: DataLoader, beta_override: float | None = None
+    ) -> dict:
         self.model.eval()
         total_metrics = {}
         n = 0
         for batch in loader:
             outputs = self.model.forward_known(batch, self.device)
-            _, metrics = self.loss_fn(outputs)
+            _, metrics = self.loss_fn(outputs, beta_override=beta_override)
             for k, v in metrics.items():
                 total_metrics[k] = total_metrics.get(k, 0.0) + v
             n += 1

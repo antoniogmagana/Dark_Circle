@@ -53,7 +53,7 @@ class CombinedLoss(nn.Module):
         )
 
     def _modality_terms(
-        self, outputs: dict, mod: str, interv_mask: torch.Tensor | None
+        self, outputs: dict, mod: str, interv_mask: torch.Tensor | None, beta: float
     ) -> tuple[torch.Tensor, dict]:
         """Compute per-modality ELBO + causal + disentanglement losses."""
         avail = outputs.get(f"avail_{mod}")   # (B,) bool or None
@@ -91,7 +91,7 @@ class CombinedLoss(nn.Module):
 
         total = (
             L_recon
-            + self.current_beta * L_kl
+            + beta * L_kl
             + self.cfg.lambda_causal * L_causal
             + self.cfg.lambda_disent * L_disent
         )
@@ -103,17 +103,26 @@ class CombinedLoss(nn.Module):
         }
         return total, metrics
 
-    def forward(self, outputs: dict) -> tuple[torch.Tensor, dict]:
+    def forward(
+        self, outputs: dict, beta_override: float | None = None
+    ) -> tuple[torch.Tensor, dict]:
         """
         Returns (total_loss, metrics_dict).
         metrics_dict contains detached floats for logging.
+
+        Args:
+            beta_override: If provided, use this beta instead of current_beta.
+                           Pass cfg.beta_end to compute a fixed-beta loss that
+                           is comparable across epochs regardless of annealing
+                           schedule (used for checkpointing).
         """
+        beta = beta_override if beta_override is not None else self.current_beta
         interv_mask = outputs.get("interv_mask")
         metrics = {}
 
         # --- Per-modality terms ---
-        loss_audio, m_audio = self._modality_terms(outputs, "audio", interv_mask)
-        loss_seismic, m_seismic = self._modality_terms(outputs, "seismic", interv_mask)
+        loss_audio, m_audio = self._modality_terms(outputs, "audio", interv_mask, beta)
+        loss_seismic, m_seismic = self._modality_terms(outputs, "seismic", interv_mask, beta)
         metrics.update(m_audio)
         metrics.update(m_seismic)
 
@@ -159,5 +168,5 @@ class CombinedLoss(nn.Module):
             + self.cfg.lambda_task * (L_task + L_det)
         )
         metrics["total"] = total.item()
-        metrics["beta"] = self.current_beta
+        metrics["beta"] = beta
         return total, metrics
