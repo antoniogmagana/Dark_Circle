@@ -6,7 +6,12 @@ causal mechanism f_i.  Acyclicity is enforced by construction via strict
 lower-triangular parameterization — no penalty term required.
 
 One SCM instance is shared across modalities (same causal graph).
+
+Mechanisms are implemented as a single batched einsum over all d_z variables
+rather than a Python loop, eliminating d_z sequential kernel launches.
 """
+
+import math
 
 import torch
 import torch.nn as nn
@@ -22,6 +27,7 @@ class SCM(nn.Module):
     def __init__(self, d_z: int, hidden_dim: int = 32):
         super().__init__()
         self.d_z = d_z
+        self.hidden_dim = hidden_dim
 
         # Learnable adjacency matrix A_raw (d_z × d_z).
         # A[i, j] = weight of edge z_j → z_i.
@@ -30,14 +36,20 @@ class SCM(nn.Module):
         self.A_raw = nn.Parameter(torch.randn(d_z, d_z) * 0.3)
 
         # Per-variable causal mechanisms: f_i : R^d_z → R
-        self.mechanisms = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(d_z, hidden_dim),
-                nn.Tanh(),
-                nn.Linear(hidden_dim, 1),
-            )
-            for _ in range(d_z)
-        ])
+        # Stored as batched weight tensors to allow a single vectorised forward
+        # pass instead of d_z sequential kernel launches.
+        #   mech_W1 : (d_z, d_z, hidden_dim)  — first linear weights
+        #   mech_b1 : (d_z, hidden_dim)        — first linear biases
+        #   mech_W2 : (d_z, hidden_dim)        — second linear weights (scalar out)
+        #   mech_b2 : (d_z,)                   — output biases
+        self.mech_W1 = nn.Parameter(
+            torch.randn(d_z, d_z, hidden_dim) / math.sqrt(d_z)
+        )
+        self.mech_b1 = nn.Parameter(torch.zeros(d_z, hidden_dim))
+        self.mech_W2 = nn.Parameter(
+            torch.randn(d_z, hidden_dim) / math.sqrt(hidden_dim)
+        )
+        self.mech_b2 = nn.Parameter(torch.zeros(d_z))
 
     def adjacency(self) -> torch.Tensor:
         """
@@ -61,16 +73,21 @@ class SCM(nn.Module):
 
         Returns z_hat: (B, d_z)
         """
-        A = self.adjacency()   # (d_z, d_z)
-        z_hat = torch.zeros_like(z)
+        A = self.adjacency()  # (d_z, d_z)
 
-        for i, mech in enumerate(self.mechanisms):
-            # Weighted parent values for variable i
-            parents = A[i].unsqueeze(0) * z   # (B, d_z)
-            z_hat[:, i] = mech(parents).squeeze(-1)
+        # Weighted parent inputs for all variables simultaneously.
+        # inputs[b, i, j] = A[i, j] * z[b, j]
+        inputs = A.unsqueeze(0) * z.unsqueeze(1)  # (B, d_z, d_z)
+
+        # First layer: (B, d_z, hidden_dim)
+        h1 = torch.tanh(
+            torch.einsum("bij,ijh->bih", inputs, self.mech_W1) + self.mech_b1
+        )
+
+        # Second layer (scalar output per variable): (B, d_z)
+        z_hat = torch.einsum("bih,ih->bi", h1, self.mech_W2) + self.mech_b2
 
         if intervention_mask is not None:
-            # Intervened variables keep their encoder-sampled value
             mask = intervention_mask.float()
             z_hat = z_hat * (1.0 - mask) + z * mask
 

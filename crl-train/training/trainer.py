@@ -120,14 +120,17 @@ class CRLModel(nn.Module):
 
     def encode_modality(
         self, sensor: str, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Run Filterbank → SSM → CausalEncoder for one modality.
-        Returns (z, mu, log_var) each (B, d_z).
+        Returns (z, mu, log_var, y) where y is the filterbank output (B, K*C, T').
+        Returning y avoids a redundant filterbank forward pass when the caller
+        also needs the filterbank output as a reconstruction target.
         """
         y = self.filterbanks[sensor](x)  # (B, K*C, T')
-        h = self.ssms[sensor](y)  # (B, T', d_model)
-        return self.encoders[sensor](h)  # z, mu, log_var
+        h = self.ssms[sensor](y)         # (B, T', d_model)
+        z, mu, log_var = self.encoders[sensor](h)
+        return z, mu, log_var, y
 
     def forward_known(self, batch: dict, device: torch.device) -> dict:
         """
@@ -150,17 +153,14 @@ class CRLModel(nn.Module):
             avail = batch[avail_key].to(device)
             outputs[f"avail_{sensor}"] = avail
 
-            z, mu, log_var = self.encode_modality(sensor, x)
+            z, mu, log_var, y = self.encode_modality(sensor, x)
 
-            # Filterbank target (stop gradient — we're reconstructing the
-            # actual filterbank output, not re-computing through FB)
-            with torch.no_grad():
-                fb_target = self.filterbanks[sensor](x)  # (B, K*C, T')
-            # Reshape to (B, K, T') for reconstruction loss
+            # Detach filterbank output for use as reconstruction target —
+            # stop-gradient so the target doesn't move with encoder updates.
             mod_cfg = self.cfg.modality_cfg(sensor)
             K = mod_cfg.n_filters
             T = mod_cfg.t_prime
-            x_target = fb_target.view(x.shape[0], K, T)
+            x_target = y.detach().view(x.shape[0], K, T)
 
             z_scm = self.scm(z, interv_mask)
             x_hat = self.decoders[sensor](z)
@@ -172,7 +172,7 @@ class CRLModel(nn.Module):
             outputs[f"x_hat_{sensor}"] = x_hat
             outputs[f"x_target_{sensor}"] = x_target
 
-        outputs["scm_l1"] = self.scm.A_raw.abs().sum()
+        outputs["scm_l1"] = self.scm.adjacency().abs().sum()
 
         # Downstream logits (using seismic if available, else audio)
         ref_sensor = "seismic" if "seismic" in self.sensors else self.sensors[0]
@@ -203,15 +203,13 @@ class CRLModel(nn.Module):
             avail = batch[f"{sensor}_avail"].to(device)
             outputs[f"avail_{sensor}"] = avail
 
-            z_t, mu_t, lv_t = self.encode_modality(sensor, x_t)
-            z_t1, _, _ = self.encode_modality(sensor, x_t1)
+            z_t, mu_t, lv_t, y_t = self.encode_modality(sensor, x_t)
+            z_t1, _, _, _ = self.encode_modality(sensor, x_t1)
 
             mod_cfg = self.cfg.modality_cfg(sensor)
             K = mod_cfg.n_filters
             T = mod_cfg.t_prime
-            with torch.no_grad():
-                fb_t = self.filterbanks[sensor](x_t)
-            x_target = fb_t.view(x_t.shape[0], K, T)
+            x_target = y_t.detach().view(x_t.shape[0], K, T)
 
             z_scm = self.scm(z_t, intervention_mask=None)
             x_hat = self.decoders[sensor](z_t)
@@ -244,7 +242,7 @@ class CRLModel(nn.Module):
                 )  # +1 for "no-interv" class 0
                 outputs["interv_targets"] = targets
 
-        outputs["scm_l1"] = self.scm.A_raw.abs().sum()
+        outputs["scm_l1"] = self.scm.adjacency().abs().sum()
         return outputs
 
     def crl_parameters(self):
@@ -280,9 +278,20 @@ class Trainer:
         save_dir.mkdir(parents=True, exist_ok=True)
 
         self.optimizer = torch.optim.AdamW(
-            model.crl_parameters(),
+            [
+                {
+                    "params": [
+                        p for n, p in model.named_parameters()
+                        if "det_heads" not in n and n != "scm.A_raw"
+                    ],
+                    "weight_decay": config.wd,
+                },
+                {
+                    "params": [model.scm.A_raw],
+                    "weight_decay": 0.0,
+                },
+            ],
             lr=config.lr,
-            weight_decay=config.wd,
         )
         self.scheduler = build_scheduler(self.optimizer, config)
         self.best_val_loss = float("inf")
@@ -502,7 +511,7 @@ class Trainer:
                     # Use seismic if available, else audio
                     ref = "seismic" if x_s is not None else "audio"
                     x_ref = x_s if x_s is not None else x_a
-                    z, mu, _ = self.model.encode_modality(ref, x_ref)
+                    z, mu, _, _ = self.model.encode_modality(ref, x_ref)
 
                 enc = self.model.encoders[ref]
                 z_pres, z_type, _, _ = enc.split_z_raw(z)
@@ -577,7 +586,7 @@ class Trainer:
             vtype = batch["vehicle_type"]
             det = batch["detection_label"]
 
-            z, _, _ = self.model.encode_modality(ref, x_ref)
+            z, _, _, _ = self.model.encode_modality(ref, x_ref)
             enc = self.model.encoders[ref]
             z_pres, z_type, _, _ = enc.split_z_raw(z)
             pres_logit, type_logits = self.model.det_heads[ref](z_pres, z_type)

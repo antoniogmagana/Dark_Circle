@@ -218,7 +218,7 @@ class CRLConfig:
     beta_start:           float = 0.0
     beta_end:             float = 4.0
     beta_anneal_epochs:   int   = 20
-    lambda_causal:        float = 1.0
+    lambda_causal:        float = 5.0
     lambda_interv:        float = 2.0
     lambda_disent:        float = 0.5
     lambda_task:          float = 1.0

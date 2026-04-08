@@ -146,7 +146,7 @@ def run_full_eval(
         zs, vtypes, dets, intervs = [], [], [], []
         for batch in loader:
             x = batch[f"x_{primary_sensor}"].to(device)
-            z, _, _ = model.encode_modality(primary_sensor, x)
+            z, _, _, _ = model.encode_modality(primary_sensor, x)
             zs.append(z.cpu().numpy())
             vtypes.append(batch["vehicle_type"].numpy())
             dets.append(batch["detection_label"].numpy())

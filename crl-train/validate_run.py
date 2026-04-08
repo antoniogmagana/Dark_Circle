@@ -95,7 +95,7 @@ def _collect_latents(
     zs, vtypes, dets, intervs = [], [], [], []
     for batch in loader:
         x = batch[f"x_{sensor}"].to(device)
-        z, _, _ = model.encode_modality(sensor, x)
+        z, _, _, _ = model.encode_modality(sensor, x)
         zs.append(z.cpu().numpy())
         vtypes.append(batch["vehicle_type"].numpy())
         dets.append(batch["detection_label"].numpy())
@@ -365,7 +365,7 @@ def check_causal_structure(
     # for a single fixed input, manually set z_type to each of the 4 class
     # directions and check that the decoder produces qualitatively different
     # spectral envelopes (mean pairwise MSE should be > 0).
-    z_base, _, _ = model.encode_modality(sensor, x_orig[:1].to(device))
+    z_base, _, _, _ = model.encode_modality(sensor, x_orig[:1].to(device))
     decoder     = model.decoders[sensor]
     type_start  = cfg.d_z_presence
     type_end    = type_start + cfg.d_z_type
@@ -436,7 +436,7 @@ def check_downstream_performance(
         vtype = batch["vehicle_type"]
         det   = batch["detection_label"]
 
-        z, _, _         = model.encode_modality(primary_sensor, x)
+        z, _, _, _      = model.encode_modality(primary_sensor, x)
         z_pres, z_type_r, _, _ = enc.split_z_raw(z)
         pres_logit, type_logits = model.det_heads[primary_sensor](z_pres, z_type_r)
 
