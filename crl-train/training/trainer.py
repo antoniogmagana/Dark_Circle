@@ -51,6 +51,7 @@ from training.scheduler import build_scheduler
 # CRLModel: assembles per-modality + shared components
 # ---------------------------------------------------------------------------
 
+
 class CRLModel(nn.Module):
     """
     Full CRL model: one pipeline per modality, shared SCM and intervention
@@ -104,15 +105,18 @@ class CRLModel(nn.Module):
 
         # Downstream heads (one per modality)
         from crl_vehicle.config import CLASS_MAP
+
         n_classes = len(CLASS_MAP)
-        self.det_heads = nn.ModuleDict({
-            sensor: VehicleDetectionHead(
-                d_z_presence=config.d_z_presence,
-                d_z_type=config.d_z_type,
-                n_classes=n_classes,
-            )
-            for sensor in self.sensors
-        })
+        self.det_heads = nn.ModuleDict(
+            {
+                sensor: VehicleDetectionHead(
+                    d_z_presence=config.d_z_presence,
+                    d_z_type=config.d_z_type,
+                    n_classes=n_classes,
+                )
+                for sensor in self.sensors
+            }
+        )
 
     def encode_modality(
         self, sensor: str, x: torch.Tensor
@@ -121,13 +125,11 @@ class CRLModel(nn.Module):
         Run Filterbank → SSM → CausalEncoder for one modality.
         Returns (z, mu, log_var) each (B, d_z).
         """
-        y = self.filterbanks[sensor](x)    # (B, K*C, T')
-        h = self.ssms[sensor](y)           # (B, T', d_model)
-        return self.encoders[sensor](h)    # z, mu, log_var
+        y = self.filterbanks[sensor](x)  # (B, K*C, T')
+        h = self.ssms[sensor](y)  # (B, T', d_model)
+        return self.encoders[sensor](h)  # z, mu, log_var
 
-    def forward_known(
-        self, batch: dict, device: torch.device
-    ) -> dict:
+    def forward_known(self, batch: dict, device: torch.device) -> dict:
         """
         Forward pass for known-intervention batches.
         Returns outputs dict for CombinedLoss.
@@ -185,9 +187,7 @@ class CRLModel(nn.Module):
 
         return outputs
 
-    def forward_unknown(
-        self, batch: dict, device: torch.device
-    ) -> dict:
+    def forward_unknown(self, batch: dict, device: torch.device) -> dict:
         """
         Forward pass for unknown-intervention (consecutive pair) batches.
         Returns outputs dict including intervention classifier logits.
@@ -235,16 +235,14 @@ class CRLModel(nn.Module):
                 # Target: index of the noise dimension that changed.
                 # When interv_t != interv_t1, target = noise_dim; else = 0.
                 noise_start = (
-                    self.cfg.d_z_presence
-                    + self.cfg.d_z_type
-                    + self.cfg.d_z_proximity
+                    self.cfg.d_z_presence + self.cfg.d_z_type + self.cfg.d_z_proximity
                 )
-                targets = torch.zeros(
-                    z_t.shape[0], dtype=torch.long, device=device
-                )
+                targets = torch.zeros(z_t.shape[0], dtype=torch.long, device=device)
                 changed = interv_t != interv_t1
                 noise_dim = (interv_t[changed] - 1) % self.cfg.d_z_noise
-                targets[changed] = noise_start + noise_dim + 1  # +1 for "no-interv" class 0
+                targets[changed] = (
+                    noise_start + noise_dim + 1
+                )  # +1 for "no-interv" class 0
                 outputs["interv_targets"] = targets
 
         outputs["acyclicity"] = self.scm.acyclicity_loss()
@@ -263,6 +261,7 @@ class CRLModel(nn.Module):
 # ---------------------------------------------------------------------------
 # Trainer
 # ---------------------------------------------------------------------------
+
 
 class Trainer:
 
@@ -303,9 +302,18 @@ class Trainer:
     ):
         metrics_path = self.save_dir / "crl_metrics.csv"
         fieldnames = [
-            "epoch", "train_total", "val_total", "val_ckpt",
-            "recon_audio", "kl_audio", "recon_seismic", "kl_seismic",
-            "causal_audio", "causal_seismic", "acyclic", "beta",
+            "epoch",
+            "train_total",
+            "val_total",
+            "val_ckpt",
+            "recon_audio",
+            "kl_audio",
+            "recon_seismic",
+            "kl_seismic",
+            "causal_audio",
+            "causal_seismic",
+            "acyclic",
+            "beta",
         ]
         with open(metrics_path, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=fieldnames).writeheader()
@@ -313,14 +321,14 @@ class Trainer:
         print("\n=== CRL Pre-training ===")
         for epoch in range(epochs):
             self.loss_fn.update_beta(epoch)
-            train_metrics = self._train_epoch(
-                loader_known, loader_pairs, epoch
-            )
+            train_metrics = self._train_epoch(loader_known, loader_pairs, epoch)
             # Annealing val loss — for logging only (non-stationary across epochs)
             val_metrics = self._eval_crl(val_loader)
             # Fixed-beta val loss — evaluated at beta_end so comparisons are
             # epoch-invariant; used for checkpointing and early stopping.
-            val_ckpt_metrics = self._eval_crl(val_loader, beta_override=self.cfg.beta_end)
+            val_ckpt_metrics = self._eval_crl(
+                val_loader, beta_override=self.cfg.beta_end
+            )
             self.scheduler.step()
 
             row = {
@@ -402,9 +410,7 @@ class Trainer:
                 loss = loss + unknown_weight * unk_loss
 
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), max_norm=1.0
-            )
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
 
             for k, v in metrics.items():
@@ -414,9 +420,7 @@ class Trainer:
         return {k: v / max(n_batches, 1) for k, v in total_metrics.items()}
 
     @torch.no_grad()
-    def _eval_crl(
-        self, loader: DataLoader, beta_override: float | None = None
-    ) -> dict:
+    def _eval_crl(self, loader: DataLoader, beta_override: float | None = None) -> dict:
         self.model.eval()
         total_metrics = {}
         n = 0
@@ -444,9 +448,7 @@ class Trainer:
             if "det_heads" not in name:
                 p.requires_grad = False
 
-        head_opt = torch.optim.AdamW(
-            self.model.head_parameters(), lr=self.cfg.lr * 0.1
-        )
+        head_opt = torch.optim.AdamW(self.model.head_parameters(), lr=self.cfg.lr * 0.1)
         head_sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
             head_opt, factor=0.5, patience=3
         )
@@ -454,9 +456,12 @@ class Trainer:
         metrics_path = self.save_dir / "downstream_metrics.csv"
         fieldnames = [
             "epoch",
-            "train_det_loss", "train_cls_loss",
-            "val_det_acc", "val_det_f1",
-            "val_cls_acc", "val_cls_f1",
+            "train_det_loss",
+            "train_cls_loss",
+            "val_det_acc",
+            "val_det_f1",
+            "val_cls_acc",
+            "val_cls_f1",
         ]
         with open(metrics_path, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=fieldnames).writeheader()
@@ -478,8 +483,16 @@ class Trainer:
             n_det = n_cls = 0
 
             for batch in train_loader:
-                x_s = batch["x_seismic"].to(self.device) if "seismic" in self.model.sensors else None
-                x_a = batch["x_audio"].to(self.device) if "audio" in self.model.sensors else None
+                x_s = (
+                    batch["x_seismic"].to(self.device)
+                    if "seismic" in self.model.sensors
+                    else None
+                )
+                x_a = (
+                    batch["x_audio"].to(self.device)
+                    if "audio" in self.model.sensors
+                    else None
+                )
                 vtype = batch["vehicle_type"].to(self.device)
                 det = batch["detection_label"].to(self.device)
 
@@ -495,17 +508,13 @@ class Trainer:
                 head_opt.zero_grad()
                 pres_logit, type_logits = self.model.det_heads[ref](z_pres, z_type)
 
-                det_logits_2c = torch.stack(
-                    [-pres_logit, pres_logit], dim=1
-                )
+                det_logits_2c = torch.stack([-pres_logit, pres_logit], dim=1)
                 det_loss = F.cross_entropy(det_logits_2c, det, weight=det_weight)
 
                 cls_mask = vtype >= 0
                 cls_loss = torch.tensor(0.0, device=self.device)
                 if cls_mask.any():
-                    cls_loss = F.cross_entropy(
-                        type_logits[cls_mask], vtype[cls_mask]
-                    )
+                    cls_loss = F.cross_entropy(type_logits[cls_mask], vtype[cls_mask])
 
                 loss = det_loss + cls_loss
                 loss.backward()
@@ -517,7 +526,7 @@ class Trainer:
                 n_cls += int(cls_mask.any())
 
             val_m = self._eval_downstream(val_loader)
-            head_sched.step(-val_m["cls_f1"])
+            head_sched.step(-val_m["val_cls_f1"])
 
             row = {
                 "epoch": epoch,
@@ -594,6 +603,8 @@ class Trainer:
 
         self.model.train()
         return {
-            "val_det_acc": det_acc, "val_det_f1": det_f1,
-            "val_cls_acc": cls_acc, "val_cls_f1": cls_f1,
+            "val_det_acc": det_acc,
+            "val_det_f1": det_f1,
+            "val_cls_acc": cls_acc,
+            "val_cls_f1": cls_f1,
         }
