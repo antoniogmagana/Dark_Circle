@@ -1,39 +1,10 @@
 import os
 import hashlib
 import json
-import random
 import torch
 import torchaudio.transforms
+import pandas as pd
 from torch.utils.data import Dataset
-import atexit
-from torch.utils.data import get_worker_info
-
-# Centralized imports
-from db_utils import (
-    db_connect,
-    db_close,
-    fetch_table_segment,
-    get_time_bounds,
-    get_present_map,
-)
-
-
-def db_worker_init(worker_id, config=None):
-    """
-    This function runs once per worker when it is spawned.
-    It gives each worker its own dedicated PostgreSQL connection.
-    """
-    torch.set_num_threads(1)
-    worker_info = get_worker_info()
-    dataset = worker_info.dataset
-
-    if isinstance(dataset, torch.utils.data.Subset):
-        dataset = dataset.dataset
-
-    # Open the connection and attach it directly to the dataset object
-    dataset.conn, dataset.cursor = db_connect(config.DB_CONN_PARAMS)
-
-    atexit.register(dataset.close_connection)
 
 
 class VehicleDataset(Dataset):
@@ -45,15 +16,11 @@ class VehicleDataset(Dataset):
         self.split_idx = {}
         self.samples = []
         self.resamplers = {}
-        self.conn = None
-        self.cursor = None
-        self.noise_floors = None
         self.reverse_class_map = {v: k for k, v in self.config.CLASS_MAP.items()}
 
-        self._get_tables()
-        self._get_table_max_time()
+        self._scan_parquet_files()
+        self._load_metadata()
         self._align_max_time()
-        self._get_present_maps()
         self._get_samples()
         self._preload_tables()
 
@@ -61,10 +28,8 @@ class VehicleDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        # Unpack the fully-defined sample tuple
         dataset, instance, sensor_node, run_id, time, label_str = self.samples[idx]
 
-        # --- RESOLVE STRING TO INTEGER ---
         if self.config.TRAINING_MODE == "detection":
             label_int = 0 if label_str == "background" else 1
 
@@ -111,7 +76,6 @@ class VehicleDataset(Dataset):
         X = torch.cat(sensor_tensors, dim=0)
         y = torch.tensor(label_int, dtype=torch.long)
 
-        # CRITICAL: Return dataset string here
         return X, y, dataset
 
     def _upsample_signal(self, sensor_data, sample_rate, target_freq):
@@ -122,46 +86,69 @@ class VehicleDataset(Dataset):
             )
         return self.resamplers[resample_key](sensor_data)
 
-    def _get_tables(self):
-        conn, cursor = db_connect(self.config.DB_CONN_PARAMS)
-        for dataset in self.config.TRAIN_DATASETS:
-            cursor.execute(
-                """
-                SELECT tablename
-                FROM pg_tables
-                WHERE schemaname='public'
-                  AND tablename LIKE %s;
-                  """,
-                (f"{dataset}_%",),
-            )
-            self.tables.extend([table[0] for table in cursor.fetchall()])
-        db_close(conn, cursor)
+    def _scan_parquet_files(self):
+        """Discover all parquet files across DATA_SCAN_DIRS and index by table name."""
+        data_dir = getattr(self.config, "DATA_DIR", "../data_files/parsed")
+        scan_dirs = getattr(self.config, "DATA_SCAN_DIRS", ["train", "val", "test_iobt"])
 
-    def _get_table_max_time(self):
-        temp_conn, temp_cursor = db_connect(self.config.DB_CONN_PARAMS)
+        self._parquet_paths = {}  # table_name -> file path
 
+        for subdir in scan_dirs:
+            dir_path = os.path.join(data_dir, subdir)
+            if not os.path.isdir(dir_path):
+                continue
+            for fname in sorted(os.listdir(dir_path)):
+                if not fname.endswith(".parquet"):
+                    continue
+                table_name = fname[: -len(".parquet")]
+                ds = table_name.split("_")[0]
+                if ds not in self.config.TRAIN_DATASETS:
+                    continue
+                # First occurrence wins — avoids duplicate table keys across subdirs
+                if table_name not in self._parquet_paths:
+                    self._parquet_paths[table_name] = os.path.join(dir_path, fname)
+
+        self.tables = list(self._parquet_paths.keys())
+
+    def _load_metadata(self):
+        """Compute time bounds and present maps in a single read pass per file.
+
+        Replaces the separate _get_table_max_time and _get_present_maps DB calls.
+        For m3nvc files the run_id column splits the file into per-run segments,
+        matching the multi-run structure that was previously in the database.
+        """
         self.table_run_max_time = {}
         self.table_run_min_time = {}
+        self.present_maps = {}
 
         for table in self.tables:
-            if table.startswith("m3nvc_"):
-                try:
-                    temp_cursor.execute(
-                        f"SELECT DISTINCT run_id FROM {table} WHERE run_id IS NOT NULL;"
-                    )
-                    runs = [row[0] for row in temp_cursor.fetchall()]
-                except Exception:
-                    temp_conn.rollback()
-                    runs = [None]
+            path = self._parquet_paths[table]
+            is_m3nvc = table.startswith("m3nvc_")
+
+            cols = ["time_stamp", "present"]
+            if is_m3nvc:
+                cols.append("run_id")
+
+            df = pd.read_parquet(path, columns=cols)
+
+            if is_m3nvc:
+                for run_id, grp in df.groupby("run_id"):
+                    run_id = int(run_id)
+                    key = (table, run_id)
+                    self.table_run_min_time[key] = float(grp["time_stamp"].min())
+                    self.table_run_max_time[key] = float(grp["time_stamp"].max())
+                    sec_groups = grp.groupby(grp["time_stamp"].astype(int))["present"].all()
+                    self.present_maps[key] = {
+                        int(k): bool(v) for k, v in sec_groups.items()
+                    }
             else:
-                runs = [None]
-
-            for run_id in runs:
-                min_t, max_t = get_time_bounds(temp_cursor, table, run_id=run_id)
-                self.table_run_min_time[(table, run_id)] = min_t
-                self.table_run_max_time[(table, run_id)] = max_t
-
-        db_close(temp_conn, temp_cursor)
+                key = (table, None)
+                self.table_run_min_time[key] = float(df["time_stamp"].min())
+                self.table_run_max_time[key] = float(df["time_stamp"].max())
+                sec_groups = df.groupby(df["time_stamp"].astype(int))["present"].all()
+                self.present_maps[key] = {
+                    int(k): bool(v) for k, v in sec_groups.items()
+                }
 
     def _align_max_time(self):
         groups = {}
@@ -194,8 +181,6 @@ class VehicleDataset(Dataset):
                 else:
                     ref_trs = table_runs
                 group_min_t = max(self.table_run_min_time[tr] for tr in ref_trs)
-                # End time must be the intersection across all sensors so every
-                # sensor's cache covers the full valid_duration window range.
                 group_max_t = min(self.table_run_max_time[tr] for tr in table_runs)
 
                 valid_duration = group_max_t - group_min_t
@@ -212,16 +197,6 @@ class VehicleDataset(Dataset):
             del self.table_run_max_time[k]
             del self.table_run_min_time[k]
 
-    def _get_present_maps(self):
-        """Load per-second present flags for every valid (table, run_id)."""
-        conn, cursor = db_connect(self.config.DB_CONN_PARAMS)
-        self.present_maps = {}
-        for (table, run_id) in self.table_run_max_time:
-            self.present_maps[(table, run_id)] = get_present_map(
-                cursor, table, run_id=run_id
-            )
-        db_close(conn, cursor)
-
     def _get_samples(self):
         unique_samples = set()
 
@@ -235,7 +210,6 @@ class VehicleDataset(Dataset):
             instance = "_".join(parts[2:-1])
             sensor_node = parts[-1]
 
-            # 1. Fetch category STRING from mapping (e.g., "sport")
             vehicle_info = self.config.DATASET_VEHICLE_MAP.get(dataset, {}).get(
                 instance, None
             )
@@ -248,21 +222,12 @@ class VehicleDataset(Dataset):
             ):
                 continue
 
-            # 2. Resolve present map for this (table, run_id)
-            # Use the first sensor's table — all sensors share the same
-            # time axis so their present maps are identical.
             ref_signal = self.config.TRAIN_SENSORS[0]
             ref_table = f"{dataset}_{ref_signal}_{instance}_{sensor_node}"
             present_map = self.present_maps.get((ref_table, run_id), {})
             is_m3nvc_bg = (dataset == "m3nvc" and instance == "background")
 
             def _effective_label(step_idx):
-                """
-                Returns (label_str, include) for a given step index.
-                - m3nvc background is always "background" / always included.
-                - detection: all windows included; label driven by present_flag.
-                - category/instance: only present=True windows included.
-                """
                 if is_m3nvc_bg:
                     return "background", True
                 start_sec = int(step_idx * STEP)
@@ -273,12 +238,10 @@ class VehicleDataset(Dataset):
                 else:
                     return category_str, present_flag
 
-            # 3. Map-Driven Sliding-Window Split Assignment
             split_rule = vehicle_info[2]
             WINDOW = self.config.SAMPLE_SECONDS
-            # Sliding windows only for train; eval splits use non-overlapping 1s windows
             STEP = self.config.WINDOW_STEP if self.split == "train" else WINDOW
-            valid_duration = times  # float seconds
+            valid_duration = times
             max_step_idx = int((valid_duration - WINDOW) / STEP)
             mid_time = valid_duration / 2.0
 
@@ -354,6 +317,7 @@ class VehicleDataset(Dataset):
             "sample_seconds": self.config.SAMPLE_SECONDS,
             "window_step": self.config.WINDOW_STEP,
             "split": self.split,
+            "data_dir": getattr(self.config, "DATA_DIR", ""),
         }
         key_hash = hashlib.md5(
             json.dumps(key_data, sort_keys=True).encode()
@@ -362,10 +326,10 @@ class VehicleDataset(Dataset):
         return os.path.join(cache_dir, f"table_cache_{self.split}_{key_hash}.pt")
 
     def _preload_tables(self):
-        """Bulk-load all required table segments into memory.
+        """Bulk-load all required parquet segments into memory tensors.
 
-        Eliminates per-sample DB queries.
-        Caches to disk so subsequent runs skip the DB load entirely."""
+        Caches to disk so subsequent runs skip the parquet load entirely.
+        """
         cache_path = self._get_cache_path()
 
         if os.path.exists(cache_path):
@@ -380,13 +344,10 @@ class VehicleDataset(Dataset):
             )
             return
 
-        conn, cursor = db_connect(self.config.DB_CONN_PARAMS)
         self.table_cache = {}
 
         needed = set()
         for dataset, instance, sensor_node, run_id, _, _ in self.samples:
-            if dataset == "synthetic":
-                continue
             for signal in self.config.TRAIN_SENSORS:
                 table = f"{dataset}_{signal}_{instance}_{sensor_node}"
                 key = (table, run_id)
@@ -397,32 +358,43 @@ class VehicleDataset(Dataset):
         print(f"[{self.split}] Pre-loading {total} table segments into memory...")
 
         for i, (table, run_id) in enumerate(sorted(needed)):
+            path = self._parquet_paths.get(table)
+            if path is None:
+                continue
+
             min_t = self.table_run_min_time[(table, run_id)]
-            rows = fetch_table_segment(
-                cursor, table, from_time=min_t, run_id=run_id
-            )
-            if rows:
-                self.table_cache[(table, run_id)] = torch.tensor(
-                    rows, dtype=torch.float32
+
+            if "_accel_" in table:
+                data_cols = ["accel_x_ew", "accel_y_ns", "accel_z_ud"]
+            else:
+                data_cols = ["amplitude"]
+
+            read_cols = ["time_stamp"] + data_cols
+            if run_id is not None:
+                read_cols.append("run_id")
+
+            df = pd.read_parquet(path, columns=read_cols)
+            df = df[df["time_stamp"] >= min_t]
+
+            if run_id is not None:
+                df = df[df["run_id"] == run_id]
+
+            df = df.sort_values("time_stamp")
+
+            if not df.empty:
+                data = torch.tensor(
+                    df[data_cols].to_numpy(), dtype=torch.float32
                 ).T
+                self.table_cache[(table, run_id)] = data
+
             if (i + 1) % 20 == 0 or (i + 1) == total:
                 print(
-                    f"  [{self.split}] Loaded {i + 1}/{total} segments...", flush=True
+                    f"  [{self.split}] Loaded {i + 1}/{total} segments...",
+                    flush=True,
                 )
 
-        db_close(conn, cursor)
         print(f"[{self.split}] Pre-loading complete.", flush=True)
 
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
         torch.save(self.table_cache, cache_path)
         print(f"[{self.split}] Cache saved to {cache_path}", flush=True)
-
-    def close_connection(self):
-        if getattr(self, "cursor", None) and not self.cursor.closed:
-            self.cursor.close()
-
-        if getattr(self, "conn", None) and self.conn.closed == 0:
-            self.conn.close()
-
-    def __del__(self):
-        self.close_connection()

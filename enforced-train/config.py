@@ -38,17 +38,12 @@ else:
     DEVICE = torch.device("cpu")
 
 # =====================================================================
-# 2. DATABASE PARAMETERS
+# 2. DATA SOURCE
 # =====================================================================
-DB_CONN_PARAMS = {
-    "dbname": "lvc_db",
-    "user": "lvc_toolkit",
-    "password": os.environ.get("DB_PASSWORD"),
-    "host": "localhost",
-    "port": 5432,
-}
-if not DB_CONN_PARAMS["password"]:
-    DB_CONN_PARAMS["password"] = input("Enter Database Password: ")
+# Root of the pre-split parquet tree (relative to enforced-train/ working dir).
+# Override with DATA_DIR env var when running from a different location.
+DATA_DIR = os.environ.get("DATA_DIR", "../data_files/parsed")
+DATA_SCAN_DIRS = ["train", "val", "test_iobt"]
 
 # =====================================================================
 # 3. TRAINING MODE
