@@ -44,7 +44,7 @@ from crl_vehicle.models.intervention import (
 from crl_vehicle.models.decoder import SpectralDecoder
 from crl_vehicle.models.downstream import VehicleDetectionHead
 from crl_vehicle.losses.combined import CombinedLoss
-from crl_vehicle.data.transforms import apply_all_interventions, N_INTERVENTIONS
+from crl_vehicle.data.transforms import apply_interventions_batch_gpu, N_INTERVENTIONS
 from training.scheduler import build_scheduler
 
 
@@ -166,6 +166,7 @@ class CRLModel(nn.Module):
             z_scm = self.scm(z, interv_mask)
             x_hat = self.decoders[sensor](z)
 
+            outputs[f"x_raw_{sensor}"] = x          # cached for contrast loss (already on device)
             outputs[f"z_{sensor}"] = z
             outputs[f"mu_{sensor}"] = mu
             outputs[f"log_var_{sensor}"] = log_var
@@ -448,42 +449,34 @@ class Trainer:
             outputs = self.model.forward_known(batch, self.device)
             loss, metrics = self.loss_fn(outputs)
 
-            # All-interventions contrast loss: for each available modality,
-            # expand the batch by (N_INTERVENTIONS+1) views, encode all, then
-            # penalise vehicle-dim variance across intervention conditions and
-            # reward noise-dim variance (anti-collapse).
-            # Applied on a random subset of min(B, 16) samples for efficiency.
+            # All-interventions contrast loss: expand batch to (N+1) intervention
+            # views in one vectorised GPU call, encode all, then penalise vehicle-dim
+            # variance across interventions and reward noise-dim variance.
+            # Subsample to min(B, 16) to keep memory bounded.
             if self.cfg.lambda_contrast > 0:
                 for sensor in self.model.sensors:
-                    x_raw = batch[f"x_{sensor}"].to(self.device)
-                    avail = batch[f"{sensor}_avail"]
-                    if not avail.any():
+                    avail = outputs.get(f"avail_{sensor}")
+                    x_raw = outputs[f"x_raw_{sensor}"]   # already on device, no .to() needed
+                    if avail is not None:
+                        x_raw = x_raw[avail]
+                    if x_raw.shape[0] == 0:
                         continue
-                    x_raw = x_raw[avail.to(self.device)]
                     sub_B = min(x_raw.shape[0], 16)
                     if sub_B < x_raw.shape[0]:
-                        idx = torch.randperm(x_raw.shape[0])[:sub_B]
+                        idx = torch.randperm(x_raw.shape[0], device=x_raw.device)[:sub_B]
                         x_raw = x_raw[idx]
                     sr = self.cfg.modality_cfg(sensor).sample_rate
                     N = N_INTERVENTIONS
-                    # Build ((N+1)*sub_B, C, W) — one row per (sample, interv)
-                    views = torch.cat([
-                        torch.stack([
-                            apply_all_interventions(x_raw[b], sr)[k]
-                            for b in range(sub_B)
-                        ])
-                        for k in range(N + 1)
-                    ])  # ((N+1)*sub_B, C, W)
+                    # (N+1, sub_B, C, W) — all views generated on GPU in one call
+                    all_views = apply_interventions_batch_gpu(x_raw, sr)
+                    views = all_views.view((N + 1) * sub_B, *x_raw.shape[1:])
                     z_all, _, _, _ = self.model.encode_modality(sensor, views)
-                    # Reshape to (sub_B, N+1, d_z)
-                    z_all = z_all.view(N + 1, sub_B, -1).permute(1, 0, 2)
+                    z_all = z_all.view(N + 1, sub_B, -1).permute(1, 0, 2)  # (sub_B, N+1, d_z)
                     enc = self.model.encoders[sensor]
                     noise_start = enc.noise_idx.start
                     z_veh = z_all[:, :, :noise_start]          # (sub_B, N+1, d_veh)
                     z_nz  = z_all[:, :, enc.noise_idx]         # (sub_B, N+1, d_noise)
-                    # Invariance: vehicle dims should not vary across interventions
                     L_inv = (z_veh - z_veh.mean(dim=1, keepdim=True)).pow(2).mean()
-                    # Equivariance: noise dims must vary (prevent noise collapse)
                     L_equiv = -z_nz.var(dim=1).clamp(max=1.0).mean()
                     loss = (
                         loss
@@ -511,6 +504,8 @@ class Trainer:
             for k, v in metrics.items():
                 total_metrics[k] = total_metrics.get(k, 0.0) + v
             n_batches += 1
+            if self.cfg.steps_per_epoch and n_batches >= self.cfg.steps_per_epoch:
+                break
 
         return {k: v / max(n_batches, 1) for k, v in total_metrics.items()}
 

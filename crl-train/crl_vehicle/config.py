@@ -239,6 +239,9 @@ class CRLConfig:
     lambda_equiv:    float = 0.5   # equivariance: noise dims must vary across interventions
     lambda_collapse: float = 1.0   # posterior collapse penalty
 
+    # Training throughput
+    steps_per_epoch: int | None = None  # cap gradient steps per epoch (None = full epoch)
+
     # Paths
     save_dir:        str   = "saved_crl"
 

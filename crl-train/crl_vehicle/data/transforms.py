@@ -254,11 +254,119 @@ def apply_all_interventions(x: torch.Tensor, sample_rate: int) -> torch.Tensor:
     x: (C, W)
     Returns: (N_INTERVENTIONS+1, C, W)
 
-    Used in the training loop to compute the all-interventions contrast loss.
-    Applied in-loop (not in __getitem__) to avoid multiplying DataLoader data
-    transfer by 8×.
+    Single-sample version kept for backwards compatibility.
+    Prefer apply_interventions_batch_gpu for training loops.
     """
     return torch.stack([
         rms_normalize(apply_intervention(x, k, sample_rate))
         for k in range(N_INTERVENTIONS + 1)
     ])
+
+
+# ---------------------------------------------------------------------------
+# Vectorised batch intervention — GPU-native, no CPU↔GPU transfers
+# ---------------------------------------------------------------------------
+
+def _noise_batch_gpu(
+    interv_id: int, B: int, C: int, W: int, sample_rate: int, device: torch.device
+) -> torch.Tensor:
+    """
+    Generate a (B, C, W) noise tensor for intervention type interv_id directly
+    on `device`.  All random ops and deterministic ops stay on GPU.
+    """
+    if interv_id == 1:  # white
+        return torch.randn(B, C, W, device=device)
+
+    if interv_id == 2:  # brown
+        noise = torch.cumsum(torch.randn(B, C, W, device=device), dim=-1)
+        return noise - noise.mean(dim=-1, keepdim=True)
+
+    if interv_id == 3:  # pink — Voss-McCartney, batched
+        n_oct = max(1, int(math.log2(W)))
+        pink = torch.zeros(B, C, W, device=device)
+        for k in range(n_oct):
+            step = 2 ** k
+            n_samp = math.ceil(W / step)
+            white = torch.randn(B, C, n_samp, device=device)
+            upsampled = white.repeat_interleave(step, dim=-1)[:, :, :W]
+            pink = pink + upsampled
+        return pink - pink.mean(dim=-1, keepdim=True)
+
+    if interv_id == 4:  # green — FFT band-pass on batched pink
+        n_oct = max(1, int(math.log2(W)))
+        pink = torch.zeros(B, C, W, device=device)
+        for k in range(n_oct):
+            step = 2 ** k
+            n_samp = math.ceil(W / step)
+            white = torch.randn(B, C, n_samp, device=device)
+            pink = pink + white.repeat_interleave(step, dim=-1)[:, :, :W]
+        pink = pink - pink.mean(dim=-1, keepdim=True)
+        centre_hz = min(500.0, sample_rate / 8.0)
+        freqs = torch.fft.rfftfreq(W, d=1.0 / sample_rate, device=device)
+        mask = torch.exp(-0.5 * ((freqs - centre_hz) / centre_hz).pow(2))
+        return torch.fft.irfft(torch.fft.rfft(pink, dim=-1) * mask, n=W, dim=-1)
+
+    if interv_id == 5:  # low-freq oscillation — deterministic base, random amplitude
+        t = torch.linspace(0, W / sample_rate, W, device=device)
+        base = torch.sin(2 * math.pi * 3 * t) + torch.sin(2 * math.pi * 8 * t + 1.5)
+        amp = torch.randn(B, C, W, device=device) * 0.2 + 1.0
+        return base.view(1, 1, W) * amp
+
+    if interv_id == 6:  # high-freq chirp — fully deterministic, broadcast across batch
+        t = torch.linspace(0, W / sample_rate, W, device=device)
+        freq = torch.linspace(sample_rate / 8.0, sample_rate / 3.0, W, device=device)
+        chirp = torch.sin(2 * math.pi * freq * t)
+        envelope = torch.exp(-((t - t[-1] / 2) ** 2) / (0.02 + 1e-8))
+        return (chirp * envelope).view(1, 1, W).expand(B, C, W).contiguous()
+
+    if interv_id == 7:  # bird chirps — 4 batched FM bursts
+        t = torch.linspace(0, W / sample_rate, W, device=device)  # (W,)
+        signal = torch.zeros(B, C, W, device=device)
+        for _ in range(4):
+            t_c = torch.rand(B, 1, 1, device=device) * (W / sample_rate)
+            sigma = (0.02 + torch.rand(B, 1, 1, device=device) * 0.08).clamp(min=1e-4)
+            env = torch.exp(-0.5 * ((t - t_c) / sigma).pow(2))        # (B, 1, W)
+            f_lo = sample_rate * 0.25 + torch.rand(B, 1, 1, device=device) * sample_rate * 0.25
+            f_hi = f_lo + sample_rate * 0.1
+            # Instantaneous frequency: linear sweep per sample, shape (B, 1, W)
+            sweep = torch.linspace(0, 1, W, device=device).view(1, 1, W)
+            f_inst = f_lo + sweep * (f_hi - f_lo)
+            phase = 2 * math.pi * torch.cumsum(f_inst / sample_rate, dim=-1)
+            signal = signal + (torch.sin(phase) * env).expand(B, C, W)
+        return signal
+
+    return torch.zeros(B, C, W, device=device)  # unknown — pass-through noise-free
+
+
+def apply_interventions_batch_gpu(
+    x_batch: torch.Tensor, sample_rate: int
+) -> torch.Tensor:
+    """
+    Vectorised multi-intervention expansion.  All noise is generated on
+    x_batch.device — no CPU↔GPU transfers and no Python loop over batch samples.
+
+    x_batch : (B, C, W) — already on GPU
+    Returns  : (N_INTERVENTIONS+1, B, C, W)
+                  [0] = clean (RMS-normalised)
+                  [k] = x_batch + intervention-k noise (RMS-normalised), k=1..7
+    """
+    B, C, W = x_batch.shape
+    device = x_batch.device
+    sig_rms = x_batch.pow(2).mean(dim=-1, keepdim=True).sqrt()  # (B, C, 1)
+
+    views = [_rms_normalize_batch(x_batch)]  # clean view
+
+    for k in range(1, N_INTERVENTIONS + 1):
+        noise = _noise_batch_gpu(k, B, C, W, sample_rate, device)   # (B, C, W)
+        noise_rms = noise.pow(2).mean(dim=-1, keepdim=True).sqrt()
+        target_rms = (sig_rms * 0.20).clamp(min=1e-4)
+        mixed = x_batch + noise * (target_rms / (noise_rms + 1e-8))
+        views.append(_rms_normalize_batch(mixed))
+
+    return torch.stack(views)   # (N+1, B, C, W)
+
+
+def _rms_normalize_batch(x: torch.Tensor) -> torch.Tensor:
+    """x: (B, C, W) → (B, C, W), per-sample RMS normalisation."""
+    rms = x.pow(2).mean(dim=-1, keepdim=True).sqrt()
+    return x / (rms + 1e-8)
