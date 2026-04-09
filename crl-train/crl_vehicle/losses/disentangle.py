@@ -21,7 +21,7 @@ def total_correlation_loss(z: torch.Tensor) -> torch.Tensor:
     Returns scalar.  = 0 when all z dimensions are uncorrelated.
     """
     B, d_z = z.shape
-    z_norm = (z - z.mean(0)) / (z.std(0) + 1e-8)   # (B, d_z)
+    z_norm = (z - z.mean(0)) / (z.std(0, correction=0) + 1e-8)   # (B, d_z)
     cov = (z_norm.T @ z_norm) / B                    # (d_z, d_z)
     off_diag = cov - torch.diag(cov.diag())
     return off_diag.pow(2).mean()
