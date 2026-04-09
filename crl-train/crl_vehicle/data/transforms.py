@@ -233,7 +233,7 @@ def apply_intervention(
     else:
         return x   # unknown id — pass through
 
-    noise = noise.unsqueeze(0).expand(C, -1)             # [C, L]
+    noise = noise.unsqueeze(0).expand(C, -1).to(x.device)  # [C, L]
 
     signal_rms = x.pow(2).mean().sqrt()
     noise_rms  = noise.pow(2).mean().sqrt()
