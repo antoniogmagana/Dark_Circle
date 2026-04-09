@@ -205,6 +205,34 @@ def main():
                 f"No CRL checkpoint at {ckpt}. Run --phase crl first."
             )
 
+        # --- Diagnostic: check whether z_pres (mu) separates detection labels ---
+        print("\n=== z_pres Diagnostic (val set) ===")
+        model.eval()
+        ref_sensor = "seismic" if "seismic" in sensors else sensors[0]
+        pres_vals_pos, pres_vals_neg = [], []
+        with torch.no_grad():
+            for batch in val_loader:
+                x = batch[f"x_{ref_sensor}"].to(device)
+                det = batch["detection_label"]
+                _, mu, _, _ = model.encode_modality(ref_sensor, x)
+                enc = model.encoders[ref_sensor]
+                z_pres, _, _, _ = enc.split_z_raw(mu)
+                z_pres_cpu = z_pres.squeeze(-1).cpu()
+                pres_vals_pos.extend(z_pres_cpu[det == 1].tolist())
+                pres_vals_neg.extend(z_pres_cpu[det == 0].tolist())
+        if pres_vals_pos and pres_vals_neg:
+            import statistics
+            mean_pos = statistics.mean(pres_vals_pos)
+            mean_neg = statistics.mean(pres_vals_neg)
+            std_pos  = statistics.stdev(pres_vals_pos) if len(pres_vals_pos) > 1 else 0.0
+            std_neg  = statistics.stdev(pres_vals_neg) if len(pres_vals_neg) > 1 else 0.0
+            sep = abs(mean_pos - mean_neg) / (0.5 * (std_pos + std_neg) + 1e-8)
+            print(f"  vehicle present  : n={len(pres_vals_pos):5d}  mu={mean_pos:+.4f}  std={std_pos:.4f}")
+            print(f"  vehicle absent   : n={len(pres_vals_neg):5d}  mu={mean_neg:+.4f}  std={std_neg:.4f}")
+            print(f"  separation (d')  : {sep:.3f}  (>1 = usable signal, <0.5 = weak)")
+        else:
+            print("  WARNING: one detection class absent from val set — check labels.")
+
         trainer.train_downstream(train_loader, val_loader, args.ds_epochs)
 
         for sensor, head in model.det_heads.items():

@@ -606,10 +606,10 @@ class Trainer:
                     # Use seismic if available, else audio
                     ref = "seismic" if x_s is not None else "audio"
                     x_ref = x_s if x_s is not None else x_a
-                    z, mu, _, _ = self.model.encode_modality(ref, x_ref)
+                    _, mu, _, _ = self.model.encode_modality(ref, x_ref)
 
                 enc = self.model.encoders[ref]
-                z_pres, z_type, _, _ = enc.split_z_raw(z)
+                z_pres, z_type, _, _ = enc.split_z_raw(mu)
 
                 head_opt.zero_grad()
                 pres_logit, type_logits = self.model.det_heads[ref](z_pres, z_type)
@@ -634,10 +634,20 @@ class Trainer:
             val_m = self._eval_downstream(val_loader)
             head_sched.step(-val_m["val_cls_f1"])
 
+            train_det_loss = epoch_det / max(n_det, 1)
+            train_cls_loss = epoch_cls / max(n_cls, 1)
+
+            # Gradient norm on head parameters (diagnostic: zero = no learning)
+            head_grad_norm = sum(
+                p.grad.norm().item() ** 2
+                for p in self.model.head_parameters()
+                if p.grad is not None
+            ) ** 0.5
+
             row = {
                 "epoch": epoch,
-                "train_det_loss": epoch_det / max(n_det, 1),
-                "train_cls_loss": epoch_cls / max(n_cls, 1),
+                "train_det_loss": train_det_loss,
+                "train_cls_loss": train_cls_loss,
                 **val_m,
             }
             with open(metrics_path, "a", newline="") as f:
@@ -645,8 +655,9 @@ class Trainer:
 
             print(
                 f"Epoch {epoch:3d} | "
-                f"det_f1={val_m['val_det_f1']:.4f} "
-                f"cls_f1={val_m['val_cls_f1']:.4f}"
+                f"tr_det={train_det_loss:.4f} tr_cls={train_cls_loss:.4f} "
+                f"det_f1={val_m['val_det_f1']:.4f} cls_f1={val_m['val_cls_f1']:.4f} "
+                f"grad={head_grad_norm:.2e}"
             )
 
             if val_m["val_cls_f1"] > best_f1:
@@ -681,9 +692,9 @@ class Trainer:
             vtype = batch["vehicle_type"]
             det = batch["detection_label"]
 
-            z, _, _, _ = self.model.encode_modality(ref, x_ref)
+            _, mu, _, _ = self.model.encode_modality(ref, x_ref)
             enc = self.model.encoders[ref]
-            z_pres, z_type, _, _ = enc.split_z_raw(z)
+            z_pres, z_type, _, _ = enc.split_z_raw(mu)
             pres_logit, type_logits = self.model.det_heads[ref](z_pres, z_type)
 
             det_pred.extend((pres_logit > 0).long().cpu().tolist())
