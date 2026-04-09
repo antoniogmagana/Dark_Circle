@@ -1,9 +1,11 @@
 """
 Evaluation utilities.
 
-compute_mig()            — Mutual Information Gap (Kim & Mnih 2018).
-linear_probe_accuracy()  — logistic regression probe per latent block.
-run_full_eval()          — collects z over a DataLoader and computes all metrics.
+compute_mig()                — Mutual Information Gap (Kim & Mnih 2018).
+linear_probe_accuracy()      — logistic regression probe per latent block.
+run_full_eval()              — collects z over a DataLoader and computes all metrics.
+collapse_metrics()           — detects posterior collapse (active dim fraction, AU).
+noise_type_separation_score()— linear separability of noise types in a latent block.
 
 These are diagnostic tools run after CRL pre-training to measure
 disentanglement quality before launching downstream head training.
@@ -143,23 +145,25 @@ def run_full_eval(
     model.eval()
 
     def collect(loader):
-        zs, vtypes, dets, intervs = [], [], [], []
+        zs, mus, vtypes, dets, intervs = [], [], [], [], []
         for batch in loader:
             x = batch[f"x_{primary_sensor}"].to(device)
-            z, _, _, _ = model.encode_modality(primary_sensor, x)
+            z, mu, _, _ = model.encode_modality(primary_sensor, x)
             zs.append(z.cpu().numpy())
+            mus.append(mu.cpu().numpy())
             vtypes.append(batch["vehicle_type"].numpy())
             dets.append(batch["detection_label"].numpy())
             intervs.append(batch["interv_idx"].numpy())
         return (
             np.concatenate(zs),
+            np.concatenate(mus),
             np.concatenate(vtypes),
             np.concatenate(dets),
             np.concatenate(intervs),
         )
 
-    z_tr, vt_tr, det_tr, iv_tr = collect(train_loader)
-    z_val, vt_val, det_val, iv_val = collect(val_loader)
+    z_tr, mu_tr, vt_tr, det_tr, iv_tr = collect(train_loader)
+    z_val, mu_val, vt_val, det_val, iv_val = collect(val_loader)
 
     metrics = {}
 
@@ -198,6 +202,19 @@ def run_full_eval(
         z_tr, vt_tr, z_val, vt_val, label_name="probe_full_z"
     ))
 
+    # --- Collapse metrics ---
+    metrics.update(collapse_metrics(z_val, mu_val))
+
+    # --- Noise type separation ---
+    enc = model.encoders[primary_sensor]
+    metrics["noise_sep_in_z_noise"] = noise_type_separation_score(
+        z_val[:, enc.noise_idx], iv_val
+    )
+    noise_start = enc.noise_idx.start
+    metrics["noise_sep_in_z_veh"] = noise_type_separation_score(
+        z_val[:, :noise_start], iv_val
+    )
+
     # --- Detection AUC ---
     # Use presence block sigmoid as detection score
     pres_scores_val = torch.sigmoid(
@@ -214,3 +231,59 @@ def run_full_eval(
 
     model.train()
     return metrics
+
+
+# ---------------------------------------------------------------------------
+# Collapse-prevention diagnostics
+# ---------------------------------------------------------------------------
+
+def collapse_metrics(
+    z: np.ndarray, mu: np.ndarray | None = None
+) -> dict[str, float]:
+    """
+    Measures whether the latent space has collapsed (any dims unused).
+
+    active_dim_frac  : fraction of z dims with std > 0.05.  Target ≥ 0.80.
+    spread_ratio     : min_std / max_std.  1.0 = all dims used equally.
+    active_units_frac: (Burda et al.) fraction of dims with Var[mu_i] > 0.01.
+                       Only computed when mu is provided.
+
+    z  : (N, d_z)
+    mu : (N, d_z) optional — posterior mean from the encoder
+    """
+    stds = z.std(axis=0)
+    active_frac = float((stds > 0.05).mean())
+    spread_ratio = float(stds.min() / (stds.max() + 1e-8))
+    metrics: dict[str, float] = {
+        "active_dim_frac": active_frac,
+        "spread_ratio": spread_ratio,
+    }
+    if mu is not None:
+        mu_var = mu.var(axis=0)
+        metrics["active_units_frac"] = float((mu_var > 0.01).mean())
+    return metrics
+
+
+def noise_type_separation_score(
+    z_block: np.ndarray,
+    interv_labels: np.ndarray,
+) -> float:
+    """
+    Linear separability of noise types in a latent block.
+
+    Trains a logistic classifier on z_block to predict intervention type
+    (0=clean, 1-7=noise type) and returns held-out accuracy.
+
+    High score in z_noise block is DESIRED — noise is localised there.
+    Low score in z_veh block is DESIRED — vehicle dims are clean of noise.
+
+    z_block      : (N, d_block)
+    interv_labels: (N,) int — 0=clean, 1-7=noise type
+    Returns float accuracy.
+    """
+    valid = interv_labels >= 0
+    if valid.sum() < 2 or len(np.unique(interv_labels[valid])) < 2:
+        return 0.0
+    clf = LogisticRegression(max_iter=300, C=1.0)
+    clf.fit(z_block[valid], interv_labels[valid])
+    return float(accuracy_score(interv_labels[valid], clf.predict(z_block[valid])))

@@ -115,17 +115,21 @@ def _vehicle_seismic_centers(K: int) -> torch.Tensor:
 
 def _vehicle_audio_centers(K: int) -> torch.Tensor:
     """
-    Acoustic vehicle bands (airborne sound):
-        [20-150 Hz]   engine idle / exhaust
-        [150-500 Hz]  engine harmonics
-        [500-1200 Hz] tyre/road noise
-        [1200-2000 Hz] body panels, wind noise
+    Acoustic vehicle bands (airborne sound) covering 20–7500 Hz.
+    At 16 kHz the Nyquist is 8 kHz; 7500 Hz preserves engine harmonics
+    through the 2–8 kHz region clipped by the former 4 kHz / 1800 Hz config.
+        [20-150 Hz]    engine idle / exhaust fundamentals
+        [150-600 Hz]   engine harmonics tier 1
+        [600-2000 Hz]  tyre/road interaction
+        [2000-5000 Hz] higher harmonics, intake noise
+        [5000-7500 Hz] body panels, wind turbulence
     """
     bands = [
-        (20.0, 150.0),
-        (150.0, 500.0),
-        (500.0, 1200.0),
-        (1200.0, 1800.0),
+        (20.0,   150.0),
+        (150.0,  600.0),
+        (600.0,  2000.0),
+        (2000.0, 5000.0),
+        (5000.0, 7500.0),
     ]
     per_band = max(1, K // len(bands))
     centers = []
@@ -138,7 +142,7 @@ def _vehicle_audio_centers(K: int) -> torch.Tensor:
         c = c[:K]
     elif len(c) < K:
         extras = torch.exp(
-            torch.linspace(math.log(20.0), math.log(1800.0), K - len(c))
+            torch.linspace(math.log(20.0), math.log(7500.0), K - len(c))
         )
         c = torch.cat([c, extras])
     return c.sort().values

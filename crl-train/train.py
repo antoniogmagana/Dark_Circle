@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader
 from crl_vehicle.config import CRLConfig, MODALITIES
 from crl_vehicle.data.dataset import (
     SensorDataset,
-    ConsecutivePairDataset,
+    MultiHorizonPairDataset,
     collate_single,
     collate_pairs,
 )
@@ -89,7 +89,7 @@ def build_loaders(
 
     pair_loader = None
     if include_pairs:
-        pair_ds = ConsecutivePairDataset(train_ds)
+        pair_ds = MultiHorizonPairDataset(train_ds)
         if len(pair_ds) > 0:
             pair_loader = DataLoader(
                 pair_ds,
@@ -102,10 +102,10 @@ def build_loaders(
                 prefetch_factor=4,
                 persistent_workers=True,
             )
-            print(f"  Pair dataset: {len(pair_ds)} consecutive pairs.")
+            print(f"  Pair dataset: {len(pair_ds)} multi-horizon pairs (n=1..{config.n_horizons}).")
         else:
             print(
-                "  Warning: no consecutive pairs found — unknown curriculum disabled."
+                "  Warning: no multi-horizon pairs found — unknown curriculum disabled."
             )
 
     return train_loader, pair_loader, val_loader

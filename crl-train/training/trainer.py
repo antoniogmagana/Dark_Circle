@@ -44,6 +44,7 @@ from crl_vehicle.models.intervention import (
 from crl_vehicle.models.decoder import SpectralDecoder
 from crl_vehicle.models.downstream import VehicleDetectionHead
 from crl_vehicle.losses.combined import CombinedLoss
+from crl_vehicle.data.transforms import apply_all_interventions, N_INTERVENTIONS
 from training.scheduler import build_scheduler
 
 
@@ -186,25 +187,27 @@ class CRLModel(nn.Module):
 
         return outputs
 
-    def forward_unknown(self, batch: dict, device: torch.device) -> dict:
+    def forward_horizon_pair(self, batch: dict, device: torch.device) -> dict:
         """
-        Forward pass for unknown-intervention (consecutive pair) batches.
-        Returns outputs dict including intervention classifier logits.
+        Forward pass for multi-horizon pair batches (MultiHorizonPairDataset).
+        Encodes x_t and x_tn per modality; runs the intervention classifier on
+        the temporal difference; stores z_tn for temporal consistency loss.
         """
         outputs = {
             "interv_mask": None,
             "vehicle_labels": batch["vehicle_type"].to(device),
             "det_labels": batch["detection_label"].to(device),
+            "horizon_n": batch["horizon_n"].to(device),
         }
 
         for sensor in self.sensors:
-            x_t = batch[f"x_{sensor}_t"].to(device)
-            x_t1 = batch[f"x_{sensor}_t1"].to(device)
+            x_t  = batch[f"x_{sensor}_t"].to(device)
+            x_tn = batch[f"x_{sensor}_tn"].to(device)
             avail = batch[f"{sensor}_avail"].to(device)
             outputs[f"avail_{sensor}"] = avail
 
-            z_t, mu_t, lv_t, y_t = self.encode_modality(sensor, x_t)
-            z_t1, _, _, _ = self.encode_modality(sensor, x_t1)
+            z_t,  mu_t,  lv_t,  y_t = self.encode_modality(sensor, x_t)
+            z_tn, _, _, _            = self.encode_modality(sensor, x_tn)
 
             mod_cfg = self.cfg.modality_cfg(sensor)
             K = mod_cfg.n_filters
@@ -214,36 +217,72 @@ class CRLModel(nn.Module):
             z_scm = self.scm(z_t, intervention_mask=None)
             x_hat = self.decoders[sensor](z_t)
 
-            outputs[f"z_{sensor}"] = z_t
-            outputs[f"mu_{sensor}"] = mu_t
+            outputs[f"z_{sensor}"]       = z_t
+            outputs[f"z_tn_{sensor}"]    = z_tn
+            outputs[f"mu_{sensor}"]      = mu_t
             outputs[f"log_var_{sensor}"] = lv_t
-            outputs[f"z_scm_{sensor}"] = z_scm
-            outputs[f"x_hat_{sensor}"] = x_hat
+            outputs[f"z_scm_{sensor}"]   = z_scm
+            outputs[f"x_hat_{sensor}"]   = x_hat
             outputs[f"x_target_{sensor}"] = x_target
 
-            # Unknown intervention classification (once, using primary sensor)
+            # Unknown intervention classifier (once, on primary sensor)
             if "interv_logits" not in outputs:
-                interv_logits = self.unknown_interv(z_t, z_t1)
+                interv_logits = self.unknown_interv(z_t, z_tn)
                 outputs["interv_logits"] = interv_logits
-                # No ground-truth for unknown — this trains the classifier
-                # via a pseudo-label derived from the intervention indices.
-                interv_t = batch["interv_idx_t"].to(device)
-                interv_t1 = batch["interv_idx_t1"].to(device)
-                # Target: index of the noise dimension that changed.
-                # When interv_t != interv_t1, target = noise_dim; else = 0.
+                interv_t  = batch["interv_idx_t"].to(device)
+                interv_tn = batch["interv_idx_tn"].to(device)
                 noise_start = (
                     self.cfg.d_z_presence + self.cfg.d_z_type + self.cfg.d_z_proximity
                 )
                 targets = torch.zeros(z_t.shape[0], dtype=torch.long, device=device)
-                changed = interv_t != interv_t1
+                changed = interv_t != interv_tn
                 noise_dim = (interv_t[changed] - 1) % self.cfg.d_z_noise
-                targets[changed] = (
-                    noise_start + noise_dim + 1
-                )  # +1 for "no-interv" class 0
+                targets[changed] = noise_start + noise_dim + 1
                 outputs["interv_targets"] = targets
 
         outputs["scm_l1"] = self.scm.adjacency().abs().sum()
         return outputs
+
+    @torch.no_grad()
+    def predict_with_vote(
+        self,
+        x_audio: torch.Tensor | None,
+        x_seismic: torch.Tensor | None,
+        weights: dict | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Independent per-modality inference with weighted vote.
+
+        Each modality produces its own detection probability and vehicle-type
+        probability.  Results are combined by a weighted average, enabling
+        graceful degradation when one modality is unavailable.
+
+        weights: {sensor: float} — default equal weights.
+                 Calibrate post-training with calibrate_vote_weights().
+        Returns:
+            det_prob  : (B,) probability of vehicle present
+            type_probs: (B, n_classes) softmax probability
+        """
+        if weights is None:
+            weights = {s: 1.0 for s in self.sensors}
+
+        det_probs, type_probs, ws = [], [], []
+        for sensor in self.sensors:
+            x = x_audio if sensor == "audio" else x_seismic
+            if x is None:
+                continue
+            z, _, _, _ = self.encode_modality(sensor, x)
+            z_pres, z_type, _, _ = self.encoders[sensor].split_z_raw(z)
+            pres_logit, type_logit = self.det_heads[sensor](z_pres, z_type)
+            det_probs.append(torch.sigmoid(pres_logit) * weights[sensor])
+            type_probs.append(torch.softmax(type_logit, dim=-1) * weights[sensor])
+            ws.append(weights[sensor])
+
+        if not det_probs:
+            raise ValueError("No modality available for inference")
+
+        W = sum(ws)
+        return sum(det_probs) / W, sum(type_probs) / W
 
     def crl_parameters(self):
         """All parameters except downstream heads."""
@@ -409,16 +448,61 @@ class Trainer:
             outputs = self.model.forward_known(batch, self.device)
             loss, metrics = self.loss_fn(outputs)
 
-            # Unknown intervention pass (curriculum)
+            # All-interventions contrast loss: for each available modality,
+            # expand the batch by (N_INTERVENTIONS+1) views, encode all, then
+            # penalise vehicle-dim variance across intervention conditions and
+            # reward noise-dim variance (anti-collapse).
+            # Applied on a random subset of min(B, 16) samples for efficiency.
+            if self.cfg.lambda_contrast > 0:
+                for sensor in self.model.sensors:
+                    x_raw = batch[f"x_{sensor}"].to(self.device)
+                    avail = batch[f"{sensor}_avail"]
+                    if not avail.any():
+                        continue
+                    x_raw = x_raw[avail.to(self.device)]
+                    sub_B = min(x_raw.shape[0], 16)
+                    if sub_B < x_raw.shape[0]:
+                        idx = torch.randperm(x_raw.shape[0])[:sub_B]
+                        x_raw = x_raw[idx]
+                    sr = self.cfg.modality_cfg(sensor).sample_rate
+                    N = N_INTERVENTIONS
+                    # Build ((N+1)*sub_B, C, W) — one row per (sample, interv)
+                    views = torch.cat([
+                        torch.stack([
+                            apply_all_interventions(x_raw[b], sr)[k]
+                            for b in range(sub_B)
+                        ])
+                        for k in range(N + 1)
+                    ])  # ((N+1)*sub_B, C, W)
+                    z_all, _, _, _ = self.model.encode_modality(sensor, views)
+                    # Reshape to (sub_B, N+1, d_z)
+                    z_all = z_all.view(N + 1, sub_B, -1).permute(1, 0, 2)
+                    enc = self.model.encoders[sensor]
+                    noise_start = enc.noise_idx.start
+                    z_veh = z_all[:, :, :noise_start]          # (sub_B, N+1, d_veh)
+                    z_nz  = z_all[:, :, enc.noise_idx]         # (sub_B, N+1, d_noise)
+                    # Invariance: vehicle dims should not vary across interventions
+                    L_inv = (z_veh - z_veh.mean(dim=1, keepdim=True)).pow(2).mean()
+                    # Equivariance: noise dims must vary (prevent noise collapse)
+                    L_equiv = -z_nz.var(dim=1).clamp(max=1.0).mean()
+                    loss = (
+                        loss
+                        + self.cfg.lambda_contrast * L_inv
+                        + self.cfg.lambda_equiv * L_equiv
+                    )
+                    metrics[f"contrast_inv_{sensor}"] = L_inv.item()
+                    metrics[f"contrast_equiv_{sensor}"] = L_equiv.item()
+
+            # Horizon pair pass (curriculum)
             if pair_iter is not None:
                 try:
                     pair_batch = next(pair_iter)
                 except StopIteration:
                     pair_iter = iter(loader_pairs)
                     pair_batch = next(pair_iter)
-                unk_outputs = self.model.forward_unknown(pair_batch, self.device)
-                unk_loss, _ = self.loss_fn(unk_outputs)
-                loss = loss + unknown_weight * unk_loss
+                pair_outputs = self.model.forward_horizon_pair(pair_batch, self.device)
+                pair_loss, _ = self.loss_fn(pair_outputs)
+                loss = loss + unknown_weight * pair_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -619,3 +703,41 @@ class Trainer:
             "val_cls_acc": cls_acc,
             "val_cls_f1": cls_f1,
         }
+
+    @torch.no_grad()
+    def calibrate_vote_weights(self, val_loader: DataLoader) -> dict:
+        """
+        Compute per-modality detection AUC on the validation set and return
+        normalised vote weights proportional to (AUC - 0.5).
+
+        Call after train_downstream() to produce calibrated weights for
+        predict_with_vote().  Modalities near random (AUC ≈ 0.5) receive low
+        weight; strong modalities receive high weight.
+
+        Returns: {sensor: weight} with weights summing to 1.0.
+        """
+        from sklearn.metrics import roc_auc_score
+
+        self.model.eval()
+        aucs = {}
+        for sensor in self.model.sensors:
+            scores, labels = [], []
+            for batch in val_loader:
+                x = batch[f"x_{sensor}"].to(self.device)
+                z, _, _, _ = self.model.encode_modality(sensor, x)
+                z_pres, z_type, _, _ = self.model.encoders[sensor].split_z_raw(z)
+                pres_logit, _ = self.model.det_heads[sensor](z_pres, z_type)
+                scores.extend(torch.sigmoid(pres_logit).cpu().tolist())
+                labels.extend(batch["detection_label"].tolist())
+            try:
+                auc = roc_auc_score(labels, scores)
+            except Exception:
+                auc = 0.5
+            # Weight = excess above chance; floor at 0.1 so no modality is silenced
+            aucs[sensor] = float(max(0.1, auc - 0.5))
+
+        total = sum(aucs.values())
+        weights = {s: v / total for s, v in aucs.items()}
+        self.model.train()
+        print(f"Vote weights (AUC-based): {weights}")
+        return weights

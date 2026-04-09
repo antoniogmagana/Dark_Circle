@@ -1,5 +1,5 @@
 """
-SensorDataset and ConsecutivePairDataset
+SensorDataset and MultiHorizonPairDataset
 
 Reads seismic AND audio parquet files, returning them independently so that
 each modality can be processed through its own Filterbank → SSM → Encoder
@@ -16,18 +16,23 @@ SensorDataset.__getitem__ returns:
       'x_seismic':       tensor (1, W_seismic) or zeros if unavailable
       'audio_avail':     bool
       'seismic_avail':   bool
-      'interv_idx':      int    — 0=none, 1-4=noise type (same label for both)
+      'interv_idx':      int    — 0=none, 1-7=noise type (same label for both)
       'vehicle_type':    int    — LABEL_BACKGROUND/LABEL_MULTI or 0-3
       'detection_label': int    — 0=absent, 1=present
       'segment_id':      int    — unique int per continuous recording segment
     }
 
-ConsecutivePairDataset wraps SensorDataset for CITRIS-style pair training:
+Windows overlap: stride = cfg.horizon_stride_sec seconds (default 0.1 s).
+This is ~10× more windows per recording than non-overlapping; raw waveforms
+are cached once so there is no additional memory cost.
+
+MultiHorizonPairDataset wraps SensorDataset for causal multi-horizon training:
     {
-      'x_audio_t',   'x_audio_t1',
-      'x_seismic_t', 'x_seismic_t1',
+      'x_audio_t',   'x_audio_tn',
+      'x_seismic_t', 'x_seismic_tn',
       'audio_avail', 'seismic_avail',
-      'interv_idx_t', 'interv_idx_t1',
+      'interv_idx_t', 'interv_idx_tn',
+      'horizon_n',   — int in {1..n_horizons}
       'vehicle_type', 'detection_label', 'segment_id'
     }
 """
@@ -56,9 +61,10 @@ from crl_vehicle.data.transforms import (
     N_INTERVENTIONS,
 )
 
-# Target sample rates: each modality has its own
+# Target sample rates: each modality has its own.
+# Audio at 16 kHz preserves engine harmonics (2–8 kHz); seismic at 200 Hz.
 _TARGET_SR = {
-    "audio":   4000,
+    "audio":   16000,
     "seismic": 200,
 }
 
@@ -227,19 +233,21 @@ class SensorDataset(Dataset):
                     "seismic_seg_id": seismic_seg_id,
                 }
 
-                # Determine presence label from whichever modality is available
+                # Determine presence label from whichever modality is available.
+                # Detection label is sampled at the native-SR stride position.
                 ref_sensor = "seismic" if seismic_stem else "audio"
                 ref_stem = seismic_stem if seismic_stem else audio_stem
                 ref_cache = self._cache[ref_sensor]
                 ref_entry = ref_cache.get((ref_stem, seg_key), {})
                 native_sr = ref_entry.get("native_sr", 1)
-                win_len = int(native_sr * self.cfg.sample_seconds)
+                stride_native = int(native_sr * self.cfg.horizon_stride_sec)
+                stride_native = max(stride_native, 1)
                 present_arr = ref_entry.get(
                     "present", np.ones(1, dtype=bool)
                 )
 
                 for w in range(max_windows):
-                    row_idx = w * win_len
+                    row_idx = w * stride_native
                     det_label = int(present_arr[row_idx]) if row_idx < len(present_arr) else 1
                     self._index.append((gkey, w, vehicle_type, det_label, audio_seg_id, seismic_seg_id))
 
@@ -265,6 +273,7 @@ class SensorDataset(Dataset):
         result = {}
         has_segments = "scene_id" in df.columns and "run_id" in df.columns
 
+        stride_native = max(int(native_sr * self.cfg.horizon_stride_sec), 1)
         if has_segments:
             for (scene_id, run_id), seg_df in df.groupby(["scene_id", "run_id"], sort=True):
                 seg_key = (int(scene_id), int(run_id))
@@ -274,7 +283,7 @@ class SensorDataset(Dataset):
                     if entry is None:
                         continue
                     self._cache[sensor][cache_key] = entry
-                nw = self._n_windows(self._cache[sensor][cache_key], native_sr)
+                nw = self._n_windows(self._cache[sensor][cache_key], native_sr, stride_native)
                 if nw >= 1:
                     result[seg_key] = (stem, nw)
         else:
@@ -284,15 +293,20 @@ class SensorDataset(Dataset):
                 if entry is None:
                     return {}
                 self._cache[sensor][cache_key] = entry
-            nw = self._n_windows(self._cache[sensor][cache_key], native_sr)
+            nw = self._n_windows(self._cache[sensor][cache_key], native_sr, stride_native)
             if nw >= 1:
                 result[None] = (stem, nw)
 
         return result
 
-    def _n_windows(self, entry: dict, native_sr: int) -> int:
+    def _n_windows(self, entry: dict, native_sr: int, stride_native: int | None = None) -> int:
         win_len = int(native_sr * self.cfg.sample_seconds)
-        return entry["data"].shape[-1] // win_len
+        total = entry["data"].shape[-1]
+        if total < win_len:
+            return 0
+        if stride_native is None:
+            stride_native = max(int(native_sr * self.cfg.horizon_stride_sec), 1)
+        return (total - win_len) // stride_native + 1
 
     @staticmethod
     def _df_to_entry(df: pd.DataFrame, sensor: str, native_sr: int) -> dict | None:
@@ -340,7 +354,8 @@ class SensorDataset(Dataset):
         entry = self._cache[sensor][(stem, seg_key)]
         native_sr = entry["native_sr"]
         win_len = int(native_sr * self.cfg.sample_seconds)
-        start = w * win_len
+        stride_native = max(int(native_sr * self.cfg.horizon_stride_sec), 1)
+        start = w * stride_native
         chunk = entry["data"][:, start: start + win_len].copy()
         tensor = torch.from_numpy(chunk)                              # [1, win_len]
         tensor = self._resample(tensor, native_sr, sensor)            # [1, target_window_size]
@@ -405,43 +420,56 @@ class SensorDataset(Dataset):
 
 
 # ---------------------------------------------------------------------------
-# ConsecutivePairDataset
+# MultiHorizonPairDataset
 # ---------------------------------------------------------------------------
 
-class ConsecutivePairDataset(Dataset):
+class MultiHorizonPairDataset(Dataset):
     """
-    Wraps SensorDataset to yield (t, t+1) pairs from the same segment.
-    Used in CITRIS-style unknown-intervention curriculum training.
+    Wraps SensorDataset to yield (x_t, x_tn) pairs where n ∈ {1..n_horizons}
+    is sampled uniformly at each call.  Both windows come from the same segment.
+
+    Windows are spaced by horizon_stride_sec (from cfg), so x_t and x_tn are
+    n * horizon_stride_sec seconds apart in the original recording.
+
+    Interventions at t and t+n are assigned independently — the causal model
+    must infer which latent variables changed without knowing the noise type
+    at the target time step.
     """
 
-    def __init__(self, sensor_dataset: SensorDataset):
+    def __init__(self, sensor_dataset: SensorDataset, n_horizons: int | None = None):
         self.ds = sensor_dataset
-        self._pairs: list = []
+        self.n_horizons = n_horizons if n_horizons is not None else sensor_dataset.cfg.n_horizons
+        self._anchors: list[int] = []   # flat index positions valid as anchors
         index = sensor_dataset._index
 
-        for i in range(len(index) - 1):
-            gkey_a, w_a, _, _, _, sid_seismic_a = index[i]
-            gkey_b, w_b, _, _, _, sid_seismic_b = index[i + 1]
-            # Same group, consecutive windows
-            if gkey_a == gkey_b and w_b == w_a + 1:
-                self._pairs.append((i, i + 1))
+        for i, (gkey, w, *_) in enumerate(index):
+            group = sensor_dataset._groups[gkey]
+            max_w = max(group["audio_nw"], group["seismic_nw"]) - 1
+            if w + self.n_horizons <= max_w:
+                self._anchors.append(i)
 
     def __len__(self) -> int:
-        return len(self._pairs)
+        return len(self._anchors)
 
     def __getitem__(self, idx: int) -> dict:
-        i_t, i_t1 = self._pairs[idx]
+        i_t = self._anchors[idx]
         gkey, w_t, vehicle_type, det_label, audio_seg_id, seismic_seg_id = self.ds._index[i_t]
-        _, w_t1, _, _, _, _ = self.ds._index[i_t1]
         group = self.ds._groups[gkey]
 
-        # Force different noise types for t and t+1 — this IS the intervention
+        n = torch.randint(1, self.n_horizons + 1, (1,)).item()
+        w_tn = w_t + n
+
+        # Independent interventions at t and t+n.
+        # Intentional: the causal classifier must detect changes without
+        # knowing the intervention type at the target step.
         if self.ds.is_train and torch.rand(1).item() < 0.60:
             interv_t = torch.randint(1, N_INTERVENTIONS + 1, (1,)).item()
-            interv_t1 = (interv_t % N_INTERVENTIONS) + 1
         else:
             interv_t = 0
-            interv_t1 = 0
+        if self.ds.is_train and torch.rand(1).item() < 0.60:
+            interv_tn = torch.randint(1, N_INTERVENTIONS + 1, (1,)).item()
+        else:
+            interv_tn = 0
 
         audio_avail = group["audio_stem"] is not None
         seismic_avail = group["seismic_stem"] is not None
@@ -455,13 +483,14 @@ class ConsecutivePairDataset(Dataset):
 
         return {
             "x_audio_t":       get("audio",   w_t,  interv_t),
-            "x_audio_t1":      get("audio",   w_t1, interv_t1),
+            "x_audio_tn":      get("audio",   w_tn, interv_tn),
             "x_seismic_t":     get("seismic", w_t,  interv_t),
-            "x_seismic_t1":    get("seismic", w_t1, interv_t1),
+            "x_seismic_tn":    get("seismic", w_tn, interv_tn),
             "audio_avail":     audio_avail,
             "seismic_avail":   seismic_avail,
             "interv_idx_t":    interv_t,
-            "interv_idx_t1":   interv_t1,
+            "interv_idx_tn":   interv_tn,
+            "horizon_n":       n,
             "vehicle_type":    vehicle_type,
             "detection_label": det_label,
             "segment_id":      seismic_seg_id if seismic_avail else audio_seg_id,
@@ -488,13 +517,14 @@ def collate_single(batch: list) -> dict:
 def collate_pairs(batch: list) -> dict:
     return {
         "x_audio_t":       torch.stack([b["x_audio_t"]     for b in batch]),
-        "x_audio_t1":      torch.stack([b["x_audio_t1"]    for b in batch]),
+        "x_audio_tn":      torch.stack([b["x_audio_tn"]    for b in batch]),
         "x_seismic_t":     torch.stack([b["x_seismic_t"]   for b in batch]),
-        "x_seismic_t1":    torch.stack([b["x_seismic_t1"]  for b in batch]),
+        "x_seismic_tn":    torch.stack([b["x_seismic_tn"]  for b in batch]),
         "audio_avail":     torch.tensor([b["audio_avail"]   for b in batch], dtype=torch.bool),
         "seismic_avail":   torch.tensor([b["seismic_avail"] for b in batch], dtype=torch.bool),
         "interv_idx_t":    torch.tensor([b["interv_idx_t"]    for b in batch], dtype=torch.long),
-        "interv_idx_t1":   torch.tensor([b["interv_idx_t1"]   for b in batch], dtype=torch.long),
+        "interv_idx_tn":   torch.tensor([b["interv_idx_tn"]   for b in batch], dtype=torch.long),
+        "horizon_n":       torch.tensor([b["horizon_n"]        for b in batch], dtype=torch.long),
         "vehicle_type":    torch.tensor([b["vehicle_type"]     for b in batch], dtype=torch.long),
         "detection_label": torch.tensor([b["detection_label"]  for b in batch], dtype=torch.long),
         "segment_id":      torch.tensor([b["segment_id"]       for b in batch], dtype=torch.long),

@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from crl_vehicle.config import CRLConfig, MODALITIES
 from crl_vehicle.data.dataset import (
     SensorDataset,
-    ConsecutivePairDataset,
+    MultiHorizonPairDataset,
     collate_single,
     collate_pairs,
 )
@@ -275,12 +275,12 @@ def main():
         print("  ✓ All gradients finite and present.")
 
     # ----------------------------------------------------------------
-    _header("6. Consecutive pair forward (unknown intervention)")
+    _header("6. Multi-horizon pair forward (causal temporal training)")
     # ----------------------------------------------------------------
-    pair_ds = ConsecutivePairDataset(train_ds)
+    pair_ds = MultiHorizonPairDataset(train_ds)
     if len(pair_ds) == 0:
         print(
-            "  SKIP: no consecutive pairs in this slice "
+            "  SKIP: no multi-horizon pairs in this slice "
             "(increase --max-files to get pairs)."
         )
     else:
@@ -292,14 +292,17 @@ def main():
             collate_fn=collate_pairs,
         )
         pair_batch = next(iter(pair_loader))
+        horizon_ns = pair_batch.get("horizon_n")
         print(
-            f"  Pair batch size: {pair_batch['x_seismic_t'].shape[0] if 'x_seismic_t' in pair_batch else 'n/a'}"
+            f"  Pair batch size: {pair_batch['x_seismic_t'].shape[0] if 'x_seismic_t' in pair_batch else 'n/a'}, "
+            f"horizon_n range: [{horizon_ns.min().item()}, {horizon_ns.max().item()}]"
+            if horizon_ns is not None else ""
         )
-        unk_outputs = model.forward_unknown(pair_batch, device)
-        unk_loss, unk_m = loss_fn(unk_outputs)
-        print(f"  Unknown-interv loss: {unk_loss.item():.4f}")
-        if "interv_logits" in unk_outputs:
-            _check("  interv_logits", unk_outputs["interv_logits"])
+        pair_outputs = model.forward_horizon_pair(pair_batch, device)
+        pair_loss, pair_m = loss_fn(pair_outputs)
+        print(f"  Horizon-pair loss: {pair_loss.item():.4f}")
+        if "interv_logits" in pair_outputs:
+            _check("  interv_logits", pair_outputs["interv_logits"])
 
     # ----------------------------------------------------------------
     _header("SMOKE TEST PASSED")

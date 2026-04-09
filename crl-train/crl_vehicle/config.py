@@ -9,10 +9,10 @@ signal processing parameters. Late fusion only happens at the downstream head.
 Per-modality parameters live in ModalityConfig; shared architecture and
 training parameters live in CRLConfig.
 
-Audio target SR  : 4000 Hz  → window_size=4000 samples (1 second)
-                              envelope_stride=160 → T'=25
-Seismic target SR: 200 Hz   → window_size=200  samples (1 second)
-                              envelope_stride=8  → T'=25
+Audio target SR  : 16000 Hz → window_size=16000 samples (1 second)
+                              envelope_stride=640 → T'=25
+Seismic target SR: 200 Hz   → window_size=200   samples (1 second)
+                              envelope_stride=8   → T'=25
 Both produce T'=25, so SSM and CausalEncoder weights are shared (or not—
 see CRLConfig.share_encoder).
 """
@@ -118,21 +118,22 @@ class ModalityConfig:
 
 def default_audio_config() -> ModalityConfig:
     """
-    Audio at 4 kHz target SR.
-    1 second = 4000 samples; T' = 4000 // 160 = 25 steps.
-    Frequency range covers vehicle acoustic signatures (20 Hz – 1800 Hz).
+    Audio at 16 kHz target SR.
+    1 second = 16000 samples; T' = 16000 // 640 = 25 steps.
+    Frequency range covers vehicle acoustic signatures (20 Hz – 7500 Hz),
+    preserving engine harmonics (2–8 kHz) that were clipped at 4 kHz.
     """
     return ModalityConfig(
-        sample_rate=4000,
-        window_size=4000,
+        sample_rate=16000,
+        window_size=16000,
         n_channels=1,
-        n_filters=32,
-        filter_len=128,       # 32 ms at 4 kHz — resolves engine harmonics
-        envelope_pool=160,
-        envelope_stride=160,  # T' = 4000 // 160 = 25
+        n_filters=64,
+        filter_len=512,       # 32 ms at 16 kHz — resolves engine harmonics
+        envelope_pool=640,
+        envelope_stride=640,  # T' = 16000 // 640 = 25
         freq_init="log",
         f_min=20.0,
-        f_max=1800.0,
+        f_max=7500.0,
     )
 
 
@@ -228,6 +229,15 @@ class CRLConfig:
     # Curriculum
     unknown_interv_start_epoch: int = 10
     unknown_interv_ramp_epochs: int = 10
+
+    # Multi-horizon pair construction
+    n_horizons:         int   = 10    # n ∈ {1..n_horizons} for temporal pairs
+    horizon_stride_sec: float = 0.1   # seconds between successive x(t) anchor windows
+
+    # All-interventions contrast loss weights
+    lambda_contrast: float = 2.0   # invariance of vehicle dims across interventions
+    lambda_equiv:    float = 0.5   # equivariance: noise dims must vary across interventions
+    lambda_collapse: float = 1.0   # posterior collapse penalty
 
     # Paths
     save_dir:        str   = "saved_crl"

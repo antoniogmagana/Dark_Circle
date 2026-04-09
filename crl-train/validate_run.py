@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from crl_vehicle.config import CRLConfig, MODALITIES
 from crl_vehicle.data.dataset import SensorDataset, collate_single
 from crl_vehicle.data.transforms import apply_intervention, N_INTERVENTIONS
-from training.eval import compute_mig, linear_probe_accuracy
+from training.eval import compute_mig, linear_probe_accuracy, collapse_metrics, noise_type_separation_score
 from training.trainer import CRLModel
 
 
@@ -170,6 +170,23 @@ def check_unit_level(
     if all_finite:
         _result(PASS, "all intermediate tensors are finite")
 
+    # Modality sample-rate assertions
+    _check(
+        cfg.audio_cfg.sample_rate == 16000,
+        "audio sample rate == 16000 Hz",
+        f"got {cfg.audio_cfg.sample_rate} Hz",
+    )
+    _check(
+        cfg.audio_cfg.f_max == 7500.0,
+        "audio f_max == 7500 Hz (engine harmonics preserved)",
+        f"got {cfg.audio_cfg.f_max} Hz",
+    )
+    _check(
+        cfg.seismic_cfg.sample_rate == 200,
+        "seismic sample rate == 200 Hz",
+        f"got {cfg.seismic_cfg.sample_rate} Hz",
+    )
+
     # SCM acyclicity at convergence
     acyc = model.scm.acyclicity_loss().item()
     _check_below(acyc, 0.1, "acyclicity_loss at convergence", fmt=".5f")
@@ -278,6 +295,31 @@ def check_representation_quality(
         PASS if xb2_acc < 0.65 else FAIL,
         "cross-block: detection probe on z_noise should be near chance",
         f"acc={xb2_acc:.4f} (fail if > 0.65 — z_noise leaks detection signal)",
+    )
+
+    # --- Collapse-prevention checks ---
+    cm = collapse_metrics(z_val, mu=None)
+    metrics.update(cm)
+    _check_above(
+        cm["active_dim_frac"], 0.80,
+        "active_dim_frac > 80% (< 20% of latent dims collapsed)",
+    )
+    _result(INFO, "spread_ratio (min_std/max_std)", f"{cm['spread_ratio']:.4f}")
+
+    # --- Noise localisation checks (core scientific requirement) ---
+    # Noise types should be linearly separable in z_noise (localised there)
+    # but NOT in z_veh (vehicle dims should be clean of noise labels).
+    noise_sep_noise = noise_type_separation_score(blk(z_val, enc.noise_idx), iv_val)
+    noise_sep_veh   = noise_type_separation_score(blk(z_val, slice(0, enc.noise_idx.start)), iv_val)
+    metrics["noise_sep_in_z_noise"] = noise_sep_noise
+    metrics["noise_sep_in_z_veh"]   = noise_sep_veh
+    _check_above(
+        noise_sep_noise, 0.30,
+        "noise types separable in z_noise (> 30%) — noise is localised",
+    )
+    _check_below(
+        noise_sep_veh, 0.20,
+        "noise types NOT separable in z_veh (< 20%) — vehicle dims clean of noise",
     )
 
     return metrics

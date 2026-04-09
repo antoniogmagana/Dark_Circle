@@ -11,8 +11,12 @@ Expected keys in the `outputs` dict (built by the Trainer per forward pass):
         mu_{mod}          : (B, d_z)
         log_var_{mod}     : (B, d_z)
         z_{mod}           : (B, d_z)    reparameterised latent
+        z_tn_{mod}        : (B, d_z)    latent at t+n (horizon-pair path only)
         z_scm_{mod}       : (B, d_z)    SCM prediction
         avail_{mod}       : (B,) bool   availability mask
+
+    Horizon-pair path (MultiHorizonPairDataset):
+        horizon_n         : (B,) long   temporal horizon index n ∈ {1..n_horizons}
 
     Shared (one SCM per experiment):
         interv_mask       : (B, d_z) or None
@@ -32,7 +36,7 @@ import torch.nn.functional as F
 
 from crl_vehicle.losses.elbo import reconstruction_loss, kl_divergence
 from crl_vehicle.losses.causal import scm_consistency_loss
-from crl_vehicle.losses.disentangle import total_correlation_loss
+from crl_vehicle.losses.disentangle import total_correlation_loss, posterior_collapse_penalty
 
 
 class CombinedLoss(nn.Module):
@@ -94,18 +98,21 @@ class CombinedLoss(nn.Module):
         L_kl = kl_divergence(mu, log_var, im)
         L_causal = scm_consistency_loss(z, z_scm)
         L_disent = total_correlation_loss(z)
+        L_collapse = posterior_collapse_penalty(log_var)
 
         total = (
             L_recon
             + beta * L_kl
             + self.cfg.lambda_causal * L_causal
             + self.cfg.lambda_disent * L_disent
+            + self.cfg.lambda_collapse * L_collapse
         )
         metrics = {
             f"recon_{mod}": L_recon.item(),
             f"kl_{mod}": L_kl.item(),
             f"causal_{mod}": L_causal.item(),
             f"disent_{mod}": L_disent.item(),
+            f"collapse_{mod}": L_collapse.item(),
         }
         return total, metrics
 
@@ -166,12 +173,44 @@ class CombinedLoss(nn.Module):
             L_det = F.cross_entropy(det_logits, det_labels)
         metrics["task_det"] = L_det.item() if torch.is_tensor(L_det) else 0.0
 
+        # --- Temporal consistency loss (horizon-pair path only) ---
+        # Vehicle-semantic dims (presence, type, proximity) should remain
+        # approximately stable across n * horizon_stride_sec seconds.
+        # Dividing by n relaxes the constraint for longer horizons.
+        L_temporal = torch.zeros((), device=_dev)
+        horizon_n = outputs.get("horizon_n")
+        for mod in ["audio", "seismic"]:
+            z_t_key = f"z_{mod}"
+            z_tn_key = f"z_tn_{mod}"
+            if z_tn_key not in outputs:
+                continue
+            avail = outputs.get(f"avail_{mod}")
+            z_t = outputs[z_t_key]
+            z_tn = outputs[z_tn_key]
+            if avail is not None:
+                z_t = z_t[avail]
+                z_tn = z_tn[avail]
+            # Vehicle semantic slice: all dims before noise block
+            # noise_start = d_z_presence + d_z_type + d_z_proximity
+            noise_start = (
+                self.cfg.d_z_presence + self.cfg.d_z_type + self.cfg.d_z_proximity
+            )
+            z_veh_t  = z_t[:, :noise_start]
+            z_veh_tn = z_tn[:, :noise_start]
+            sq_err = (z_veh_t - z_veh_tn).pow(2).mean(dim=-1)  # (B',)
+            if horizon_n is not None:
+                n_float = horizon_n[avail].float() if avail is not None else horizon_n.float()
+                sq_err = sq_err / n_float.clamp(min=1.0)
+            L_temporal = L_temporal + sq_err.mean()
+        metrics["temporal"] = L_temporal.item()
+
         total = (
             loss_audio
             + loss_seismic
             + self.current_lambda_l1 * L_l1_graph
             + self.cfg.lambda_interv * L_interv
             + self.cfg.lambda_task * (L_task + L_det)
+            + self.cfg.lambda_causal * L_temporal  # reuse causal weight for temporal
         )
         metrics["total"] = total.item()
         metrics["beta"] = beta

@@ -244,3 +244,21 @@ def apply_intervention(
 
 # Number of distinct intervention types (excluding 0=no-op)
 N_INTERVENTIONS = 7
+
+
+def apply_all_interventions(x: torch.Tensor, sample_rate: int) -> torch.Tensor:
+    """
+    Return N_INTERVENTIONS+1 versions of x: [x_clean, x_interv1, ..., x_interv7].
+    Each version is RMS-normalised independently.
+
+    x: (C, W)
+    Returns: (N_INTERVENTIONS+1, C, W)
+
+    Used in the training loop to compute the all-interventions contrast loss.
+    Applied in-loop (not in __getitem__) to avoid multiplying DataLoader data
+    transfer by 8×.
+    """
+    return torch.stack([
+        rms_normalize(apply_intervention(x, k, sample_rate))
+        for k in range(N_INTERVENTIONS + 1)
+    ])

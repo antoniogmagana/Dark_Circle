@@ -6,6 +6,7 @@ TC estimation but effective for moderate batch sizes).
 """
 
 import torch
+import torch.nn.functional as F
 
 
 def total_correlation_loss(z: torch.Tensor) -> torch.Tensor:
@@ -24,3 +25,21 @@ def total_correlation_loss(z: torch.Tensor) -> torch.Tensor:
     cov = (z_norm.T @ z_norm) / B                    # (d_z, d_z)
     off_diag = cov - torch.diag(cov.diag())
     return off_diag.pow(2).mean()
+
+
+def posterior_collapse_penalty(
+    log_var: torch.Tensor, threshold: float = -3.0
+) -> torch.Tensor:
+    """
+    Penalises latent dimensions where log_var < threshold.
+
+    In beta-VAE training, unused dimensions collapse to a deterministic
+    unit (log_var → -∞).  This penalty forces all d_z dimensions to remain
+    stochastic, ensuring neither vehicle-signature nor environmental dimensions
+    become trivially constant.
+
+    log_var  : (B, d_z)
+    threshold: log-variance below this value is penalised (default -3 → σ≈0.22)
+    Returns scalar ≥ 0.
+    """
+    return F.relu(threshold - log_var).mean()
