@@ -192,6 +192,8 @@ class LearnableFilterbank(nn.Module):
         self._K = K
         self._C = C
 
+        self._kernel_cache: torch.Tensor | None = None
+
         # Envelope extraction: squared magnitude pooling
         self.pool = nn.AvgPool1d(
             kernel_size=mod_cfg.envelope_pool,
@@ -213,7 +215,16 @@ class LearnableFilterbank(nn.Module):
         Returns: (B, K*C, T')
         """
         _, C, _ = x.shape
-        kernels = self._build_kernels()   # (K*C, 1, L)
+        # During training, rebuild every forward (parameters change each step).
+        # During eval, cache the result — frequencies are frozen between batches.
+        if self.training:
+            kernels = self._build_kernels()
+            self._kernel_cache: torch.Tensor | None = None
+        elif self._kernel_cache is None:
+            kernels = self._build_kernels()
+            self._kernel_cache = kernels
+        else:
+            kernels = self._kernel_cache
 
         # Depthwise grouped convolution: groups=C means each input channel
         # is convolved with its own K kernels → output (B, K*C, W)

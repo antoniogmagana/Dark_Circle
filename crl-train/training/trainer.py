@@ -372,13 +372,14 @@ class Trainer:
             self.loss_fn.update_beta(epoch)
             self.loss_fn.update_lambda_l1(epoch)
             train_metrics = self._train_epoch(loader_known, loader_pairs, epoch)
-            # Annealing val loss — for logging only (non-stationary across epochs)
-            val_metrics = self._eval_crl(val_loader)
-            # Fixed-beta val loss — evaluated at beta_end so comparisons are
-            # epoch-invariant; used for checkpointing and early stopping.
-            val_ckpt_metrics = self._eval_crl(
-                val_loader, beta_override=self.cfg.beta_end
+            # Single val pass: annealing beta (logging) + fixed beta (checkpointing).
+            # Fixed-beta metric is epoch-invariant and used for model selection.
+            both = self._eval_crl(
+                val_loader,
+                {"annealing": None, "fixed": self.cfg.beta_end},
             )
+            val_metrics = both["annealing"]
+            val_ckpt_metrics = both["fixed"]
             self.scheduler.step()
 
             row = {
@@ -510,18 +511,33 @@ class Trainer:
         return {k: v / max(n_batches, 1) for k, v in total_metrics.items()}
 
     @torch.no_grad()
-    def _eval_crl(self, loader: DataLoader, beta_override: float | None = None) -> dict:
+    def _eval_crl(
+        self,
+        loader: DataLoader,
+        betas: dict[str, float | None] | None = None,
+    ) -> dict[str, dict]:
+        """
+        Single-pass validation over loader, computing metrics at each beta in
+        `betas`.  Returns {key: metrics_dict} so callers can retrieve annealing
+        and fixed-beta metrics without traversing the val set twice.
+        """
+        if betas is None:
+            betas = {"default": None}
         self.model.eval()
-        total_metrics = {}
+        totals: dict[str, dict] = {key: {} for key in betas}
         n = 0
         for batch in loader:
             outputs = self.model.forward_known(batch, self.device)
-            _, metrics = self.loss_fn(outputs, beta_override=beta_override)
-            for k, v in metrics.items():
-                total_metrics[k] = total_metrics.get(k, 0.0) + v
+            for key, beta in betas.items():
+                _, metrics = self.loss_fn(outputs, beta_override=beta)
+                for k, v in metrics.items():
+                    totals[key][k] = totals[key].get(k, 0.0) + v
             n += 1
         self.model.train()
-        return {k: v / max(n, 1) for k, v in total_metrics.items()}
+        return {
+            key: {k: v / max(n, 1) for k, v in m.items()}
+            for key, m in totals.items()
+        }
 
     # ------------------------------------------------------------------
     # Downstream head training

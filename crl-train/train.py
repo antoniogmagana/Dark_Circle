@@ -139,6 +139,12 @@ def parse_args():
     p.add_argument(
         "--ssm-backend", default="transformer", choices=["transformer", "mamba"]
     )
+    p.add_argument(
+        "--steps-per-epoch",
+        type=int,
+        default=None,
+        help="Cap gradient steps per epoch (None = full epoch)",
+    )
     return p.parse_args()
 
 
@@ -157,6 +163,8 @@ def main():
         cfg.num_workers = args.num_workers
     if args.crl_epochs:
         cfg.n_epochs = args.crl_epochs
+    if args.steps_per_epoch:
+        cfg.steps_per_epoch = args.steps_per_epoch
     cfg.save_dir = str(save_dir)
 
     sensors = args.sensors or MODALITIES
