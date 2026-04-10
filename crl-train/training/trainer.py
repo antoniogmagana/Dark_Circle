@@ -576,8 +576,8 @@ class Trainer:
         best_f1 = 0.0
         patience_ctr = 0
 
-        # Class weights for imbalanced detection (vehicles are minority)
-        det_weight = torch.tensor([1.0, 5.0], device=self.device)
+        det_weight = torch.tensor([1.0, 1.0], device=self.device)
+        cls_weight = torch.tensor([24.3933, 22.925, 1.42813, 4.64756], device=self.device)
 
         print("\n=== Downstream Head Training ===")
         for epoch in range(epochs):
@@ -621,7 +621,7 @@ class Trainer:
                 cls_mask = vtype >= 0
                 cls_loss = torch.tensor(0.0, device=self.device)
                 if cls_mask.any():
-                    cls_loss = F.cross_entropy(type_logits[cls_mask], vtype[cls_mask])
+                    cls_loss = F.cross_entropy(type_logits[cls_mask], vtype[cls_mask], weight=cls_weight)
 
                 loss = det_loss + cls_loss
                 loss.backward()

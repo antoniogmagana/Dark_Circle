@@ -54,9 +54,7 @@ DATA_SCAN_DIRS = ["train", "val", "test_iobt"]
 #   "instance"   -> each vehicle instance is its own class
 TRAINING_MODE = os.environ.get("TRAINING_MODE")
 if not TRAINING_MODE:
-    TRAINING_MODE = input(
-        'Enter Training Mode ["detection", "category", "instance"]: '
-    )
+    TRAINING_MODE = input('Enter Training Mode ["detection", "category", "instance"]: ')
 
 # Reproducible instance-level class IDs
 INSTANCE_SEED = 0
@@ -91,9 +89,7 @@ NATIVE_SR = {
 }
 
 # Global reference sample rate for all sensors/datasets
-REF_SAMPLE_RATE = max(
-    NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_SENSORS
-)
+REF_SAMPLE_RATE = max(NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_SENSORS)
 
 # Bit depth per sensor type (hardware spec)
 BIT_DEPTH_MAP = {"audio": 16, "seismic": 24, "accel": 24}
@@ -177,10 +173,10 @@ CLASS_WEIGHTS = []
 # Determine number of classes based on training mode
 if TRAINING_MODE == "detection":
     NUM_CLASSES = 2
-    CLASS_WEIGHTS = [25.5, 1.0]
+    CLASS_WEIGHTS = [1.0, 1.0]
 elif TRAINING_MODE == "category":
     NUM_CLASSES = len(CLASS_MAP)
-    CLASS_WEIGHTS = [28.0, 2.0, 13.0, 15.5]  # based on classification classes
+    CLASS_WEIGHTS = [24.0, 3.0, 1.4, 4.6]  # based on classification classes
 elif TRAINING_MODE == "instance":
     NUM_CLASSES = len(INSTANCE_TO_CLASS)
 else:
@@ -202,9 +198,7 @@ if not RUN_ID:
     RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # 2. Build the nested directory structure (includes sensor for per-sensor runs)
-RUN_DIR = os.path.join(
-    "saved_models", TRAINING_MODE, TRAIN_SENSOR, MODEL_NAME, RUN_ID
-)
+RUN_DIR = os.path.join("saved_models", TRAINING_MODE, TRAIN_SENSOR, MODEL_NAME, RUN_ID)
 CACHE_DIR = os.path.join("saved_models", "cache")
 
 # 3. Define the specific file paths inside that new folder
@@ -219,7 +213,7 @@ VAL_STEPS_PER_EPOCH = 16
 
 # Time-scale knobs
 SAMPLE_SECONDS = 1
-WINDOW_STEP = 0.1   # sliding window stride in seconds
+WINDOW_STEP = 0.1  # sliding window stride in seconds
 
 # Mel spectrogram parameters
 MEL_BINS = 64
