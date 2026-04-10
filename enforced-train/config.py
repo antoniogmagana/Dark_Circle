@@ -227,11 +227,13 @@ MEL_HOP_LENGTH = 512
 MEL_TOP_DB = 80
 NOISE_KERNEL_SIZE = 51
 
-# FFT window size
-N_FFT = 1024
+# FFT window size — largest power of 2 ≤ SEQ_LEN, capped at 1024 for audio.
+# Guarantees n_fft // 2 < SEQ_LEN (STFT padding constraint).
+# Seismic (SEQ_LEN=200): N_FFT=128. Audio (SEQ_LEN=16000): N_FFT=1024.
+N_FFT = min(1024, 1 << (SEQ_LEN.bit_length() - 1))
 
-# Hop length between STFT frames
-HOP_LENGTH = 256
+# Hop length between STFT frames (~25% of N_FFT, standard convention)
+HOP_LENGTH = N_FFT // 4
 
 BATCH_MODE = True
 
