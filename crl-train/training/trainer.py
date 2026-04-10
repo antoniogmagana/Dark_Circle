@@ -323,7 +323,7 @@ class Trainer:
                 {
                     "params": [
                         p for n, p in model.named_parameters()
-                        if "det_heads" not in n and n != "scm.A_raw"
+                        if n != "scm.A_raw"
                     ],
                     "weight_decay": config.wd,
                 },
