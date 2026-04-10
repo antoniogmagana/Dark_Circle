@@ -46,6 +46,7 @@ from crl_vehicle.models.downstream import VehicleDetectionHead
 from crl_vehicle.losses.combined import CombinedLoss
 from crl_vehicle.data.transforms import apply_interventions_batch_gpu, N_INTERVENTIONS
 from training.scheduler import build_scheduler
+from training.eval import sample_level_eval, plot_confusion_matrices
 
 
 # ---------------------------------------------------------------------------
@@ -676,6 +677,19 @@ class Trainer:
                     break
 
         print(f"Downstream complete. Best cls F1: {best_f1:.4f}")
+
+        # --- Post-training diagnostics: confusion matrices + per-sample CSV ---
+        ref = "seismic" if "seismic" in self.model.sensors else self.model.sensors[0]
+        best_head_path = self.save_dir / f"det_head_{ref}_best.pth"
+        if best_head_path.exists():
+            self.model.det_heads[ref].load_state_dict(
+                torch.load(best_head_path, map_location=self.device)
+            )
+        diag_dir = self.save_dir / "diagnostics"
+        print(f"  Generating confusion matrices → {diag_dir}/")
+        df_preds = sample_level_eval(self.model, val_loader, self.device, primary_sensor=ref)
+        plot_confusion_matrices(df_preds, diag_dir)
+        print(f"  Saved: detection_cm.png, type_cm.png, det_acc_by_interv.png, predictions.csv")
 
     @torch.no_grad()
     def _eval_downstream(self, loader: DataLoader) -> dict:

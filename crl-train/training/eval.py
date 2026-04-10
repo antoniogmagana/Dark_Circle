@@ -11,8 +11,15 @@ These are diagnostic tools run after CRL pre-training to measure
 disentanglement quality before launching downstream head training.
 """
 
+from pathlib import Path
+
 import numpy as np
 import torch
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import seaborn as sns
 from torch.utils.data import DataLoader
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -20,6 +27,7 @@ from sklearn.metrics import (
     f1_score,
     roc_auc_score,
     mutual_info_score,
+    confusion_matrix,
 )
 from sklearn.preprocessing import KBinsDiscretizer
 
@@ -287,3 +295,190 @@ def noise_type_separation_score(
     clf = LogisticRegression(max_iter=300, C=1.0)
     clf.fit(z_block[valid], interv_labels[valid])
     return float(accuracy_score(interv_labels[valid], clf.predict(z_block[valid])))
+
+
+# ---------------------------------------------------------------------------
+# Intervention label names (interv_idx 0=clean, 1-7=noise types)
+# ---------------------------------------------------------------------------
+
+_INTERV_NAMES = {
+    0: "clean",
+    1: "white noise",
+    2: "brown noise",
+    3: "pink noise",
+    4: "green noise",
+    5: "low-freq osc",
+    6: "hi-freq chirp",
+    7: "bird chirps",
+}
+
+_DET_NAMES  = ["absent", "present"]
+_TYPE_NAMES = ["pedestrian", "light", "sport", "utility"]
+
+
+# ---------------------------------------------------------------------------
+# Sample-level evaluation
+# ---------------------------------------------------------------------------
+
+@torch.no_grad()
+def sample_level_eval(
+    model,
+    loader: DataLoader,
+    device: torch.device,
+    primary_sensor: str = "seismic",
+) -> pd.DataFrame:
+    """
+    Run inference over *loader* and return a DataFrame with one row per sample:
+
+        segment_id   : int   — unique segment identifier from the dataset
+        interv_idx   : int   — 0=clean, 1-7=noise type applied
+        true_det     : int   — ground-truth detection label (0=absent, 1=present)
+        pred_det     : int   — model detection prediction (0/1)
+        true_type    : int   — ground-truth vehicle type (-2/-1=invalid, 0-3=class)
+        pred_type    : int   — model type prediction (0-3); -1 when true_type invalid
+
+    Rows where true_type < 0 (background / multi-vehicle) are kept so
+    detection confusion can still be inspected for those samples, but
+    pred_type is set to -1 to flag them as excluded from type CM.
+    """
+    model.eval()
+    rows = []
+
+    for batch in loader:
+        x = batch[f"x_{primary_sensor}"].to(device)
+        seg_ids   = batch["segment_id"].tolist()
+        intervs   = batch["interv_idx"].tolist()
+        true_det  = batch["detection_label"].tolist()
+        true_type = batch["vehicle_type"].tolist()
+
+        _, mu, _, _ = model.encode_modality(primary_sensor, x)
+        enc = model.encoders[primary_sensor]
+        z_pres, z_type, _, _ = enc.split_z_raw(mu)
+        pres_logit, type_logits = model.det_heads[primary_sensor](z_pres, z_type)
+
+        pred_det  = (pres_logit > 0).long().cpu().tolist()
+        pred_type_all = type_logits.argmax(dim=1).cpu().tolist()
+
+        for i in range(len(seg_ids)):
+            rows.append({
+                "segment_id": seg_ids[i],
+                "interv_idx": intervs[i],
+                "true_det":   true_det[i],
+                "pred_det":   pred_det[i],
+                "true_type":  true_type[i],
+                "pred_type":  pred_type_all[i] if true_type[i] >= 0 else -1,
+            })
+
+    model.train()
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Confusion matrix plots
+# ---------------------------------------------------------------------------
+
+def plot_confusion_matrices(
+    df: pd.DataFrame,
+    out_dir: Path,
+    tag: str = "",
+) -> None:
+    """
+    Generate and save three diagnostic plots to *out_dir*:
+
+        1. detection_cm{tag}.png       — binary detection confusion matrix
+        2. type_cm{tag}.png            — 4-class vehicle type confusion matrix
+                                         (samples with true_type < 0 excluded)
+        3. det_acc_by_interv{tag}.png  — bar chart: detection accuracy per
+                                         noise intervention type
+
+    Also writes per-sample predictions to:
+        predictions{tag}.csv
+
+    Args:
+        df      : output of sample_level_eval()
+        out_dir : directory to save figures (created if absent)
+        tag     : optional suffix appended to filenames (e.g. "_epoch10")
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = f"_{tag}" if tag else ""
+
+    # --- 1. Detection confusion matrix ---
+    cm_det = confusion_matrix(df["true_det"], df["pred_det"], labels=[0, 1])
+    fig, ax = plt.subplots(figsize=(4, 4))
+    sns.heatmap(
+        cm_det, annot=True, fmt="d", cmap="Blues",
+        xticklabels=_DET_NAMES, yticklabels=_DET_NAMES, ax=ax,
+    )
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("Assumed (ground truth)")
+    ax.set_title("Vehicle Detection")
+    fig.tight_layout()
+    fig.savefig(out_dir / f"detection_cm{suffix}.png", dpi=150)
+    plt.close(fig)
+
+    # --- 2. Vehicle type confusion matrix (valid labels only) ---
+    type_df = df[df["true_type"] >= 0].copy()
+    if not type_df.empty:
+        cm_type = confusion_matrix(
+            type_df["true_type"], type_df["pred_type"], labels=[0, 1, 2, 3]
+        )
+        fig, ax = plt.subplots(figsize=(5, 5))
+        sns.heatmap(
+            cm_type, annot=True, fmt="d", cmap="Blues",
+            xticklabels=_TYPE_NAMES, yticklabels=_TYPE_NAMES, ax=ax,
+        )
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("Assumed (ground truth)")
+        ax.set_title("Vehicle Type Classification")
+        fig.tight_layout()
+        fig.savefig(out_dir / f"type_cm{suffix}.png", dpi=150)
+        plt.close(fig)
+
+    # --- 3. Detection accuracy per intervention type ---
+    interv_accs = {}
+    for idx, grp in df.groupby("interv_idx"):
+        if len(grp) == 0:
+            continue
+        acc = accuracy_score(grp["true_det"], grp["pred_det"])
+        label = _INTERV_NAMES.get(int(idx), f"interv_{idx}")
+        interv_accs[label] = acc
+
+    if interv_accs:
+        labels = list(interv_accs.keys())
+        accs   = list(interv_accs.values())
+        fig, ax = plt.subplots(figsize=(max(6, len(labels)), 4))
+        bars = ax.bar(labels, accs, color="steelblue", edgecolor="white")
+        ax.bar_label(bars, fmt="%.2f", padding=3, fontsize=9)
+        ax.set_ylim(0, 1.1)
+        ax.set_ylabel("Detection Accuracy")
+        ax.set_xlabel("Noise Intervention Type")
+        ax.set_title("Detection Accuracy by Intervention")
+        ax.axhline(0.5, color="red", linestyle="--", linewidth=0.8, label="chance")
+        ax.legend(fontsize=8)
+        plt.xticks(rotation=20, ha="right")
+        fig.tight_layout()
+        fig.savefig(out_dir / f"det_acc_by_interv{suffix}.png", dpi=150)
+        plt.close(fig)
+
+    # --- 4. Per-sample CSV ---
+    df_out = df.copy()
+    df_out["interv_name"] = df_out["interv_idx"].map(
+        lambda i: _INTERV_NAMES.get(int(i), f"interv_{i}")
+    )
+    df_out["true_det_name"]  = df_out["true_det"].map(
+        lambda v: _DET_NAMES[int(v)] if int(v) in (0, 1) else str(v)
+    )
+    df_out["pred_det_name"]  = df_out["pred_det"].map(
+        lambda v: _DET_NAMES[int(v)] if int(v) in (0, 1) else str(v)
+    )
+    df_out["true_type_name"] = df_out["true_type"].map(
+        lambda v: _TYPE_NAMES[int(v)] if 0 <= int(v) < len(_TYPE_NAMES) else (
+            "background" if int(v) == -1 else "multi" if int(v) == -2 else str(v)
+        )
+    )
+    df_out["pred_type_name"] = df_out["pred_type"].map(
+        lambda v: _TYPE_NAMES[int(v)] if 0 <= int(v) < len(_TYPE_NAMES) else "n/a"
+    )
+    df_out.to_csv(out_dir / f"predictions{suffix}.csv", index=False)
