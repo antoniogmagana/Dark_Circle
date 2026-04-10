@@ -20,12 +20,12 @@ class SpectralDecoder(nn.Module):
         d_z     : latent dimension (CRLConfig.d_z)
         d_model : hidden dimension
         mod_cfg : ModalityConfig for the target modality
-                  (provides n_filters and t_prime)
+                  (provides filterbank_out_channels and t_prime)
     """
 
     def __init__(self, d_z: int, d_model: int, mod_cfg: ModalityConfig):
         super().__init__()
-        self.K = mod_cfg.n_filters
+        self.K = mod_cfg.filterbank_out_channels
         self.T = mod_cfg.t_prime
 
         self.expand = nn.Linear(d_z, d_model)

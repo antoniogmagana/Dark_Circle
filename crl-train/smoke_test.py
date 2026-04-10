@@ -220,7 +220,7 @@ def main():
             _check(
                 "  decoder x_hat (B, K, T')",
                 x_hat,
-                (x.shape[0], mod_cfg.n_filters, mod_cfg.t_prime),
+                (x.shape[0], mod_cfg.filterbank_out_channels, mod_cfg.t_prime),
             )
 
     acyc = model.scm.acyclicity_loss()

@@ -2,19 +2,20 @@
 CRLConfig — single source of truth for all hyperparameters.
 
 Design principle: audio and seismic are processed completely independently
-through separate Filterbank → SSM → CausalEncoder → SCM chains. They share
-the same d_z latent structure (same causal variables) but have distinct
-signal processing parameters. Late fusion only happens at the downstream head.
+through separate SpectrogramFrontend → SSM → CausalEncoder → SCM chains.
+They share the same d_z latent structure (same causal variables) but have
+distinct signal processing parameters. Late fusion only happens at the
+downstream head.
 
 Per-modality parameters live in ModalityConfig; shared architecture and
 training parameters live in CRLConfig.
 
-Audio target SR  : 16000 Hz → window_size=16000 samples (1 second)
-                              envelope_stride=640 → T'=25
-Seismic target SR: 200 Hz   → window_size=200   samples (1 second)
-                              envelope_stride=8   → T'=25
-Both produce T'=25, so SSM and CausalEncoder weights are shared (or not—
-see CRLConfig.share_encoder).
+Audio target SR  : 16000 Hz → window_size=16000, n_fft=512, hop_length=160
+                              → T' = 16000 // 160 + 1 = 101 frames
+                              → n_freq_bins = n_mels = 64
+Seismic target SR: 200 Hz   → window_size=200, n_fft=64, hop_length=8
+                              → T' = 200 // 8 + 1 = 26 frames
+                              → n_freq_bins = n_fft//2+1 = 33
 """
 
 from dataclasses import dataclass, field
@@ -93,67 +94,71 @@ MODALITIES = ["audio", "seismic"]
 class ModalityConfig:
     """
     Signal processing parameters for a single sensor modality.
-    All filterbank and envelope parameters are modality-specific.
+    Audio uses a mel spectrogram; seismic uses a linear-scale STFT.
     """
-    sample_rate:      int   = 200     # target SR after resampling
-    window_size:      int   = 200     # samples per 1-second window (= sample_rate × 1s)
-    n_channels:       int   = 1       # audio=1, seismic=1
-    n_filters:        int   = 16      # spectral bands
-    filter_len:       int   = 32      # FIR tap length
-    envelope_pool:    int   = 8       # AvgPool kernel for envelope extraction
-    envelope_stride:  int   = 8       # → T' = window_size // envelope_stride
-    freq_init:        str   = "log"   # "log" or "vehicle"
-    f_min:            float = 2.0     # Hz — lowest filterbank center freq
-    f_max:            float = 90.0    # Hz — highest center freq
+    sample_rate:  int   = 200    # target SR after resampling
+    window_size:  int   = 200    # samples per 1-second window (= sample_rate × 1s)
+    n_channels:   int   = 1      # audio=1, seismic=1
+    n_fft:        int   = 64     # STFT window size in samples
+    hop_length:   int   = 8      # STFT frame hop in samples
+    n_mels:       int   = 0      # >0 → mel spectrogram; 0 → linear STFT (seismic)
+    f_min:        float = 0.0    # mel lower bound in Hz (audio only)
+    f_max:        float = 0.0    # mel upper bound in Hz (audio only; 0 = sr/2)
 
     @property
     def t_prime(self) -> int:
-        """Temporal steps after envelope extraction."""
-        return self.window_size // self.envelope_stride
+        """Temporal frames produced by STFT with center=True padding."""
+        return self.window_size // self.hop_length + 1
+
+    @property
+    def n_freq_bins(self) -> int:
+        """Frequency bins output by the spectrogram frontend."""
+        if self.n_mels > 0:
+            return self.n_mels
+        return self.n_fft // 2 + 1
 
     @property
     def filterbank_out_channels(self) -> int:
-        return self.n_filters * self.n_channels
+        """Total feature channels fed into TemporalSSM (freq_bins × n_channels)."""
+        return self.n_freq_bins * self.n_channels
 
 
 def default_audio_config() -> ModalityConfig:
     """
-    Audio at 16 kHz target SR.
-    1 second = 16000 samples; T' = 16000 // 640 = 25 steps.
-    Frequency range covers vehicle acoustic signatures (20 Hz – 7500 Hz),
-    preserving engine harmonics (2–8 kHz) that were clipped at 4 kHz.
+    Audio at 16 kHz target SR — mel spectrogram frontend.
+    1 second = 16000 samples; n_fft=512 (32 ms), hop=160 (10 ms).
+    T' = 16000 // 160 + 1 = 101 frames.
+    64 mel bins, 50 Hz – 8 kHz covers vehicle acoustic signatures.
     """
     return ModalityConfig(
         sample_rate=16000,
         window_size=16000,
         n_channels=1,
-        n_filters=64,
-        filter_len=512,       # 32 ms at 16 kHz — resolves engine harmonics
-        envelope_pool=640,
-        envelope_stride=640,  # T' = 16000 // 640 = 25
-        freq_init="log",
-        f_min=20.0,
-        f_max=7500.0,
+        n_fft=512,
+        hop_length=160,
+        n_mels=64,
+        f_min=50.0,
+        f_max=8000.0,
     )
 
 
 def default_seismic_config() -> ModalityConfig:
     """
-    Seismic at 200 Hz target SR.
-    1 second = 200 samples; T' = 200 // 8 = 25 steps.
-    Frequency range covers ground-borne vehicle vibration (2 Hz – 90 Hz).
+    Seismic at 200 Hz target SR — linear STFT frontend.
+    1 second = 200 samples; n_fft=64 (320 ms), hop=8 (40 ms).
+    T' = 200 // 8 + 1 = 26 frames; 33 linear frequency bins (0–100 Hz).
+    Linear scale is appropriate: mel compression distorts the low-frequency
+    vehicle vibration bands (2–90 Hz) that contain diagnostic information.
     """
     return ModalityConfig(
         sample_rate=200,
         window_size=200,
         n_channels=1,
-        n_filters=16,
-        filter_len=32,        # 160 ms at 200 Hz — resolves low-freq body resonance
-        envelope_pool=8,
-        envelope_stride=8,    # T' = 200 // 8 = 25
-        freq_init="log",
-        f_min=2.0,
-        f_max=90.0,
+        n_fft=64,
+        hop_length=8,
+        n_mels=0,
+        f_min=0.0,
+        f_max=0.0,
     )
 
 
@@ -166,7 +171,8 @@ class CRLConfig:
     """
     Full pipeline configuration.
     Modality-specific signal processing lives in audio_cfg / seismic_cfg.
-    Both produce T' = 25, enabling a shared SSM and encoder design.
+    Audio produces T'=101, seismic T'=26. share_encoder=False (default)
+    gives each modality independent SSM/encoder weights.
     """
 
     # Per-modality signal processing configs

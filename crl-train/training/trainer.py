@@ -3,7 +3,7 @@ Trainer
 
 Orchestrates the full CRL training pipeline for independent audio and
 seismic modalities.  Each modality has its own:
-    - LearnableFilterbank
+    - SpectrogramFrontend
     - TemporalSSM
     - CausalEncoder
     - SpectralDecoder
@@ -33,7 +33,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from crl_vehicle.config import CRLConfig, MODALITIES
-from crl_vehicle.models.filterbank import LearnableFilterbank
+from crl_vehicle.models.spectrogram import SpectrogramFrontend
 from crl_vehicle.models.ssm import TemporalSSM
 from crl_vehicle.models.encoder import CausalEncoder
 from crl_vehicle.models.scm import SCM
@@ -76,7 +76,7 @@ class CRLModel(nn.Module):
 
         for sensor in self.sensors:
             mod_cfg = config.modality_cfg(sensor)
-            self.filterbanks[sensor] = LearnableFilterbank(mod_cfg, sensor=sensor)
+            self.filterbanks[sensor] = SpectrogramFrontend(mod_cfg)
             self.ssms[sensor] = TemporalSSM(
                 in_channels=mod_cfg.filterbank_out_channels,
                 config=config,
@@ -156,10 +156,10 @@ class CRLModel(nn.Module):
 
             z, mu, log_var, y = self.encode_modality(sensor, x)
 
-            # Detach filterbank output for use as reconstruction target —
+            # Detach spectrogram output for use as reconstruction target —
             # stop-gradient so the target doesn't move with encoder updates.
             mod_cfg = self.cfg.modality_cfg(sensor)
-            K = mod_cfg.n_filters
+            K = mod_cfg.filterbank_out_channels
             T = mod_cfg.t_prime
             x_target = y.detach().view(x.shape[0], K, T)
 
@@ -211,7 +211,7 @@ class CRLModel(nn.Module):
             z_tn, _, _, _            = self.encode_modality(sensor, x_tn)
 
             mod_cfg = self.cfg.modality_cfg(sensor)
-            K = mod_cfg.n_filters
+            K = mod_cfg.filterbank_out_channels
             T = mod_cfg.t_prime
             x_target = y_t.detach().view(x_t.shape[0], K, T)
 
