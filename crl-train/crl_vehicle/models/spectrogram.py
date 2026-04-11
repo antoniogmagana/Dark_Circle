@@ -39,6 +39,7 @@ class SpectrogramFrontend(nn.Module):
 
     def __init__(self, mod_cfg: ModalityConfig):
         super().__init__()
+        self._mod_cfg = mod_cfg
 
         if mod_cfg.n_mels > 0:
             self.transform = AT.MelSpectrogram(
@@ -71,3 +72,34 @@ class SpectrogramFrontend(nn.Module):
         F, T = spec.shape[-2], spec.shape[-1]
         spec = spec.reshape(B, C * F, T)          # (B, F*C, T')
         return torch.log1p(spec)
+
+    def center_frequencies(self) -> torch.Tensor:
+        """
+        Return a 1-D CPU float tensor of frequency bin centres in Hz.
+
+        Audio  (n_mels > 0): mel-scale centre frequencies derived from the
+                              mel filterbank used at construction time.
+        Seismic (n_mels == 0): linear STFT bins from 0 Hz to Nyquist.
+        """
+        import torchaudio.functional as AF
+
+        cfg = self._mod_cfg
+        if cfg.n_mels > 0:
+            # melscale_fbanks returns (n_freqs, n_mels); each column is one filter.
+            # The centre frequency of filter k is the linear-Hz bin with the
+            # highest weight in that column.
+            n_freqs = cfg.n_fft // 2 + 1
+            f_max = cfg.f_max if cfg.f_max > 0 else cfg.sample_rate / 2.0
+            fb = AF.melscale_fbanks(
+                n_freqs=n_freqs,
+                f_min=cfg.f_min,
+                f_max=f_max,
+                n_mels=cfg.n_mels,
+                sample_rate=cfg.sample_rate,
+            )  # (n_freqs, n_mels)
+            linear_hz = torch.linspace(0.0, cfg.sample_rate / 2.0, n_freqs)
+            peak_bins = fb.argmax(dim=0)          # (n_mels,)
+            return linear_hz[peak_bins].float()   # (n_mels,) CPU tensor
+        else:
+            n_bins = cfg.n_fft // 2 + 1
+            return torch.linspace(0.0, cfg.sample_rate / 2.0, n_bins).float()
