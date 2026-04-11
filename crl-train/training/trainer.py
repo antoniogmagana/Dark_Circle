@@ -550,12 +550,18 @@ class Trainer:
         val_loader: DataLoader,
         epochs: int,
     ):
+        # Reinitialise heads so the CRL-phase bias doesn't carry over.
+        for head in self.model.det_heads.values():
+            head.apply(
+                lambda m: m.reset_parameters() if hasattr(m, "reset_parameters") else None
+            )
+
         # Freeze CRL backbone
         for name, p in self.model.named_parameters():
             if "det_heads" not in name:
                 p.requires_grad = False
 
-        head_opt = torch.optim.AdamW(self.model.head_parameters(), lr=self.cfg.lr * 0.1)
+        head_opt = torch.optim.AdamW(self.model.head_parameters(), lr=self.cfg.lr)
         head_sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
             head_opt, factor=0.5, patience=3
         )
