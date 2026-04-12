@@ -353,8 +353,8 @@ def sample_level_eval(
 
         _, mu, _, _ = model.encode_modality(primary_sensor, x)
         enc = model.encoders[primary_sensor]
-        z_pres, z_type, _, _ = enc.split_z_raw(mu)
-        pres_logit, type_logits = model.det_heads[primary_sensor](z_pres, z_type)
+        z_pres, z_type, z_inst, _, _ = enc.split_z_raw(mu)
+        pres_logit, type_logits, _ = model.det_heads[primary_sensor](z_pres, z_type, z_inst)
 
         pred_det  = (pres_logit > 0).long().cpu().tolist()
         pred_type_all = type_logits.argmax(dim=1).cpu().tolist()

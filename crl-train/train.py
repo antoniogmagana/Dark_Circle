@@ -218,7 +218,7 @@ def main():
                 det = batch["detection_label"]
                 _, mu, _, _ = model.encode_modality(ref_sensor, x)
                 enc = model.encoders[ref_sensor]
-                z_pres, _, _, _ = enc.split_z_raw(mu)
+                z_pres, _, _, _, _ = enc.split_z_raw(mu)
                 z_pres_cpu = z_pres.squeeze(-1).cpu()
                 pres_vals_pos.extend(z_pres_cpu[det == 1].tolist())
                 pres_vals_neg.extend(z_pres_cpu[det == 0].tolist())
@@ -250,7 +250,7 @@ def main():
                 vtype = batch["vehicle_type"]
                 _, mu, _, _ = model.encode_modality(ref_sensor, x)
                 enc = model.encoders[ref_sensor]
-                _, z_type_raw, _, _ = enc.split_z_raw(mu)
+                _, z_type_raw, _, _, _ = enc.split_z_raw(mu)
                 z_type_cpu = z_type_raw.cpu()
                 for cls_idx in CLASS_NAMES:
                     mask = vtype == cls_idx

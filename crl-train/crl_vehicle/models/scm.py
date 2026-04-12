@@ -24,7 +24,7 @@ class SCM(nn.Module):
         hidden_dim : hidden size of each per-variable MLP mechanism
     """
 
-    def __init__(self, d_z: int, hidden_dim: int = 32):
+    def __init__(self, d_z: int, hidden_dim: int = 32, group_sizes: list | None = None):
         super().__init__()
         self.d_z = d_z
         self.hidden_dim = hidden_dim
@@ -34,6 +34,24 @@ class SCM(nn.Module):
         # Only the strict lower triangle is used; upper triangle and diagonal
         # are zeroed out, guaranteeing a DAG by construction.
         self.A_raw = nn.Parameter(torch.randn(d_z, d_z) * 0.3)
+
+        # Static edge mask: controls which causal edges are permitted.
+        # group_sizes = [d_z_presence, d_z_type, d_z_instance, d_z_proximity, d_z_noise]
+        # Permitted edges: z_type → z_instance only.  All other groups are
+        # treated as independent roots (no intra-group or cross-group edges).
+        if group_sizes is not None:
+            mask = torch.zeros(d_z, d_z)
+            starts = [0]
+            for s in group_sizes[:-1]:
+                starts.append(starts[-1] + s)
+            # group 1 = type, group 2 = instance
+            type_start, type_end = starts[1], starts[2]
+            inst_start, inst_end = starts[2], starts[3]
+            mask[inst_start:inst_end, type_start:type_end] = 1.0
+            mask = torch.tril(mask, diagonal=-1)
+        else:
+            mask = torch.tril(torch.ones(d_z, d_z), diagonal=-1)
+        self.register_buffer("edge_mask", mask)
 
         # Per-variable causal mechanisms: f_i : R^d_z → R
         # Stored as batched weight tensors to allow a single vectorised forward
@@ -53,10 +71,11 @@ class SCM(nn.Module):
 
     def adjacency(self) -> torch.Tensor:
         """
-        Strict lower-triangular adjacency matrix — acyclic by construction.
-        A[i, j] = weight of edge z_j → z_i (j < i only).
+        Block-masked lower-triangular adjacency matrix — acyclic by construction.
+        Only z_type → z_instance edges are permitted; all other groups are
+        independent roots.  A[i, j] = weight of edge z_j → z_i (j < i only).
         """
-        return torch.tril(self.A_raw, diagonal=-1)
+        return torch.tril(self.A_raw, diagonal=-1) * self.edge_mask
 
     def forward(
         self,

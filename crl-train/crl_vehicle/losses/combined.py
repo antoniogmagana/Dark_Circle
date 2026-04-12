@@ -193,6 +193,16 @@ class CombinedLoss(nn.Module):
         metrics["task_cls"] = L_task.item() if torch.is_tensor(L_task) else 0.0
         metrics["task_det"] = L_det.item() if torch.is_tensor(L_det) else 0.0
 
+        # --- Instance classification loss ---
+        instance_labels = outputs.get("instance_labels")
+        L_instance = torch.zeros((), device=_dev)
+        for key, val in outputs.items():
+            if key.startswith("instance_logits_") and instance_labels is not None:
+                valid = instance_labels >= 0
+                if valid.any():
+                    L_instance = L_instance + F.cross_entropy(val[valid], instance_labels[valid])
+        metrics["task_instance"] = L_instance.item() if torch.is_tensor(L_instance) else 0.0
+
         # --- Temporal consistency loss (horizon-pair path only) ---
         # Vehicle-semantic dims (presence, type, proximity) should remain
         # approximately stable across n * horizon_stride_sec seconds.
@@ -211,9 +221,10 @@ class CombinedLoss(nn.Module):
                 z_t = z_t[avail]
                 z_tn = z_tn[avail]
             # Vehicle semantic slice: all dims before noise block
-            # noise_start = d_z_presence + d_z_type + d_z_proximity
+            # noise_start = d_z_presence + d_z_type + d_z_instance + d_z_proximity
             noise_start = (
-                self.cfg.d_z_presence + self.cfg.d_z_type + self.cfg.d_z_proximity
+                self.cfg.d_z_presence + self.cfg.d_z_type
+                + self.cfg.d_z_instance + self.cfg.d_z_proximity
             )
             z_veh_t  = z_t[:, :noise_start]
             z_veh_tn = z_tn[:, :noise_start]
@@ -229,7 +240,7 @@ class CombinedLoss(nn.Module):
             + loss_seismic
             + self.current_lambda_l1 * L_l1_graph
             + self.cfg.lambda_interv * L_interv
-            + self.cfg.lambda_task * (L_task + L_det)
+            + self.cfg.lambda_task * (L_task + L_det + L_instance)
             + self.current_lambda_causal * L_temporal  # reuse causal weight for temporal
         )
         metrics["total"] = total.item()

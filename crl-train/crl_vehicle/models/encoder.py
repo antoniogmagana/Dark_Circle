@@ -1,19 +1,20 @@
 """
 CausalEncoder
 
-Maps SSM output (B, T', d_model) to a structured latent z with four
+Maps SSM output (B, T', d_model) to a structured latent z with five
 semantically-defined blocks:
 
     z_presence  (d_z_presence=1)  — is a vehicle present?
     z_type      (d_z_type=4)      — which vehicle category?
+    z_instance  (d_z_instance=8)  — which specific vehicle instance?
     z_proximity (d_z_proximity=1) — how close is it?
     z_noise     (d_z_noise=4)     — unstructured nuisance / sensor noise
 
-Total d_z = 10.  Instantiate one per modality — each modality encodes
+Total d_z = 18.  Instantiate one per modality — each modality encodes
 the same causal variables independently.
 
 Reparameterisation: VAE-style (mu, log_var) → z.
-split_z()  decomposes z into the four semantic blocks.
+split_z()  decomposes z into the five semantic blocks.
 """
 
 import torch
@@ -35,15 +36,17 @@ class CausalEncoder(nn.Module):
         d_model: int,
         d_z_presence: int = 1,
         d_z_type: int = 4,
+        d_z_instance: int = 8,
         d_z_proximity: int = 1,
         d_z_noise: int = 4,
     ):
         super().__init__()
         self.d_z_presence = d_z_presence
         self.d_z_type = d_z_type
+        self.d_z_instance = d_z_instance
         self.d_z_proximity = d_z_proximity
         self.d_z_noise = d_z_noise
-        self.d_z = d_z_presence + d_z_type + d_z_proximity + d_z_noise
+        self.d_z = d_z_presence + d_z_type + d_z_instance + d_z_proximity + d_z_noise
 
         # Soft attention pooling: collapse T' timesteps → single context vector
         # Linear(d_model → 1) gives a scalar score per timestep; softmax over T'.
@@ -61,12 +64,14 @@ class CausalEncoder(nn.Module):
         s0 = 0
         s1 = s0 + d_z_presence
         s2 = s1 + d_z_type
-        s3 = s2 + d_z_proximity
-        s4 = s3 + d_z_noise
-        self.presence_idx = slice(s0, s1)
-        self.type_idx = slice(s1, s2)
-        self.proximity_idx = slice(s2, s3)
-        self.noise_idx = slice(s3, s4)
+        s3 = s2 + d_z_instance
+        s4 = s3 + d_z_proximity
+        s5 = s4 + d_z_noise
+        self.presence_idx  = slice(s0, s1)
+        self.type_idx      = slice(s1, s2)
+        self.instance_idx  = slice(s2, s3)
+        self.proximity_idx = slice(s3, s4)
+        self.noise_idx     = slice(s4, s5)
 
     def forward(
         self, x: torch.Tensor
@@ -99,19 +104,21 @@ class CausalEncoder(nn.Module):
 
     def split_z(self, z: torch.Tensor) -> tuple:
         """
-        Decompose z into its four semantic blocks.
+        Decompose z into its five semantic blocks.
 
-        Returns (z_presence, z_type, z_proximity, z_noise) where:
+        Returns (z_presence, z_type, z_instance, z_proximity, z_noise) where:
             z_presence  : (B, 1)  — sigmoid → [0, 1]
             z_type      : (B, 4)  — softmax → probability simplex
+            z_instance  : (B, 8)  — softmax → probability simplex over 13 classes
             z_proximity : (B, 1)  — sigmoid → [0, 1]
             z_noise     : (B, 4)  — unconstrained
         """
-        z_presence = torch.sigmoid(z[:, self.presence_idx])
-        z_type = torch.softmax(z[:, self.type_idx], dim=-1)
+        z_presence  = torch.sigmoid(z[:, self.presence_idx])
+        z_type      = torch.softmax(z[:, self.type_idx], dim=-1)
+        z_instance  = torch.softmax(z[:, self.instance_idx], dim=-1)
         z_proximity = torch.sigmoid(z[:, self.proximity_idx])
-        z_noise = z[:, self.noise_idx]
-        return z_presence, z_type, z_proximity, z_noise
+        z_noise     = z[:, self.noise_idx]
+        return z_presence, z_type, z_instance, z_proximity, z_noise
 
     def split_z_raw(self, z: torch.Tensor) -> tuple:
         """
@@ -119,8 +126,9 @@ class CausalEncoder(nn.Module):
         Use this when passing to a downstream linear head to avoid
         double-squashing.
         """
-        z_presence = z[:, self.presence_idx]
-        z_type = z[:, self.type_idx]
+        z_presence  = z[:, self.presence_idx]
+        z_type      = z[:, self.type_idx]
+        z_instance  = z[:, self.instance_idx]
         z_proximity = z[:, self.proximity_idx]
-        z_noise = z[:, self.noise_idx]
-        return z_presence, z_type, z_proximity, z_noise
+        z_noise     = z[:, self.noise_idx]
+        return z_presence, z_type, z_instance, z_proximity, z_noise

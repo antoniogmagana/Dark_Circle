@@ -361,7 +361,7 @@ def check_causal_structure(
 
     # Intervention mask correctness:
     # known interventions should activate only noise dims (never presence/type).
-    noise_start = cfg.d_z_presence + cfg.d_z_type + cfg.d_z_proximity
+    noise_start = cfg.d_z_presence + cfg.d_z_type + cfg.d_z_instance + cfg.d_z_proximity
     interv_ok = True
     for k in range(1, min(N_INTERVENTIONS + 1, 5)):
         idx = torch.full(
@@ -481,8 +481,8 @@ def check_downstream_performance(
         det   = batch["detection_label"]
 
         z, _, _, _      = model.encode_modality(primary_sensor, x)
-        z_pres, z_type_r, _, _ = enc.split_z_raw(z)
-        pres_logit, type_logits = model.det_heads[primary_sensor](z_pres, z_type_r)
+        z_pres, z_type_r, z_inst, _, _ = enc.split_z_raw(z)
+        pres_logit, type_logits, _ = model.det_heads[primary_sensor](z_pres, z_type_r, z_inst)
 
         scores = torch.sigmoid(pres_logit.squeeze(-1)).cpu().numpy()
         det_scores.extend(scores.tolist())

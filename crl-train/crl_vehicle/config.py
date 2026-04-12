@@ -30,6 +30,16 @@ CATEGORY_TO_IDX = {v: k for k, v in CLASS_MAP.items()}
 LABEL_BACKGROUND = -1   # background recordings (m3nvc)
 LABEL_MULTI      = -2   # ambiguous multi-vehicle recordings
 
+INSTANCE_MAP = {
+    0: "polaris", 1: "warhog", 2: "pickup",
+    3: "walk", 4: "bicycle", 5: "motorcycle",
+    6: "scooter", 7: "forester", 8: "mustang",
+    9: "ev", 10: "cx30", 11: "miata", 12: "gle350",
+}
+INSTANCE_TO_IDX = {v: k for k, v in INSTANCE_MAP.items()}
+LABEL_INSTANCE_BACKGROUND = -1
+LABEL_INSTANCE_MULTI      = -2
+
 # Native sample rates per dataset and sensor modality
 NATIVE_SR = {
     "iobt":  {"audio": 16000, "seismic": 100,  "accel": 100},
@@ -43,43 +53,43 @@ ADC_SCALE = {"audio": 32768.0, "seismic": 8388608.0, "accel": 8388608.0}
 # Vehicle → category string per dataset
 DATASET_VEHICLE_MAP = {
     "iobt": {
-        "polaris0150pm":              "light",
-        "polaris0215pm":              "light",
-        "polaris0235pm_nolineofsig":  "light",
-        "warhog1135am":               "light",
-        "warhog1149am":               "light",
-        "warhog_nolineofsight":       "light",
-        "silverado0255pm":            "utility",
-        "silverado0315pm":            "utility",
+        "polaris0150pm":              ["light",   "polaris"],
+        "polaris0215pm":              ["light",   "polaris"],
+        "polaris0235pm_nolineofsig":  ["light",   "polaris"],
+        "warhog1135am":               ["light",   "warhog"],
+        "warhog1149am":               ["light",   "warhog"],
+        "warhog_nolineofsight":       ["light",   "warhog"],
+        "silverado0255pm":            ["utility", "pickup"],
+        "silverado0315pm":            ["utility", "pickup"],
     },
     "focal": {
-        "walk":        "pedestrian",
-        "walk2":       "pedestrian",
-        "bicycle":     "pedestrian",
-        "bicycle2":    "pedestrian",
-        "motor":       "light",
-        "motor2":      "light",
-        "scooter":     "light",
-        "scooter2":    "light",
-        "forester":    "utility",
-        "forester2":   "utility",
-        "mustang":     "sport",
-        "mustang0528": "sport",
-        "mustang2":    "sport",
-        "pickup":      "utility",
-        "pickup2":     "utility",
-        "tesla":       "sport",
-        "tesla2":      "sport",
+        "walk":        ["pedestrian", "walk"],
+        "walk2":       ["pedestrian", "walk"],
+        "bicycle":     ["pedestrian", "bicycle"],
+        "bicycle2":    ["pedestrian", "bicycle"],
+        "motor":       ["light",      "motorcycle"],
+        "motor2":      ["light",      "motorcycle"],
+        "scooter":     ["light",      "scooter"],
+        "scooter2":    ["light",      "scooter"],
+        "forester":    ["utility",    "forester"],
+        "forester2":   ["utility",    "forester"],
+        "mustang":     ["sport",      "mustang"],
+        "mustang0528": ["sport",      "mustang"],
+        "mustang2":    ["sport",      "mustang"],
+        "pickup":      ["utility",    "pickup"],
+        "pickup2":     ["utility",    "pickup"],
+        "tesla":       ["sport",      "ev"],
+        "tesla2":      ["sport",      "ev"],
     },
     "m3nvc": {
-        "background":    "background",
-        "cx30":          "utility",
-        "miata":         "sport",
-        "mustang":       "sport",
-        "gle350":        "utility",
-        "cx30_miata":    "multi",
-        "cx30_mustang":  "multi",
-        "miata_mustang": "multi",
+        "background":    ["background", "background"],
+        "cx30":          ["utility",    "cx30"],
+        "miata":         ["sport",      "miata"],
+        "mustang":       ["sport",      "mustang"],
+        "gle350":        ["utility",    "gle350"],
+        "cx30_miata":    ["multi",      "multi"],
+        "cx30_mustang":  ["multi",      "multi"],
+        "miata_mustang": ["multi",      "multi"],
     },
 }
 
@@ -191,9 +201,10 @@ class CRLConfig:
     # Encoder latent dims (same causal variables for both modalities)
     d_z_presence:    int   = 1      # is vehicle present?
     d_z_type:        int   = 4      # vehicle type (# classes)
+    d_z_instance:    int   = 8      # vehicle instance (13 non-background classes)
     d_z_proximity:   int   = 1      # scalar proximity
     d_z_noise:       int   = 4      # unstructured nuisance
-    # total d_z = 10
+    # total d_z = 18
 
     # SCM
     scm_hidden:      int   = 32
@@ -254,7 +265,7 @@ class CRLConfig:
 
     @property
     def d_z(self) -> int:
-        return self.d_z_presence + self.d_z_type + self.d_z_proximity + self.d_z_noise
+        return self.d_z_presence + self.d_z_type + self.d_z_instance + self.d_z_proximity + self.d_z_noise
 
     def modality_cfg(self, modality: str) -> ModalityConfig:
         if modality == "audio":

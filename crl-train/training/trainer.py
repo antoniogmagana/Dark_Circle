@@ -86,6 +86,7 @@ class CRLModel(nn.Module):
                 d_model=config.d_model,
                 d_z_presence=config.d_z_presence,
                 d_z_type=config.d_z_type,
+                d_z_instance=config.d_z_instance,
                 d_z_proximity=config.d_z_proximity,
                 d_z_noise=config.d_z_noise,
             )
@@ -96,10 +97,17 @@ class CRLModel(nn.Module):
             )
 
         # Shared SCM (one causal graph for all sensors)
-        self.scm = SCM(d_z=config.d_z, hidden_dim=config.scm_hidden)
+        self.scm = SCM(
+            d_z=config.d_z,
+            hidden_dim=config.scm_hidden,
+            group_sizes=[
+                config.d_z_presence, config.d_z_type, config.d_z_instance,
+                config.d_z_proximity, config.d_z_noise,
+            ],
+        )
 
         # Intervention modules
-        noise_start = config.d_z_presence + config.d_z_type + config.d_z_proximity
+        noise_start = config.d_z_presence + config.d_z_type + config.d_z_instance + config.d_z_proximity
         self.known_interv = KnownInterventionHandler(
             d_z=config.d_z, noise_start_idx=noise_start
         )
@@ -109,12 +117,16 @@ class CRLModel(nn.Module):
         from crl_vehicle.config import CLASS_MAP
 
         n_classes = len(CLASS_MAP)
+        from crl_vehicle.config import INSTANCE_MAP
+        n_instance_classes = len(INSTANCE_MAP)
         self.det_heads = nn.ModuleDict(
             {
                 sensor: VehicleDetectionHead(
                     d_z_presence=config.d_z_presence,
                     d_z_type=config.d_z_type,
+                    d_z_instance=config.d_z_instance,
                     n_classes=n_classes,
+                    n_instance_classes=n_instance_classes,
                 )
                 for sensor in self.sensors
             }
@@ -145,6 +157,7 @@ class CRLModel(nn.Module):
         outputs = {
             "interv_mask": interv_mask,
             "vehicle_labels": batch["vehicle_type"].to(device),
+            "instance_labels": batch["instance_type"].to(device),
             "det_labels": batch["detection_label"].to(device),
         }
 
@@ -182,10 +195,11 @@ class CRLModel(nn.Module):
         # anchored to labels for audio and seismic separately).
         for sensor in self.sensors:
             enc = self.encoders[sensor]
-            z_pres, z_type, _, _ = enc.split_z_raw(outputs[f"z_{sensor}"])
-            pres_logit, type_logits = self.det_heads[sensor](z_pres, z_type)
+            z_pres, z_type, z_inst, _, _ = enc.split_z_raw(outputs[f"z_{sensor}"])
+            pres_logit, type_logits, inst_logits = self.det_heads[sensor](z_pres, z_type, z_inst)
             outputs[f"det_logits_{sensor}"] = torch.stack([-pres_logit, pres_logit], dim=1)
             outputs[f"vehicle_logits_{sensor}"] = type_logits
+            outputs[f"instance_logits_{sensor}"] = inst_logits
 
         return outputs
 
@@ -234,7 +248,8 @@ class CRLModel(nn.Module):
                 interv_t  = batch["interv_idx_t"].to(device)
                 interv_tn = batch["interv_idx_tn"].to(device)
                 noise_start = (
-                    self.cfg.d_z_presence + self.cfg.d_z_type + self.cfg.d_z_proximity
+                    self.cfg.d_z_presence + self.cfg.d_z_type
+                    + self.cfg.d_z_instance + self.cfg.d_z_proximity
                 )
                 targets = torch.zeros(z_t.shape[0], dtype=torch.long, device=device)
                 changed = interv_t != interv_tn
@@ -274,8 +289,8 @@ class CRLModel(nn.Module):
             if x is None:
                 continue
             z, _, _, _ = self.encode_modality(sensor, x)
-            z_pres, z_type, _, _ = self.encoders[sensor].split_z_raw(z)
-            pres_logit, type_logit = self.det_heads[sensor](z_pres, z_type)
+            z_pres, z_type, z_inst, _, _ = self.encoders[sensor].split_z_raw(z)
+            pres_logit, type_logit, _ = self.det_heads[sensor](z_pres, z_type, z_inst)
             det_probs.append(torch.sigmoid(pres_logit) * weights[sensor])
             type_probs.append(torch.softmax(type_logit, dim=-1) * weights[sensor])
             ws.append(weights[sensor])
@@ -656,10 +671,10 @@ class Trainer:
                     _, mu, _, _ = self.model.encode_modality(ref, x_ref)
 
                 enc = self.model.encoders[ref]
-                z_pres, z_type, _, _ = enc.split_z_raw(mu)
+                z_pres, z_type, z_inst, _, _ = enc.split_z_raw(mu)
 
                 head_opt.zero_grad()
-                pres_logit, type_logits = self.model.det_heads[ref](z_pres, z_type)
+                pres_logit, type_logits, inst_logits = self.model.det_heads[ref](z_pres, z_type, z_inst)
 
                 det_logits_2c = torch.stack([-pres_logit, pres_logit], dim=1)
                 det_loss = F.cross_entropy(det_logits_2c, det, weight=det_weight)
@@ -754,8 +769,8 @@ class Trainer:
 
             _, mu, _, _ = self.model.encode_modality(ref, x_ref)
             enc = self.model.encoders[ref]
-            z_pres, z_type, _, _ = enc.split_z_raw(mu)
-            pres_logit, type_logits = self.model.det_heads[ref](z_pres, z_type)
+            z_pres, z_type, z_inst, _, _ = enc.split_z_raw(mu)
+            pres_logit, type_logits, _ = self.model.det_heads[ref](z_pres, z_type, z_inst)
 
             det_pred.extend((pres_logit > 0).long().cpu().tolist())
             det_true.extend(det.tolist())
@@ -807,8 +822,8 @@ class Trainer:
             for batch in val_loader:
                 x = batch[f"x_{sensor}"].to(self.device)
                 z, _, _, _ = self.model.encode_modality(sensor, x)
-                z_pres, z_type, _, _ = self.model.encoders[sensor].split_z_raw(z)
-                pres_logit, _ = self.model.det_heads[sensor](z_pres, z_type)
+                z_pres, z_type, z_inst, _, _ = self.model.encoders[sensor].split_z_raw(z)
+                pres_logit, _, _ = self.model.det_heads[sensor](z_pres, z_type, z_inst)
                 scores.extend(torch.sigmoid(pres_logit).cpu().tolist())
                 labels.extend(batch["detection_label"].tolist())
             try:
