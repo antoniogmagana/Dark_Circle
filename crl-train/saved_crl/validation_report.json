@@ -1,0 +1,253 @@
+{
+  "checkpoint": "saved_crl/crl_best.pth",
+  "summary": {
+    "PASS": 24,
+    "FAIL": 7,
+    "WARN": 0,
+    "INFO": 14
+  },
+  "results": [
+    {
+      "status": "PASS",
+      "name": "filterbank frequencies in bounds [audio]",
+      "detail": "range [93.8, 7687.5] Hz (config [50.0, 8000.0] Hz)"
+    },
+    {
+      "status": "PASS",
+      "name": "filterbank frequencies in bounds [seismic]",
+      "detail": "range [0.0, 100.0] Hz (config [0.0, 100.0] Hz)"
+    },
+    {
+      "status": "PASS",
+      "name": "shape trace: Filterbank \u2192 SSM \u2192 Encoder all correct",
+      "detail": ""
+    },
+    {
+      "status": "PASS",
+      "name": "all intermediate tensors are finite",
+      "detail": ""
+    },
+    {
+      "status": "PASS",
+      "name": "audio sample rate == 16000 Hz",
+      "detail": "got 16000 Hz"
+    },
+    {
+      "status": "PASS",
+      "name": "audio f_max == 8000 Hz (engine harmonics preserved)",
+      "detail": "got 8000.0 Hz"
+    },
+    {
+      "status": "PASS",
+      "name": "seismic sample rate == 200 Hz",
+      "detail": "got 200 Hz"
+    },
+    {
+      "status": "PASS",
+      "name": "acyclicity guaranteed by construction (strict lower-triangular DAG)",
+      "detail": ""
+    },
+    {
+      "status": "FAIL",
+      "name": "MIG [vehicle_type] > 0.2 (z_type encodes vehicle class)",
+      "detail": "0.0018 (need \u2265 0.2000)"
+    },
+    {
+      "status": "FAIL",
+      "name": "MIG [detection] > 0.2 (z_presence encodes vehicle presence)",
+      "detail": "0.0106 (need \u2265 0.2000)"
+    },
+    {
+      "status": "FAIL",
+      "name": "MIG [interv_type] > 0.2 (interventions localized to z_noise)",
+      "detail": "0.0000 (need \u2265 0.2000)"
+    },
+    {
+      "status": "INFO",
+      "name": "mean MIG",
+      "detail": "0.0041"
+    },
+    {
+      "status": "FAIL",
+      "name": "probe z_type accuracy > 25% (4-class random baseline)",
+      "detail": "0.1587 (need \u2265 0.2500)"
+    },
+    {
+      "status": "INFO",
+      "name": "probe z_type F1",
+      "detail": "0.1843"
+    },
+    {
+      "status": "INFO",
+      "name": "probe z_presence accuracy",
+      "detail": "0.5452"
+    },
+    {
+      "status": "INFO",
+      "name": "probe z_presence F1",
+      "detail": "0.5457"
+    },
+    {
+      "status": "PASS",
+      "name": "detection AUC (z_presence sigmoid) > 0.5 majority-class baseline",
+      "detail": "0.5642 (need \u2265 0.5000)"
+    },
+    {
+      "status": "PASS",
+      "name": "cross-block: type probe on z_presence should be near chance",
+      "detail": "acc=0.1397 (fail if > 0.40 \u2014 z_presence leaks vehicle-type info)"
+    },
+    {
+      "status": "PASS",
+      "name": "cross-block: detection probe on z_noise should be near chance",
+      "detail": "acc=0.5004 (fail if > 0.65 \u2014 z_noise leaks detection signal)"
+    },
+    {
+      "status": "PASS",
+      "name": "active_dim_frac > 80% (< 20% of latent dims collapsed)",
+      "detail": "1.0000 (need \u2265 0.8000)"
+    },
+    {
+      "status": "INFO",
+      "name": "spread_ratio (min_std/max_std)",
+      "detail": "0.8708"
+    },
+    {
+      "status": "FAIL",
+      "name": "noise types separable in z_noise (> 30%) \u2014 noise is localised",
+      "detail": "0.0000 (need \u2265 0.3000)"
+    },
+    {
+      "status": "PASS",
+      "name": "noise types NOT separable in z_veh (< 20%) \u2014 vehicle dims clean of noise",
+      "detail": "0.0000 (need \u2264 0.2000)"
+    },
+    {
+      "status": "INFO",
+      "name": "SCM learned adjacency (entry [i,j] = weight of edge i\u2192j)",
+      "detail": ""
+    },
+    {
+      "status": "PASS",
+      "name": "acyclicity guaranteed by construction (strict lower-triangular DAG)",
+      "detail": ""
+    },
+    {
+      "status": "PASS",
+      "name": "intervention masks activate only z_noise (not z_presence or z_type)",
+      "detail": ""
+    },
+    {
+      "status": "PASS",
+      "name": "intervention effect localized: z_noise centroid spread > z_type spread",
+      "detail": "z_noise spread=0.0785  z_type spread=0.0512"
+    },
+    {
+      "status": "PASS",
+      "name": "counterfactual: different z_type inputs \u2192 different decoder outputs",
+      "detail": "mean pairwise MSE = 0.036398"
+    },
+    {
+      "status": "PASS",
+      "name": "  detection AUC > 0.5 (majority-class baseline)",
+      "detail": "0.5642 (need \u2265 0.5000)"
+    },
+    {
+      "status": "FAIL",
+      "name": "  vehicle type accuracy > 25% (4-class random baseline)",
+      "detail": "0.1587 (need \u2265 0.2500)"
+    },
+    {
+      "status": "INFO",
+      "name": "  probe presence F1",
+      "detail": "0.5457"
+    },
+    {
+      "status": "INFO",
+      "name": "  probe type F1",
+      "detail": "0.1843"
+    },
+    {
+      "status": "PASS",
+      "name": "  detection AUC > 0.5 (Phase 2)",
+      "detail": "0.5646 (need \u2265 0.5000)"
+    },
+    {
+      "status": "INFO",
+      "name": "  detection weighted F1 (Phase 2)",
+      "detail": "0.5459"
+    },
+    {
+      "status": "FAIL",
+      "name": "  vehicle type accuracy > 25% random (Phase 2)",
+      "detail": "0.2361 (need \u2265 0.2500)"
+    },
+    {
+      "status": "INFO",
+      "name": "  vehicle type F1 (Phase 2)",
+      "detail": "0.2840"
+    },
+    {
+      "status": "INFO",
+      "name": "  type accuracy",
+      "detail": "probe=0.1587  head=0.2361  \u0394=+0.0774"
+    },
+    {
+      "status": "PASS",
+      "name": "  fine-tuning adds value beyond linear decodability",
+      "detail": "(warn: head < probe \u2014 may need more backbone pre-training)"
+    },
+    {
+      "status": "INFO",
+      "name": "training history: 50 epochs logged",
+      "detail": ""
+    },
+    {
+      "status": "PASS",
+      "name": "crl_metrics.csv has both val_total (annealing) and val_ckpt (fixed-beta)",
+      "detail": "val_total=True, val_ckpt=True"
+    },
+    {
+      "status": "PASS",
+      "name": "val_ckpt (fixed-beta) decreases post-annealing",
+      "detail": "initial=7.9010  min=7.8158"
+    },
+    {
+      "status": "INFO",
+      "name": "max divergence val_total vs val_ckpt",
+      "detail": "7.1048"
+    },
+    {
+      "status": "PASS",
+      "name": "val_total and val_ckpt diverge (confirms beta annealing is active)",
+      "detail": "(warn: identical \u2014 annealing may have had no effect)"
+    },
+    {
+      "status": "PASS",
+      "name": "beta schedule reaches beta_end during training",
+      "detail": "4.000 (need \u2265 3.800)"
+    },
+    {
+      "status": "INFO",
+      "name": "best checkpoint at epoch 44",
+      "detail": "val_ckpt=7.8158"
+    }
+  ],
+  "eval_metrics": {
+    "mig_vehicle_type": 0.0017562155311978275,
+    "mig_detection": 0.010593208875652335,
+    "mig_interv_type": 0.0,
+    "mean_mig": 0.0041164748022833875,
+    "probe_type_acc": 0.15869960246832002,
+    "probe_type_f1": 0.18431836363202134,
+    "probe_presence_acc": 0.5451638239336718,
+    "probe_presence_f1": 0.5456512865446131,
+    "detection_auc": 0.5642365403155427,
+    "xblock_pres_type_acc": 0.13968495880804443,
+    "xblock_noise_det_acc": 0.5003673380237876,
+    "active_dim_frac": 1.0,
+    "spread_ratio": 0.8707503080368042,
+    "noise_sep_in_z_noise": 0.0,
+    "noise_sep_in_z_veh": 0.0
+  }
+}
