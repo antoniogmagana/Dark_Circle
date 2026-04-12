@@ -1,0 +1,1484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRL-Train Pipeline Documentation</title>
+  <style>
+    /* ── Reset & Variables ───────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --surface2: #222638;
+      --text:     #e8eaf0;
+      --muted:    #8892a4;
+      --accent:   #4a9eff;
+      --teal:     #00d4aa;
+      --purple:   #b48aff;
+      --orange:   #ffaa44;
+      --red:      #ff6b6b;
+      --green:    #66cc88;
+      --border:   #2d3147;
+      --sidebar-w: 230px;
+    }
+
+    html { scroll-behavior: smooth; font-size: 15px; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      line-height: 1.7;
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────────────── */
+    #sidebar {
+      position: fixed;
+      top: 0; left: 0; bottom: 0;
+      width: var(--sidebar-w);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      z-index: 100;
+    }
+
+    .sidebar-brand {
+      padding: 24px 20px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .sidebar-brand .logo {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--teal);
+      margin-bottom: 4px;
+    }
+
+    .sidebar-brand h2 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.4;
+    }
+
+    #sidebar nav {
+      padding: 16px 0;
+      flex: 1;
+    }
+
+    #sidebar nav a {
+      display: block;
+      padding: 7px 20px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      text-decoration: none;
+      border-left: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+
+    #sidebar nav a:hover {
+      color: var(--text);
+      background: rgba(255,255,255,0.04);
+    }
+
+    #sidebar nav a.active {
+      color: var(--accent);
+      border-left-color: var(--accent);
+      background: rgba(74,158,255,0.07);
+    }
+
+    .nav-section-label {
+      padding: 12px 20px 4px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--border);
+    }
+
+    /* ── Main Content ────────────────────────────────────────────────── */
+    #main {
+      margin-left: var(--sidebar-w);
+      flex: 1;
+      max-width: 900px;
+      padding: 0 48px 80px;
+    }
+
+    section {
+      padding-top: 64px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 48px;
+    }
+
+    section:last-child { border-bottom: none; }
+
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      line-height: 1.2;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: var(--teal);
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 24px 0 10px;
+    }
+
+    h4 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--purple);
+      margin: 18px 0 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    p { margin-bottom: 12px; color: var(--text); }
+
+    .tagline {
+      font-size: 1.1rem;
+      color: var(--muted);
+      margin-bottom: 20px;
+      line-height: 1.6;
+    }
+
+    /* ── Badges ──────────────────────────────────────────────────────── */
+    .badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+    .badge {
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 12px;
+      letter-spacing: 0.05em;
+    }
+    .badge-blue   { background: rgba(74,158,255,0.15); color: var(--accent); border: 1px solid rgba(74,158,255,0.3); }
+    .badge-teal   { background: rgba(0,212,170,0.12);  color: var(--teal);   border: 1px solid rgba(0,212,170,0.3); }
+    .badge-purple { background: rgba(180,138,255,0.12);color: var(--purple); border: 1px solid rgba(180,138,255,0.3); }
+
+    /* ── Diagrams ────────────────────────────────────────────────────── */
+    .diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 24px;
+      margin: 20px 0;
+      overflow-x: auto;
+    }
+
+    .diagram-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 18px;
+    }
+
+    /* flow row */
+    .flow-row {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-wrap: nowrap;
+      margin-bottom: 6px;
+    }
+
+    .flow-row.centered { justify-content: center; }
+    .flow-row.indent   { padding-left: 40px; }
+
+    .box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      white-space: nowrap;
+      text-align: center;
+      min-width: 100px;
+    }
+
+    .box.accent  { border-color: var(--accent);  color: var(--accent); }
+    .box.teal    { border-color: var(--teal);    color: var(--teal); }
+    .box.purple  { border-color: var(--purple);  color: var(--purple); }
+    .box.orange  { border-color: var(--orange);  color: var(--orange); }
+    .box.muted   { border-color: var(--border);  color: var(--muted); font-size: 0.75rem; }
+    .box.filled-accent  { background: rgba(74,158,255,0.12);  border-color: var(--accent);  color: var(--accent); }
+    .box.filled-teal    { background: rgba(0,212,170,0.10);   border-color: var(--teal);    color: var(--teal); }
+    .box.filled-purple  { background: rgba(180,138,255,0.10); border-color: var(--purple);  color: var(--purple); }
+    .box.filled-orange  { background: rgba(255,170,68,0.10);  border-color: var(--orange);  color: var(--orange); }
+
+    .shape-label {
+      font-size: 0.68rem;
+      color: var(--muted);
+      text-align: center;
+      margin-top: 3px;
+    }
+
+    .arrow {
+      color: var(--muted);
+      font-size: 1.1rem;
+      padding: 0 6px;
+      flex-shrink: 0;
+    }
+
+    .arrow-down {
+      color: var(--muted);
+      font-size: 1rem;
+      text-align: center;
+      line-height: 1;
+      margin: 2px 0;
+    }
+
+    .flow-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+    }
+
+    .flow-split {
+      display: flex;
+      gap: 32px;
+      align-items: flex-start;
+      margin: 8px 0;
+    }
+
+    .flow-split-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      flex: 1;
+    }
+
+    .split-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .divider-line {
+      width: 1px;
+      background: var(--border);
+      align-self: stretch;
+      margin: 0 8px;
+    }
+
+    /* component diagram */
+    .comp-diagram {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-wrap: wrap;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 10px 0 16px;
+    }
+
+    .comp-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* ── Z-vector block diagram ──────────────────────────────────────── */
+    .z-vector {
+      display: flex;
+      height: 52px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      margin: 16px 0 8px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .z-block {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      padding: 0 8px;
+    }
+
+    .z-block span:first-child { font-size: 0.78rem; font-weight: 600; }
+    .z-block span:last-child  { font-size: 0.62rem; opacity: 0.75; }
+
+    .z-presence { background: rgba(74,158,255,0.18);  color: var(--accent);  flex: 1; }
+    .z-type     { background: rgba(0,212,170,0.14);   color: var(--teal);    flex: 4; }
+    .z-prox     { background: rgba(180,138,255,0.15); color: var(--purple);  flex: 1; }
+    .z-noise    { background: rgba(255,170,68,0.14);  color: var(--orange);  flex: 4; }
+
+    .z-legend {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+
+    .z-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+    }
+
+    .z-dot {
+      width: 10px; height: 10px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* ── LR Diagram ──────────────────────────────────────────────────── */
+    .lr-diagram {
+      display: flex;
+      align-items: stretch;
+      height: 64px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      margin: 16px 0 6px;
+      position: relative;
+    }
+
+    .lr-warmup {
+      background: linear-gradient(to right, rgba(74,158,255,0.05), rgba(74,158,255,0.22));
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      color: var(--accent);
+      font-weight: 600;
+      border-right: 1px dashed var(--border);
+    }
+
+    .lr-cosine {
+      background: linear-gradient(to right,
+        rgba(0,212,170,0.2) 0%, rgba(0,212,170,0.05) 50%,
+        rgba(0,212,170,0.2) 50%, rgba(0,212,170,0.05) 100%);
+      flex: 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      color: var(--teal);
+      font-weight: 600;
+    }
+
+    .lr-labels {
+      display: flex;
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    .lr-labels span:first-child { flex: 1; text-align: center; }
+    .lr-labels span:last-child  { flex: 3; text-align: center; }
+
+    /* ── Equation ────────────────────────────────────────────────────── */
+    .equation {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 8px 8px 0;
+      padding: 16px 20px;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 0.85rem;
+      line-height: 1.8;
+      color: var(--text);
+      margin: 16px 0;
+      white-space: pre-wrap;
+      overflow-x: auto;
+    }
+
+    /* ── Info / callout boxes ────────────────────────────────────────── */
+    .callout {
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin: 16px 0;
+      font-size: 0.88rem;
+      line-height: 1.6;
+    }
+
+    .callout-blue   { background: rgba(74,158,255,0.08);  border: 1px solid rgba(74,158,255,0.25);  border-left: 3px solid var(--accent); }
+    .callout-teal   { background: rgba(0,212,170,0.07);   border: 1px solid rgba(0,212,170,0.25);   border-left: 3px solid var(--teal); }
+    .callout-orange { background: rgba(255,170,68,0.07);  border: 1px solid rgba(255,170,68,0.25);  border-left: 3px solid var(--orange); }
+    .callout-purple { background: rgba(180,138,255,0.07); border: 1px solid rgba(180,138,255,0.25); border-left: 3px solid var(--purple); }
+
+    .callout strong { color: var(--text); }
+
+    /* ── Tables ──────────────────────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; margin: 16px 0; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+    }
+
+    thead th {
+      background: var(--surface2);
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.72rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 9px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    tbody tr { border-bottom: 1px solid rgba(45,49,71,0.6); }
+    tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    tbody tr:hover { background: rgba(255,255,255,0.04); }
+
+    tbody td {
+      padding: 9px 14px;
+      color: var(--text);
+      vertical-align: top;
+    }
+
+    td code, th code {
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 0.8em;
+      background: rgba(255,255,255,0.08);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    td.mono {
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 0.8rem;
+      color: var(--accent);
+    }
+
+    /* ── Code blocks ─────────────────────────────────────────────────── */
+    pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      overflow-x: auto;
+      margin: 12px 0;
+    }
+
+    code {
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 0.82rem;
+      line-height: 1.6;
+      color: var(--text);
+    }
+
+    pre code { background: none; padding: 0; }
+
+    .kw  { color: var(--purple); }
+    .fn  { color: var(--accent); }
+    .st  { color: var(--teal); }
+    .cm  { color: var(--muted); }
+    .nm  { color: var(--orange); }
+
+    /* ── Details / collapsible ───────────────────────────────────────── */
+    details {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin: 16px 0;
+      overflow: hidden;
+    }
+
+    details summary {
+      padding: 14px 18px;
+      background: var(--surface);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+      list-style: none;
+    }
+
+    details summary::before {
+      content: "▶";
+      font-size: 0.7rem;
+      color: var(--muted);
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+
+    details[open] summary::before { transform: rotate(90deg); }
+    details summary:hover { background: var(--surface2); }
+
+    details .details-body {
+      padding: 0 18px 18px;
+      background: var(--bg);
+    }
+
+    /* ── Section number pill ─────────────────────────────────────────── */
+    .section-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: rgba(74,158,255,0.15);
+      border: 1px solid rgba(74,158,255,0.35);
+      color: var(--accent);
+      font-size: 0.8rem;
+      font-weight: 700;
+      margin-right: 10px;
+      flex-shrink: 0;
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-heading h2 { border: none; padding: 0; margin: 0; }
+
+    /* ── Metric cards ────────────────────────────────────────────────── */
+    .metric-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+      margin: 16px 0;
+    }
+
+    .metric-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+
+    .metric-card .mc-name {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .metric-card .mc-val {
+      font-size: 1.3rem;
+      font-weight: 700;
+      font-family: "SF Mono", "Fira Code", monospace;
+    }
+
+    .metric-card .mc-desc {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    .mc-blue   { color: var(--accent); }
+    .mc-teal   { color: var(--teal); }
+    .mc-orange { color: var(--orange); }
+    .mc-green  { color: var(--green); }
+
+    /* ── Responsive ──────────────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      #sidebar { display: none; }
+      #main { margin-left: 0; padding: 0 20px 60px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════ SIDEBAR -->
+<aside id="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo">CMU Capstone</div>
+    <h2>CRL-Train Pipeline</h2>
+  </div>
+  <nav id="nav">
+    <div class="nav-section-label">Overview</div>
+    <a href="#hero">Introduction</a>
+    <a href="#overview">System Overview</a>
+    <div class="nav-section-label">Pipeline</div>
+    <a href="#data">Data Pipeline</a>
+    <a href="#architecture">Model Architecture</a>
+    <a href="#latent">Latent Space Design</a>
+    <div class="nav-section-label">Training</div>
+    <a href="#losses">Loss Functions</a>
+    <a href="#schedule">Training Schedule</a>
+    <div class="nav-section-label">Analysis</div>
+    <a href="#evaluation">Evaluation &amp; Diagnostics</a>
+    <a href="#config">Configuration Reference</a>
+  </nav>
+</aside>
+
+<!-- ═══════════════════════════════════════════════════════════════════ MAIN -->
+<main id="main">
+
+<!-- ─────────────────────────────────────────── §1 HERO -->
+<section id="hero">
+  <div class="badge-row">
+    <span class="badge badge-blue">PyTorch</span>
+    <span class="badge badge-teal">Causal ML</span>
+    <span class="badge badge-purple">Multimodal</span>
+    <span class="badge badge-blue">Vehicle Detection</span>
+  </div>
+
+  <h1>CRL-Train</h1>
+  <p class="tagline">
+    Causal Representation Learning for multimodal vehicle detection from audio and seismic sensors — a disentangled latent space that separates vehicle signatures from environmental noise.
+  </p>
+
+  <p>
+    Ground-based vehicle detection using passive sensors faces a fundamental challenge: the same sensor network must operate across a wide range of environmental conditions — rain, wind, animal activity, machinery — each of which produces interference that can mask or mimic vehicle signals. A model that memorizes sensor correlations under specific noise conditions will fail when those conditions change.
+  </p>
+  <p>
+    CRL-Train addresses this by learning a <strong>structured causal latent space</strong> where vehicle-relevant information (presence, type, proximity) is explicitly disentangled from noise. The system is trained to remain invariant to synthetic <em>interventions</em> — injected noise perturbations — so that vehicle dimensions of the latent space cannot encode noise, and noise dimensions cannot encode vehicle identity. This invariance generalizes to unseen real-world interference at inference time.
+  </p>
+
+  <div class="callout callout-teal">
+    <strong>Design principle:</strong> Rather than training a classifier to be robust by augmenting with noise, CRL-Train encodes <em>why</em> a signal changed — whether it was a vehicle event or an environmental perturbation — into separate latent dimensions. The Structural Causal Model (SCM) over the latent space makes this causal structure explicit and auditable.
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── §2 SYSTEM OVERVIEW -->
+<section id="overview">
+  <div class="section-heading">
+    <span class="section-num">2</span>
+    <h2>System Overview</h2>
+  </div>
+
+  <p>
+    The pipeline processes paired audio (16 kHz microphone) and seismic (200 Hz geophone) recordings of the same scene. Each modality is processed by an <strong>independent encoder stack</strong> — a learned filterbank, a causal temporal model, and a variational encoder — producing a structured latent vector <code>z</code>. A single <strong>Structural Causal Model (SCM)</strong> shared across modalities imposes a causal graph over <code>z</code>, enforcing that the same semantic variables (vehicle presence, type, proximity, noise) operate consistently in both sensor domains. Downstream detection and classification heads branch from the semantic blocks of <code>z</code>.
+  </p>
+
+  <div class="diagram">
+    <div class="diagram-label">End-to-end pipeline</div>
+
+    <!-- Row 1: data ingestion -->
+    <div class="flow-row centered">
+      <div class="comp-box">
+        <div class="box muted">Parquet Files<br><span style="font-size:0.7rem;opacity:0.7">audio + seismic</span></div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="comp-box">
+        <div class="box accent">SensorDataset</div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="comp-box">
+        <div class="box teal">Windows + Labels</div>
+      </div>
+    </div>
+
+    <div class="arrow-down" style="margin:6px 0;text-align:center">↓</div>
+
+    <!-- Row 2: dual encoder stacks -->
+    <div class="flow-split">
+      <div class="flow-split-col">
+        <div class="split-label" style="color:var(--accent)">Audio Stack</div>
+        <div class="box accent" style="width:100%;text-align:center;margin-bottom:0">Filterbank</div>
+        <div class="arrow-down">↓</div>
+        <div class="box accent" style="width:100%;text-align:center;margin-bottom:0">TemporalSSM</div>
+        <div class="arrow-down">↓</div>
+        <div class="box accent" style="width:100%;text-align:center;margin-bottom:0">CausalEncoder</div>
+        <div class="arrow-down">↓</div>
+        <div class="box filled-accent" style="width:100%;text-align:center">z_audio (B, 10)</div>
+      </div>
+
+      <div class="divider-line"></div>
+
+      <div class="flow-split-col">
+        <div class="split-label" style="color:var(--teal)">Seismic Stack</div>
+        <div class="box teal" style="width:100%;text-align:center;margin-bottom:0">Filterbank</div>
+        <div class="arrow-down">↓</div>
+        <div class="box teal" style="width:100%;text-align:center;margin-bottom:0">TemporalSSM</div>
+        <div class="arrow-down">↓</div>
+        <div class="box teal" style="width:100%;text-align:center;margin-bottom:0">CausalEncoder</div>
+        <div class="arrow-down">↓</div>
+        <div class="box filled-teal" style="width:100%;text-align:center">z_seismic (B, 10)</div>
+      </div>
+    </div>
+
+    <div class="arrow-down" style="text-align:center;margin:6px 0">↓</div>
+
+    <!-- Row 3: shared components -->
+    <div class="flow-row centered" style="gap:12px;flex-wrap:wrap">
+      <div class="box filled-purple">SCM<br><span style="font-size:0.7rem">shared causal graph</span></div>
+      <div class="box muted">Decoder<br><span style="font-size:0.7rem">filterbank recon</span></div>
+      <div class="box filled-orange">Detection Heads<br><span style="font-size:0.7rem">presence + type</span></div>
+    </div>
+
+    <div class="arrow-down" style="text-align:center;margin:6px 0">↓</div>
+
+    <!-- Row 4: output -->
+    <div class="flow-row centered" style="gap:12px;flex-wrap:wrap">
+      <div class="box muted">Combined Loss</div>
+      <span class="arrow">→</span>
+      <div class="box filled-teal">Checkpoint<br><span style="font-size:0.7rem">fixed-β metric</span></div>
+    </div>
+  </div>
+
+  <div class="callout callout-blue">
+    <strong>Key design choice — independent encoding, shared causality:</strong> Audio and seismic encoders are not fused early. Each modality learns its own spectral front-end. Only after encoding are latent vectors subject to the same SCM constraints. This means the causal graph is agnostic to which sensor produced the evidence, and missing modalities degrade gracefully.
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── §3 DATA PIPELINE -->
+<section id="data">
+  <div class="section-heading">
+    <span class="section-num">3</span>
+    <h2>Data Pipeline</h2>
+  </div>
+
+  <p>
+    Raw data consists of Apache Parquet files, one per sensor node per recording session. Filenames encode metadata: <code>{dataset}_{sensor}_{vehicle}_{rs_node}.parquet</code>. The <code>SensorDataset</code> class loads these files into a flat index of fixed-length windows that the DataLoader draws from.
+  </p>
+
+  <h3>3-Pass Indexing (SensorDataset)</h3>
+  <p>Loading happens in three passes to separate I/O from computation:</p>
+
+  <div class="diagram">
+    <div class="diagram-label">SensorDataset initialization</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;text-align:center">
+      <div>
+        <div class="box accent" style="margin-bottom:6px">Pass 1: Group</div>
+        <p style="font-size:0.78rem;color:var(--muted);line-height:1.5">Parse filenames → group by <code>(dataset, vehicle, rs_node)</code> per modality</p>
+      </div>
+      <div>
+        <div class="box teal" style="margin-bottom:6px">Pass 2: Load</div>
+        <p style="font-size:0.78rem;color:var(--muted);line-height:1.5">Read each parquet → extract amplitude array, presence flag, native sample rate → RAM cache</p>
+      </div>
+      <div>
+        <div class="box purple" style="margin-bottom:6px">Pass 3: Flatten</div>
+        <p style="font-size:0.78rem;color:var(--muted);line-height:1.5">Resolve labels → build flat index of <code>(group, window_idx, vehicle_type, det_label)</code></p>
+      </div>
+    </div>
+  </div>
+
+  <h3>Window Extraction</h3>
+  <p>
+    At <code>__getitem__</code>, the dataset extracts a 1-second window from the cached waveform, resamples it to the target rate (16 kHz audio, 200 Hz seismic), and applies RMS normalization. Resampling objects are cached so <code>torchaudio.Resample</code> is only constructed once per unique rate pair.
+  </p>
+  <div class="callout callout-blue">
+    <strong>RMS normalization:</strong> Each window is divided by its per-channel root-mean-square energy. This preserves the shape of vehicle transients while preventing global amplitude statistics from leaking through — a vehicle at 50 m and 200 m should produce the same latent representation modulo the proximity dimension.
+  </div>
+
+  <h3>Synthetic Interventions</h3>
+  <p>
+    During training, 60% of windows receive a synthetic noise injection to train the encoder to separate noise from vehicle signal. Each intervention is scaled to ~20% of the window's RMS energy so it does not completely mask the signal.
+  </p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>Description</th><th>Spectral character</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="mono">0</td><td>None</td><td>No intervention</td><td>—</td></tr>
+        <tr><td class="mono">1</td><td>White noise</td><td>Additive Gaussian noise</td><td>Flat spectrum</td></tr>
+        <tr><td class="mono">2</td><td>Brown noise</td><td>Integrated white noise</td><td>1/f² rolloff (bass-heavy)</td></tr>
+        <tr><td class="mono">3</td><td>Pink noise</td><td>Fractional Brownian motion</td><td>1/f rolloff</td></tr>
+        <tr><td class="mono">4</td><td>Green noise</td><td>Band-pass filtered noise</td><td>Peaked ~500 Hz</td></tr>
+        <tr><td class="mono">5</td><td>Low-freq oscillation</td><td>Sinusoidal 2–12 Hz burst</td><td>Thunder / distant traffic</td></tr>
+        <tr><td class="mono">6</td><td>High-freq chirp</td><td>Swept sinusoid</td><td>Mechanical squeaks</td></tr>
+        <tr><td class="mono">7</td><td>Bird chirps</td><td>FM modulated bursts</td><td>High-freq impulsive</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout callout-orange">
+    <strong>Vectorized GPU interventions:</strong> When the all-interventions contrast loss is active, the batch is expanded to <code>(N_INTERVENTIONS+1, B, C, W)</code> views in a single GPU kernel call. All noise generation runs on-device — no CPU↔GPU transfers per intervention.
+  </div>
+
+  <h3>MultiHorizonPairDataset</h3>
+  <p>
+    For temporal causal training, a second dataset wraps <code>SensorDataset</code> to yield <strong>pairs</strong> <code>(x_t, x_{t+n})</code> where <code>n</code> is sampled uniformly from <code>{1 … 10}</code> horizons. Each time step receives an <em>independent</em> intervention sample. The encoder must learn which latent variables changed between <code>t</code> and <code>t+n</code> without any label indicating what intervention was applied at <code>t+n</code> — forcing the unknown-intervention classifier to solve this purely from the latent difference <code>z_{t+n} − z_t</code>.
+  </p>
+
+  <div class="diagram">
+    <div class="diagram-label">Data flow: file → training batch</div>
+    <div class="flow-row centered">
+      <div class="box muted">Parquet File</div>
+      <span class="arrow">→</span>
+      <div class="box accent">Index Entry</div>
+      <span class="arrow">→</span>
+      <div class="box accent">Raw Window<br><span style="font-size:0.7rem">(1, W)</span></div>
+      <span class="arrow">→</span>
+      <div class="box teal">Resample<br><span style="font-size:0.7rem">+ RMS norm</span></div>
+      <span class="arrow">→</span>
+      <div class="box orange">Intervene<br><span style="font-size:0.7rem">60% prob</span></div>
+      <span class="arrow">→</span>
+      <div class="box filled-teal">Batch</div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── §4 MODEL ARCHITECTURE -->
+<section id="architecture">
+  <div class="section-heading">
+    <span class="section-num">4</span>
+    <h2>Model Architecture</h2>
+  </div>
+
+  <p>
+    Audio and seismic signals run through <strong>identical but independent</strong> encoder stacks — no parameters are shared between modalities until the latent space. The SCM, decoder, and downstream heads are shared. This design lets each sensor's front-end specialize to its frequency range while ensuring the causal graph generalizes across both domains.
+  </p>
+
+  <!-- LearnableFilterbank -->
+  <h3>LearnableFilterbank</h3>
+  <p>
+    Replaces a fixed STFT/mel spectrogram with a bank of learnable sinc-windowed FIR bandpass filters. Center frequencies are initialized in log space across the sensor's frequency range and updated by gradient descent. The squared filter output magnitude is log-compressed to give a stable envelope representation.
+  </p>
+  <div class="comp-diagram">
+    <div class="comp-box">
+      <div class="box muted">(B, C, W)<br><span class="shape-label">raw waveform</span></div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box accent">Sinc FIR<br>K bands<br><span style="font-size:0.7rem">learnable f_c</span></div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box accent">|·|² → log<br><span style="font-size:0.7rem">log-compress</span></div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box filled-accent">(B, K·C, T′)<br><span class="shape-label">T′ = 25 frames</span></div>
+    </div>
+  </div>
+  <div class="callout callout-blue">
+    Audio: K bands over 50–8000 Hz with n_fft=512, hop=160 → T′=101. Seismic: K bands over 0–100 Hz with n_fft=64, hop=8 → T′=25. Both share T′=25 after the hop computation <code>W // hop + 1</code>.
+  </div>
+
+  <!-- TemporalSSM -->
+  <h3>TemporalSSM</h3>
+  <p>
+    A causal temporal model that processes the filterbank sequence while enforcing that each time step can only attend to past frames. This is critical: the model must be deployable in a streaming setting where future frames are unavailable.
+  </p>
+  <div class="comp-diagram">
+    <div class="comp-box">
+      <div class="box muted">(B, K·C, T′)</div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box accent">Linear<br>→ d_model=64</div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box accent">Pos. embed<br>(learned, 256)</div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box accent">Causal Transformer<br>4 heads, 2 layers<br><span style="font-size:0.7rem">lower-tri mask</span></div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box filled-accent">(B, T′, 64)</div>
+    </div>
+  </div>
+
+  <!-- CausalEncoder -->
+  <h3>CausalEncoder</h3>
+  <p>
+    Compresses the full temporal sequence into a single structured latent vector via soft attention pooling, then parameterizes a diagonal Gaussian posterior over the latent space. The log-variance is clamped to <code>[-6, 4]</code> to prevent KL explosion or collapse. The 2·d_z output is split and reparameterized into the four semantic blocks.
+  </p>
+  <div class="comp-diagram">
+    <div class="comp-box">
+      <div class="box muted">(B, T′, 64)</div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box accent">Attn pool<br><span style="font-size:0.7rem">→ (B, 64)</span></div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box accent">Linear<br>→ (B, 20)</div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box accent">Reparam.<br><span style="font-size:0.7rem">clamp log_var</span></div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box filled-accent">z (B, 10)<br>μ, log_var</div>
+    </div>
+  </div>
+
+  <!-- SCM -->
+  <h3>Structural Causal Model (SCM)</h3>
+  <p>
+    The SCM learns a <strong>directed acyclic graph</strong> over the 10-dimensional latent space. The adjacency matrix <code>A</code> is parameterized as a raw lower-triangular matrix; acyclicity is guaranteed by construction — no NOTEARS penalty is needed, though gradient clipping is still applied for stability. Each variable <code>z_i</code> is predicted by a small MLP operating on its parents <code>z_{&lt;i}</code>.
+  </p>
+  <div class="comp-diagram">
+    <div class="comp-box">
+      <div class="box muted">z (B, 10)<br><span class="shape-label">encoder output</span></div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box purple">Lower-tri A<br><span style="font-size:0.7rem">sigmoid → weights</span></div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box purple">Per-var MLP<br><span style="font-size:0.7rem">f_i(parents)</span></div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box filled-purple">z_scm (B, 10)<br><span class="shape-label">SCM prediction</span></div>
+    </div>
+  </div>
+  <div class="callout callout-purple">
+    <strong>Intervention masking:</strong> For a known intervention at intervention ID <code>k</code>, the SCM output for the affected noise dimension is replaced by the encoder's value. This tells the SCM: "don't try to explain this dim causally — it was externally perturbed." The KL for those dims is also zeroed.
+  </div>
+
+  <!-- Decoder -->
+  <h3>SpectralDecoder</h3>
+  <p>
+    Reconstructs the filterbank envelope from <code>z</code>. Reconstruction happens in filterbank space (not raw waveform space) to avoid phase ambiguity — the filterbank envelope is the natural output of the front-end and provides a sufficient ELBO signal without requiring a vocoder.
+  </p>
+  <div class="comp-diagram">
+    <div class="comp-box">
+      <div class="box muted">z (B, 10)</div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box teal">MLP decoder</div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="comp-box">
+      <div class="box filled-teal">x̂ (B, K, T′)<br><span class="shape-label">filterbank recon</span></div>
+    </div>
+  </div>
+
+  <!-- Downstream heads -->
+  <h3>Downstream Detection Heads</h3>
+  <p>
+    Two lightweight heads branch directly from semantic blocks of <code>z</code>. They are shared across modalities — the same head reads from the audio-encoder's <code>z</code> and the seismic-encoder's <code>z</code> during training.
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Head</th><th>Input</th><th>Architecture</th><th>Loss</th><th>Class weight</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>PresenceHead</strong></td>
+          <td class="mono">z_presence (B,1)</td>
+          <td>Linear(1→1)</td>
+          <td>BCEWithLogits</td>
+          <td>[1.0, 5.0] (imbalance)</td>
+        </tr>
+        <tr>
+          <td><strong>TypeHead</strong></td>
+          <td class="mono">z_type (B,4)</td>
+          <td>Linear(4→32) → ReLU → Dropout(0.1) → Linear(32→n_classes)</td>
+          <td>CrossEntropy</td>
+          <td>Uniform</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── §5 LATENT SPACE -->
+<section id="latent">
+  <div class="section-heading">
+    <span class="section-num">5</span>
+    <h2>Latent Space Design</h2>
+  </div>
+
+  <p>
+    Rather than learning an unstructured latent space, CRL-Train pre-assigns semantic meaning to disjoint blocks of the latent vector <code>z ∈ ℝ¹⁰</code>. Each block corresponds to a distinct ground-truth generative factor. This makes the latent space <em>auditable</em> — you can probe each block independently to verify it encodes what it's supposed to — and enables targeted intervention: noise perturbations should only excite <code>z_noise</code>, not <code>z_type</code>.
+  </p>
+
+  <div class="z-vector">
+    <div class="z-block z-presence">
+      <span>z_presence</span>
+      <span>1 dim</span>
+    </div>
+    <div class="z-block z-type">
+      <span>z_type</span>
+      <span>4 dims</span>
+    </div>
+    <div class="z-block z-prox">
+      <span>z_prox</span>
+      <span>1 dim</span>
+    </div>
+    <div class="z-block z-noise">
+      <span>z_noise</span>
+      <span>4 dims</span>
+    </div>
+  </div>
+
+  <div class="z-legend">
+    <div class="z-legend-item">
+      <div class="z-dot" style="background:var(--accent)"></div>
+      <span><strong style="color:var(--accent)">z_presence</strong> — binary vehicle/background</span>
+    </div>
+    <div class="z-legend-item">
+      <div class="z-dot" style="background:var(--teal)"></div>
+      <span><strong style="color:var(--teal)">z_type</strong> — vehicle class (4 types)</span>
+    </div>
+    <div class="z-legend-item">
+      <div class="z-dot" style="background:var(--purple)"></div>
+      <span><strong style="color:var(--purple)">z_prox</strong> — distance scalar</span>
+    </div>
+    <div class="z-legend-item">
+      <div class="z-dot" style="background:var(--orange)"></div>
+      <span><strong style="color:var(--orange)">z_noise</strong> — unstructured environmental noise</span>
+    </div>
+  </div>
+
+  <h3>β-Annealing Schedule</h3>
+  <p>
+    The KL weight β controls how strongly the posterior is pushed toward the standard normal prior. Training begins with <strong>β = 0</strong> — the encoder is a standard autoencoder and encodes all information it can. β then ramps linearly to <strong>β = 1</strong> over 40 epochs, applying progressive pressure for the posterior to use only the capacity it needs, forcing unused dimensions toward the prior and encouraging semantic specialization.
+  </p>
+
+  <div class="diagram">
+    <div class="diagram-label">β annealing over training</div>
+    <div style="display:flex;align-items:stretch;height:56px;border-radius:6px;overflow:hidden;border:1px solid var(--border)">
+      <div style="background:linear-gradient(to right,rgba(74,158,255,0.05),rgba(74,158,255,0.25));flex:4;display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:var(--accent);font-weight:600;border-right:1px dashed var(--border)">
+        β: 0.0 → 1.0 (linear ramp, epochs 0–40)
+      </div>
+      <div style="background:rgba(74,158,255,0.25);flex:1;display:flex;align-items:center;justify-content:center;font-size:0.75rem;color:var(--accent);font-weight:700">
+        β = 1.0
+      </div>
+    </div>
+    <div style="display:flex;font-size:0.7rem;color:var(--muted);margin-top:4px">
+      <span style="flex:4;text-align:center">Epoch 0 → 40 (annealing)</span>
+      <span style="flex:1;text-align:center">40+ (fixed)</span>
+    </div>
+  </div>
+
+  <div class="callout callout-orange">
+    <strong>KL zeroing on intervened dims:</strong> When a known intervention is applied to a window, the KL loss for the noise dimensions of that window is set to zero. This prevents the KL pressure from driving noise-perturbed posteriors toward the prior — a perturbed signal <em>should</em> have a non-standard posterior in the noise block.
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── §6 LOSSES -->
+<section id="losses">
+  <div class="section-heading">
+    <span class="section-num">6</span>
+    <h2>Loss Functions</h2>
+  </div>
+
+  <p>
+    The total training objective combines reconstruction fidelity, latent regularization, causal consistency, disentanglement, task supervision, and structural sparsity. Each term is weighted by a coefficient λ; several of these coefficients are also annealed over training alongside β.
+  </p>
+
+  <div class="equation">L_total = L_recon  +  β · L_KL  +  λ_causal · L_SCM  +  λ_disent · L_TC  +  λ_collapse · L_collapse
+          +  λ_task · (L_presence + L_type)
+          +  λ_contrast · L_contrast  +  λ_l1 · L_graph</div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Term</th><th>Default λ</th><th>Formula</th><th>Role</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>L_recon</strong></td>
+          <td class="mono">1.0</td>
+          <td>MSE(x̂, filterbank_target)</td>
+          <td>Ensures z carries enough information to reconstruct the input</td>
+        </tr>
+        <tr>
+          <td><strong>L_KL</strong></td>
+          <td class="mono">β (annealed)</td>
+          <td>−½ · Σ(1 + log_var − μ² − exp(log_var))</td>
+          <td>Pushes posterior toward prior; KL zeroed on intervened dims</td>
+        </tr>
+        <tr>
+          <td><strong>L_SCM</strong></td>
+          <td class="mono">5.0</td>
+          <td>MSE(z, z_scm)</td>
+          <td>Forces the SCM to explain the encoder's latent structure causally</td>
+        </tr>
+        <tr>
+          <td><strong>L_TC</strong></td>
+          <td class="mono">0.5</td>
+          <td>Mean off-diagonal correlation²(z)</td>
+          <td>Penalizes statistical dependence between latent dimensions</td>
+        </tr>
+        <tr>
+          <td><strong>L_collapse</strong></td>
+          <td class="mono">1.0</td>
+          <td>Penalty when log_var &lt; threshold</td>
+          <td>Prevents posterior collapse (all dims shrinking to prior)</td>
+        </tr>
+        <tr>
+          <td><strong>L_presence</strong></td>
+          <td class="mono">2.0</td>
+          <td>BCEWithLogits(ŷ_det, y_det)</td>
+          <td>Supervised vehicle detection signal from z_presence</td>
+        </tr>
+        <tr>
+          <td><strong>L_type</strong></td>
+          <td class="mono">2.0</td>
+          <td>CrossEntropy(ŷ_type, y_type)</td>
+          <td>Supervised vehicle classification signal from z_type</td>
+        </tr>
+        <tr>
+          <td><strong>L_contrast</strong></td>
+          <td class="mono">2.0</td>
+          <td>Variance of z across all intervention views</td>
+          <td>Noise dims should vary; vehicle dims should not</td>
+        </tr>
+        <tr>
+          <td><strong>L_graph</strong></td>
+          <td class="mono">0.01</td>
+          <td>L1(adjacency matrix A)</td>
+          <td>Encourages a sparse causal graph (fewer edges = more interpretable)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Fixed-β Checkpointing</h3>
+  <div class="callout callout-purple">
+    <strong>Problem:</strong> The validation loss computed during β-annealing is non-stationary — the same model weights will yield a lower loss at epoch 5 (β≈0.1) than at epoch 45 (β=1.0), making epoch-to-epoch comparisons meaningless for model selection.<br><br>
+    <strong>Solution:</strong> A second validation pass at the end of each epoch computes the loss with β fixed at <code>beta_end = 1.0</code> regardless of the current training β. This <em>fixed-β metric</em> is the sole criterion for early stopping and best-checkpoint selection. The annealing loss is still logged for diagnosing training dynamics.
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── §7 TRAINING SCHEDULE -->
+<section id="schedule">
+  <div class="section-heading">
+    <span class="section-num">7</span>
+    <h2>Training Schedule</h2>
+  </div>
+
+  <p>
+    Training proceeds in two phases: CRL pre-training (where the full pipeline including SCM is trained), followed by downstream fine-tuning (where the backbone is frozen and only the detection heads are updated). Within pre-training, a curriculum controls how quickly unknown-intervention pair training is introduced.
+  </p>
+
+  <h3>Curriculum: Known vs. Unknown Interventions</h3>
+  <p>
+    Unknown-intervention training (temporal pairs) is harder than known-intervention training — the model must infer <em>which</em> latent changed without a label. Introducing it too early, before the encoder has learned a meaningful latent space, produces uninformative gradient signal. The curriculum delays unknown pairs until epoch 10 and ramps their weight over the following 10 epochs.
+  </p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Epoch range</th><th>Known weight</th><th>Unknown weight</th><th>Behavior</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="mono">0 – 10</td>
+          <td class="mono">1.0</td>
+          <td class="mono">0.0</td>
+          <td>Known interventions only. Encoder warm-start; SCM begins learning causal structure.</td>
+        </tr>
+        <tr>
+          <td class="mono">10 – 20</td>
+          <td class="mono">0.5</td>
+          <td class="mono">0 → 0.5 (ramps)</td>
+          <td>Temporal pairs gradually introduced. Unknown-intervention classifier begins training.</td>
+        </tr>
+        <tr>
+          <td class="mono">20+</td>
+          <td class="mono">0.5</td>
+          <td class="mono">0.5</td>
+          <td>Equal weighting. Full causal training regime active.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Learning Rate Schedule</h3>
+  <div class="lr-diagram">
+    <div class="lr-warmup">Linear warmup<br>0 → lr_max</div>
+    <div class="lr-cosine">Cosine annealing with warm restarts<br>(period T₀, eta_min = lr_min)</div>
+  </div>
+  <div class="lr-labels">
+    <span>Epochs 0 → warmup_epochs</span>
+    <span>Epochs warmup_epochs → end (restarts every T₀)</span>
+  </div>
+
+  <h3>Stability and Stopping</h3>
+  <div class="metric-cards">
+    <div class="metric-card">
+      <div class="mc-name">Gradient clipping</div>
+      <div class="mc-val mc-orange">1.0</div>
+      <div class="mc-desc">max_norm=1.0 applied every step. Critical for SCM training: the lower-triangular adjacency produces large gradients as the graph structure changes.</div>
+    </div>
+    <div class="metric-card">
+      <div class="mc-name">Early stopping patience</div>
+      <div class="mc-val mc-teal">25</div>
+      <div class="mc-desc">Epochs without improvement on the fixed-β validation metric before halting. Evaluated on the held-out validation loader.</div>
+    </div>
+    <div class="metric-card">
+      <div class="mc-name">Checkpointing metric</div>
+      <div class="mc-val mc-blue" style="font-size:0.9rem">Fixed-β ELBO</div>
+      <div class="mc-desc">Val loss computed at beta_end=1.0 regardless of training epoch. Epoch-invariant for fair model selection.</div>
+    </div>
+  </div>
+
+  <h3>Phase 2: Downstream Fine-tuning</h3>
+  <p>
+    After CRL pre-training converges, the full backbone (filterbank, SSM, encoder, SCM, decoder) is frozen. Only <code>PresenceHead</code> and <code>TypeHead</code> are updated. This validates that the learned latent space is linearly separable for the downstream tasks without any further representation learning.
+  </p>
+</section>
+
+<!-- ─────────────────────────────────────────── §8 EVALUATION -->
+<section id="evaluation">
+  <div class="section-heading">
+    <span class="section-num">8</span>
+    <h2>Evaluation &amp; Diagnostics</h2>
+  </div>
+
+  <p>
+    Evaluation spans three levels: <strong>disentanglement quality</strong> (does the latent space encode the right factors in the right places?), <strong>causal structure</strong> (is the SCM graph meaningful?), and <strong>task performance</strong> (does the downstream detector work?). All metrics are computed on the held-out validation set with the frozen backbone.
+  </p>
+
+  <h3>Mutual Information Gap (MIG)</h3>
+  <p>
+    MIG measures how exclusively each ground-truth factor is captured by a single latent dimension. For each factor <code>v_k</code> (e.g., vehicle type), the two latent dims with highest mutual information are identified:
+  </p>
+  <div class="equation">MIG_k = (MI(z_top1; v_k) − MI(z_top2; v_k)) / H(v_k)</div>
+  <p>
+    The mean MIG over all factors lies in <code>[0, 1]</code>. A score near 1 means each factor is captured by exactly one dimension. A score near 0 means factors are spread across many dims or multiple dims encode the same factor. MI is estimated by discretizing each z dimension into decile bins.
+  </p>
+
+  <h3>Linear Probe Accuracy</h3>
+  <p>
+    A logistic regression classifier is fit on the <em>frozen</em> latent vectors (no fine-tuning) and evaluated on the validation set. Probes are run per semantic block:
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Probe target</th><th>Input block</th><th>Metric</th><th>Interpretation</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Vehicle type</td>
+          <td class="mono">z_type (4 dims)</td>
+          <td>Weighted F1</td>
+          <td>High = type encoded in z_type as intended</td>
+        </tr>
+        <tr>
+          <td>Presence</td>
+          <td class="mono">z_presence (1 dim)</td>
+          <td>Accuracy</td>
+          <td>High = presence captured; low = collapse or entanglement</td>
+        </tr>
+        <tr>
+          <td>Full z</td>
+          <td class="mono">z (10 dims)</td>
+          <td>Weighted F1</td>
+          <td>Upper bound; gap from block probe = information leakage</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Collapse Metrics</h3>
+  <p>
+    Posterior collapse — where some latent dimensions shrink to the prior and encode nothing — is tracked explicitly. Three complementary metrics are reported:
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Metric</th><th>Formula</th><th>Target</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>active_dim_frac</strong></td>
+          <td>fraction of dims with std(z) &gt; 0.05</td>
+          <td class="mono">≥ 0.80</td>
+        </tr>
+        <tr>
+          <td><strong>spread_ratio</strong></td>
+          <td>min_std / max_std across dims</td>
+          <td class="mono">≈ 1.0</td>
+        </tr>
+        <tr>
+          <td><strong>active_units_frac</strong></td>
+          <td>fraction of dims with Var(𝔼[z|x]) &gt; 0.01</td>
+          <td class="mono">≥ 0.80</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Noise Type Separation Score</h3>
+  <p>
+    A logistic classifier is trained to predict the intervention type (IDs 0–7) from each semantic block of <code>z</code>. This verifies the disentanglement objective directly:
+  </p>
+  <div class="callout callout-teal">
+    <strong>Desired outcome:</strong> The classifier achieves <em>high accuracy on z_noise</em> (noise type is encoded in the noise block) and <em>low accuracy on z_type and z_presence</em> (vehicle dims are unaffected by noise injection). A high score on z_type means noise is leaking into vehicle representations — a disentanglement failure.
+  </div>
+
+  <h3>Outputs</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>File</th><th>Contents</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="mono">crl_best.pth</td><td>Best checkpoint by fixed-β val metric</td></tr>
+        <tr><td class="mono">crl_final.pth</td><td>Checkpoint at last epoch before early stopping</td></tr>
+        <tr><td class="mono">crl_metrics.csv</td><td>Per-epoch: all loss terms, MIG, collapse metrics, probe accuracies</td></tr>
+        <tr><td class="mono">confusion_*.png</td><td>Detection and type confusion matrices per evaluation split</td></tr>
+        <tr><td class="mono">predictions.csv</td><td>Per-sample: segment_id, true/pred detection, true/pred type, intervention ID</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ─────────────────────────────────────────── §9 CONFIG -->
+<section id="config">
+  <div class="section-heading">
+    <span class="section-num">9</span>
+    <h2>Configuration Reference</h2>
+  </div>
+
+  <p>
+    All pipeline behavior is controlled by two dataclasses defined in <code>crl_vehicle/config.py</code>. <code>ModalityConfig</code> governs per-sensor signal processing. <code>CRLConfig</code> governs the full pipeline including model dimensions, loss weights, and training schedule parameters.
+  </p>
+
+  <details>
+    <summary>ModalityConfig — per-sensor signal processing</summary>
+    <div class="details-body">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Parameter</th><th>Type</th><th>Audio default</th><th>Seismic default</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="mono">sample_rate</td><td>int</td><td class="mono">16000</td><td class="mono">200</td><td>Target sample rate after resampling</td></tr>
+            <tr><td class="mono">window_size</td><td>int</td><td class="mono">16000</td><td class="mono">200</td><td>Samples per 1-second window</td></tr>
+            <tr><td class="mono">n_channels</td><td>int</td><td class="mono">1</td><td class="mono">1</td><td>Number of sensor channels</td></tr>
+            <tr><td class="mono">n_fft</td><td>int</td><td class="mono">512</td><td class="mono">64</td><td>STFT / filterbank window size (samples)</td></tr>
+            <tr><td class="mono">hop_length</td><td>int</td><td class="mono">160</td><td class="mono">8</td><td>STFT hop / stride between frames</td></tr>
+            <tr><td class="mono">n_mels</td><td>int</td><td class="mono">64</td><td class="mono">0</td><td>&gt;0 → mel filterbank; 0 → linear STFT bins</td></tr>
+            <tr><td class="mono">f_min</td><td>float</td><td class="mono">50.0</td><td class="mono">0.0</td><td>Lower frequency bound (Hz)</td></tr>
+            <tr><td class="mono">f_max</td><td>float</td><td class="mono">8000.0</td><td class="mono">0.0</td><td>Upper frequency bound (Hz); 0 = Nyquist</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-top:8px">
+        <strong>Computed properties:</strong> <code>t_prime = window_size // hop_length + 1</code> (= 25 for seismic; audio uses same 25 frames after filterbank stride). <code>n_freq_bins</code> = n_fft//2 + 1 (linear) or n_mels (mel).
+      </p>
+      <pre><code><span class="cm"># Default audio config</span>
+<span class="fn">ModalityConfig</span>(
+    sample_rate=<span class="nm">16000</span>,  <span class="cm"># 16 kHz microphone</span>
+    window_size=<span class="nm">16000</span>,  <span class="cm"># 1-second window</span>
+    n_channels=<span class="nm">1</span>,
+    n_fft=<span class="nm">512</span>,          <span class="cm"># 32 ms frame</span>
+    hop_length=<span class="nm">160</span>,      <span class="cm"># 10 ms hop</span>
+    n_mels=<span class="nm">64</span>,           <span class="cm"># mel spectrogram</span>
+    f_min=<span class="nm">50.0</span>,          <span class="cm"># engine harmonics</span>
+    f_max=<span class="nm">8000.0</span>         <span class="cm"># + road noise</span>
+)
+
+<span class="cm"># Default seismic config</span>
+<span class="fn">ModalityConfig</span>(
+    sample_rate=<span class="nm">200</span>,     <span class="cm"># 200 Hz geophone</span>
+    window_size=<span class="nm">200</span>,     <span class="cm"># 1-second window</span>
+    n_channels=<span class="nm">1</span>,
+    n_fft=<span class="nm">64</span>,            <span class="cm"># 320 ms frame</span>
+    hop_length=<span class="nm">8</span>,         <span class="cm"># 40 ms hop</span>
+    n_mels=<span class="nm">0</span>,             <span class="cm"># linear STFT (33 bins)</span>
+    f_min=<span class="nm">0.0</span>,
+    f_max=<span class="nm">0.0</span>             <span class="cm"># full Nyquist range</span>
+)</code></pre>
+    </div>
+  </details>
+
+  <details>
+    <summary>CRLConfig — full pipeline configuration</summary>
+    <div class="details-body">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="4" style="background:rgba(74,158,255,0.06);color:var(--accent);font-size:0.72rem;font-weight:700;letter-spacing:0.08em;padding:8px 14px">MODEL DIMENSIONS</td></tr>
+            <tr><td class="mono">d_model</td><td>int</td><td class="mono">64</td><td>Hidden dimension in SSM and encoder projection</td></tr>
+            <tr><td class="mono">ssm_nhead</td><td>int</td><td class="mono">4</td><td>Number of attention heads in Transformer SSM</td></tr>
+            <tr><td class="mono">ssm_layers</td><td>int</td><td class="mono">2</td><td>Number of Transformer encoder layers</td></tr>
+            <tr><td class="mono">d_z_presence</td><td>int</td><td class="mono">1</td><td>Latent dims for vehicle presence (binary)</td></tr>
+            <tr><td class="mono">d_z_type</td><td>int</td><td class="mono">4</td><td>Latent dims for vehicle class (4 types)</td></tr>
+            <tr><td class="mono">d_z_proximity</td><td>int</td><td class="mono">1</td><td>Latent dims for proximity scalar</td></tr>
+            <tr><td class="mono">d_z_noise</td><td>int</td><td class="mono">4</td><td>Latent dims for unstructured noise</td></tr>
+            <tr><td colspan="4" style="background:rgba(0,212,170,0.06);color:var(--teal);font-size:0.72rem;font-weight:700;letter-spacing:0.08em;padding:8px 14px">LOSS WEIGHTS</td></tr>
+            <tr><td class="mono">beta_start</td><td>float</td><td class="mono">0.0</td><td>Initial KL weight</td></tr>
+            <tr><td class="mono">beta_end</td><td>float</td><td class="mono">1.0</td><td>Final KL weight (also used for fixed-β checkpointing)</td></tr>
+            <tr><td class="mono">beta_anneal_epochs</td><td>int</td><td class="mono">40</td><td>Epochs over which β ramps from start to end</td></tr>
+            <tr><td class="mono">lambda_causal</td><td>float</td><td class="mono">5.0</td><td>SCM consistency loss weight</td></tr>
+            <tr><td class="mono">lambda_interv</td><td>float</td><td class="mono">2.0</td><td>Unknown-intervention classifier loss weight</td></tr>
+            <tr><td class="mono">lambda_disent</td><td>float</td><td class="mono">0.5</td><td>Total correlation (disentanglement) penalty weight</td></tr>
+            <tr><td class="mono">lambda_task</td><td>float</td><td class="mono">2.0</td><td>Detection + classification task loss weight</td></tr>
+            <tr><td class="mono">lambda_collapse</td><td>float</td><td class="mono">1.0</td><td>Posterior collapse penalty weight</td></tr>
+            <tr><td class="mono">lambda_contrast</td><td>float</td><td class="mono">2.0</td><td>All-intervention contrast loss weight</td></tr>
+            <tr><td class="mono">lambda_l1_graph</td><td>float</td><td class="mono">0.01</td><td>SCM adjacency L1 sparsity weight</td></tr>
+            <tr><td colspan="4" style="background:rgba(180,138,255,0.06);color:var(--purple);font-size:0.72rem;font-weight:700;letter-spacing:0.08em;padding:8px 14px">CURRICULUM &amp; TRAINING</td></tr>
+            <tr><td class="mono">unknown_interv_start_epoch</td><td>int</td><td class="mono">10</td><td>Epoch at which unknown-intervention pairs begin</td></tr>
+            <tr><td class="mono">unknown_interv_ramp_epochs</td><td>int</td><td class="mono">10</td><td>Epochs over which unknown-interv weight ramps to 0.5</td></tr>
+            <tr><td class="mono">n_horizons</td><td>int</td><td class="mono">10</td><td>Max temporal horizon for pairs (windows)</td></tr>
+            <tr><td class="mono">horizon_stride_sec</td><td>float</td><td class="mono">0.1</td><td>Seconds between overlapping windows</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+</section>
+
+</main>
+
+<script>
+  // ── Scroll-spy: highlight active nav link ─────────────────────────
+  const sections = document.querySelectorAll('section[id]');
+  const navLinks  = document.querySelectorAll('#nav a');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = entry.target.getAttribute('id');
+        navLinks.forEach(a => {
+          a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+        });
+      }
+    });
+  }, {
+    rootMargin: '-15% 0px -75% 0px',
+    threshold: 0
+  });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+
+</body>
+</html>

@@ -177,15 +177,15 @@ class CRLModel(nn.Module):
 
         outputs["scm_l1"] = self.scm.adjacency().abs().sum()
 
-        # Downstream logits (using seismic if available, else audio)
-        ref_sensor = "seismic" if "seismic" in self.sensors else self.sensors[0]
-        z_ref = outputs[f"z_{ref_sensor}"]
-        enc = self.encoders[ref_sensor]
-        z_pres, z_type, _, _ = enc.split_z_raw(z_ref)
-        pres_logit, type_logits = self.det_heads[ref_sensor](z_pres, z_type)
-        # Convert binary presence to 2-class logits for CrossEntropyLoss
-        outputs["det_logits"] = torch.stack([-pres_logit, pres_logit], dim=1)
-        outputs["vehicle_logits"] = type_logits
+        # Downstream logits — independently computed per modality so both
+        # encoders receive direct task supervision (z_type and z_presence
+        # anchored to labels for audio and seismic separately).
+        for sensor in self.sensors:
+            enc = self.encoders[sensor]
+            z_pres, z_type, _, _ = enc.split_z_raw(outputs[f"z_{sensor}"])
+            pres_logit, type_logits = self.det_heads[sensor](z_pres, z_type)
+            outputs[f"det_logits_{sensor}"] = torch.stack([-pres_logit, pres_logit], dim=1)
+            outputs[f"vehicle_logits_{sensor}"] = type_logits
 
         return outputs
 

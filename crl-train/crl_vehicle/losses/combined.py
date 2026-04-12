@@ -160,24 +160,37 @@ class CombinedLoss(nn.Module):
             L_interv = F.cross_entropy(interv_logits, interv_targets)
         metrics["interv"] = L_interv.item() if torch.is_tensor(L_interv) else 0.0
 
-        # --- Downstream task losses ---
-        L_task = torch.zeros((), device=_dev)
-        vehicle_logits = outputs.get("vehicle_logits")
+        # --- Downstream task losses (summed across modalities) ---
+        # Each modality independently predicts presence and type from its own
+        # z_presence / z_type block, so both encoders receive direct label gradient.
         vehicle_labels = outputs.get("vehicle_labels")
-        if vehicle_logits is not None and vehicle_labels is not None:
-            # Exclude invalid labels (background=-1, multi=-2)
-            valid = vehicle_labels >= 0
-            if valid.any():
-                L_task = F.cross_entropy(
-                    vehicle_logits[valid], vehicle_labels[valid]
-                )
-        metrics["task_cls"] = L_task.item() if torch.is_tensor(L_task) else 0.0
-
-        L_det = torch.zeros((), device=_dev)
-        det_logits = outputs.get("det_logits")
         det_labels = outputs.get("det_labels")
-        if det_logits is not None and det_labels is not None:
-            L_det = F.cross_entropy(det_logits, det_labels)
+
+        L_task = torch.zeros((), device=_dev)
+        L_det = torch.zeros((), device=_dev)
+
+        for key, val in outputs.items():
+            if key.startswith("vehicle_logits_") and vehicle_labels is not None:
+                # Exclude invalid labels (background=-1, multi=-2)
+                valid = vehicle_labels >= 0
+                if valid.any():
+                    L_task = L_task + F.cross_entropy(val[valid], vehicle_labels[valid])
+            elif key.startswith("det_logits_") and det_labels is not None:
+                L_det = L_det + F.cross_entropy(val, det_labels)
+
+        # Fallback: legacy single-key path (used by downstream Phase 2 trainer)
+        if not any(k.startswith("vehicle_logits_") for k in outputs):
+            vehicle_logits = outputs.get("vehicle_logits")
+            if vehicle_logits is not None and vehicle_labels is not None:
+                valid = vehicle_labels >= 0
+                if valid.any():
+                    L_task = F.cross_entropy(vehicle_logits[valid], vehicle_labels[valid])
+        if not any(k.startswith("det_logits_") for k in outputs):
+            det_logits = outputs.get("det_logits")
+            if det_logits is not None and det_labels is not None:
+                L_det = F.cross_entropy(det_logits, det_labels)
+
+        metrics["task_cls"] = L_task.item() if torch.is_tensor(L_task) else 0.0
         metrics["task_det"] = L_det.item() if torch.is_tensor(L_det) else 0.0
 
         # --- Temporal consistency loss (horizon-pair path only) ---
