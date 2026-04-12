@@ -240,6 +240,65 @@ def main():
         else:
             print("  WARNING: one detection class absent from val set — check labels.")
 
+        # --- Diagnostic: check whether z_type (mu) separates vehicle type labels ---
+        print("\n=== z_type Diagnostic (val set) ===")
+        CLASS_NAMES = {0: "pedestrian", 1: "light", 2: "sport", 3: "utility"}
+        type_vals: dict[int, list[list[float]]] = {k: [] for k in CLASS_NAMES}  # cls -> list of d_z_type vectors
+        with torch.no_grad():
+            for batch in val_loader:
+                x = batch[f"x_{ref_sensor}"].to(device)
+                vtype = batch["vehicle_type"]
+                _, mu, _, _ = model.encode_modality(ref_sensor, x)
+                enc = model.encoders[ref_sensor]
+                _, z_type_raw, _, _ = enc.split_z_raw(mu)
+                z_type_cpu = z_type_raw.cpu()
+                for cls_idx in CLASS_NAMES:
+                    mask = vtype == cls_idx
+                    if mask.any():
+                        type_vals[cls_idx].extend(z_type_cpu[mask].tolist())
+        import statistics as _stats
+        n_type_dims = len(type_vals[0][0]) if type_vals[0] else 4
+        present_classes = [k for k in CLASS_NAMES if type_vals[k]]
+        if len(present_classes) < 2:
+            print("  WARNING: fewer than 2 vehicle classes in val set — cannot compute separation.")
+        else:
+            # Per-dim stats
+            per_dim_means: dict[int, list[float]] = {}   # cls -> [mu_d0, mu_d1, ...]
+            per_dim_stds:  dict[int, list[float]] = {}
+            for cls_idx in present_classes:
+                vecs = type_vals[cls_idx]
+                per_dim_means[cls_idx] = [_stats.mean(v[d] for v in vecs) for d in range(n_type_dims)]
+                per_dim_stds[cls_idx]  = [
+                    _stats.stdev(v[d] for v in vecs) if len(vecs) > 1 else 0.0
+                    for d in range(n_type_dims)
+                ]
+                n = len(vecs)
+                means_str = "  ".join(f"{per_dim_means[cls_idx][d]:+.3f}/{per_dim_stds[cls_idx][d]:.3f}" for d in range(n_type_dims))
+                print(f"  {CLASS_NAMES[cls_idx]:>10} (n={n:6d}): [{means_str}]")
+
+            # Max pairwise d' per dimension
+            max_dp_per_dim = []
+            for d in range(n_type_dims):
+                best_dp = 0.0
+                for i, ci in enumerate(present_classes):
+                    for cj in present_classes[i + 1:]:
+                        mu_i = per_dim_means[ci][d]
+                        mu_j = per_dim_means[cj][d]
+                        si   = per_dim_stds[ci][d]
+                        sj   = per_dim_stds[cj][d]
+                        dp   = abs(mu_i - mu_j) / (0.5 * (si + sj) + 1e-8)
+                        best_dp = max(best_dp, dp)
+                max_dp_per_dim.append(best_dp)
+
+            print(f"\n  Max pairwise d' per z_type dim: " + "  ".join(f"dim{d}={v:.3f}" for d, v in enumerate(max_dp_per_dim)))
+            overall_max = max(max_dp_per_dim)
+            if overall_max >= 1.0:
+                print(f"  Signal: STRONG (max d'={overall_max:.3f} ≥ 1.0) — z_type encodes class, investigate head/weights")
+            elif overall_max >= 0.5:
+                print(f"  Signal: WEAK   (max d'={overall_max:.3f} in [0.5, 1.0)) — marginal separation")
+            else:
+                print(f"  Signal: NONE   (max d'={overall_max:.3f} < 0.5) — z_type has no class signal; fix is upstream in CRL")
+
         trainer.train_downstream(train_loader, val_loader, args.ds_epochs)
 
         for sensor, head in model.det_heads.items():
