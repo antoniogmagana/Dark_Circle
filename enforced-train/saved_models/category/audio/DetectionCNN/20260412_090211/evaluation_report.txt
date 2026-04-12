@@ -1,0 +1,16 @@
+Run Directory: 20260412_090211
+Mode: category | Model: DetectionCNN
+----------------------------------------
+Accuracy: 0.5606
+MCC: 0.4007
+ROC-AUC: 0.8553
+Precision: 0.6836
+Recall: 0.5606
+F1-Score: 0.5639
+Latency: 0.0879 ms/sample
+
+Per-Class Accuracy:
+  pedestrian (0): 0.7633
+  light (1): 0.3394
+  sport (2): 0.4290
+  utility (3): 0.7649

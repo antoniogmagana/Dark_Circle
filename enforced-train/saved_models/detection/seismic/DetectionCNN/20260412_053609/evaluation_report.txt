@@ -1,0 +1,15 @@
+Run Directory: 20260412_053609
+Mode: detection | Model: DetectionCNN
+----------------------------------------
+Accuracy: 0.8002
+MCC: 0.5919
+ROC-AUC: 0.8801
+Precision: 0.8074
+Recall: 0.8002
+F1-Score: 0.7947
+Latency: 0.0276 ms/sample
+False Alarm Rate: 8.538%
+
+Per-Class Accuracy:
+  Background (0): 0.9146
+  Target (1): 0.6455

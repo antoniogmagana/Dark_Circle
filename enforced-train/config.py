@@ -173,10 +173,10 @@ CLASS_WEIGHTS = []
 # Determine number of classes based on training mode
 if TRAINING_MODE == "detection":
     NUM_CLASSES = 2
-    CLASS_WEIGHTS = [1.0, 1.0]
+    CLASS_WEIGHTS = [1.74, 2.35]
 elif TRAINING_MODE == "category":
     NUM_CLASSES = len(CLASS_MAP)
-    CLASS_WEIGHTS = [24.0, 3.0, 1.4, 4.6]  # based on classification classes
+    CLASS_WEIGHTS = [9.34, 13.62, 2.19, 2.76]  # based on classification classes
 elif TRAINING_MODE == "instance":
     NUM_CLASSES = len(INSTANCE_TO_CLASS)
 else:

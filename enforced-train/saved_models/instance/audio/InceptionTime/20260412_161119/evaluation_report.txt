@@ -1,0 +1,26 @@
+Run Directory: 20260412_161119
+Mode: instance | Model: InceptionTime
+----------------------------------------
+Accuracy: 0.3487
+MCC: 0.2462
+ROC-AUC: 0.7999
+Precision: 0.3582
+Recall: 0.3487
+F1-Score: 0.3422
+Latency: 0.1151 ms/sample
+
+Per-Class Accuracy:
+  bicycle (0): 0.0230
+  polaris (1): 0.0548
+  pickup (2): 0.1200
+  gle350 (3): 0.2190
+  scooter (4): 0.2561
+  cx30 (5): 0.5514
+  ev (6): 0.0869
+  motorcycle (7): 0.4714
+  mustang (8): 0.4621
+  forester (9): 0.2404
+  background (10): 0.7882
+  walk (11): 0.1422
+  miata (12): 0.3417
+  warhog (13): 0.0000
