@@ -102,7 +102,9 @@ def build_loaders(
                 prefetch_factor=4,
                 persistent_workers=True,
             )
-            print(f"  Pair dataset: {len(pair_ds)} multi-horizon pairs (n=1..{config.n_horizons}).")
+            print(
+                f"  Pair dataset: {len(pair_ds)} multi-horizon pairs (n=1..{config.n_horizons})."
+            )
         else:
             print(
                 "  Warning: no multi-horizon pairs found — unknown curriculum disabled."
@@ -130,9 +132,9 @@ def parse_args():
         choices=MODALITIES,
         help="Sensor modalities to use (default: all)",
     )
-    p.add_argument("--crl-epochs", type=int, default=None)
+    p.add_argument("--crl-epochs", type=int, default=50)
     p.add_argument("--ds-epochs", type=int, default=50)
-    p.add_argument("--batch-size", type=int, default=None)
+    p.add_argument("--batch-size", type=int, default=128)
     p.add_argument("--lr", type=float, default=None)
     p.add_argument("--num-workers", type=int, default=None)
     p.add_argument("--save-dir", default="./saved_crl")
@@ -222,13 +224,18 @@ def main():
                 pres_vals_neg.extend(z_pres_cpu[det == 0].tolist())
         if pres_vals_pos and pres_vals_neg:
             import statistics
+
             mean_pos = statistics.mean(pres_vals_pos)
             mean_neg = statistics.mean(pres_vals_neg)
-            std_pos  = statistics.stdev(pres_vals_pos) if len(pres_vals_pos) > 1 else 0.0
-            std_neg  = statistics.stdev(pres_vals_neg) if len(pres_vals_neg) > 1 else 0.0
+            std_pos = statistics.stdev(pres_vals_pos) if len(pres_vals_pos) > 1 else 0.0
+            std_neg = statistics.stdev(pres_vals_neg) if len(pres_vals_neg) > 1 else 0.0
             sep = abs(mean_pos - mean_neg) / (0.5 * (std_pos + std_neg) + 1e-8)
-            print(f"  vehicle present  : n={len(pres_vals_pos):5d}  mu={mean_pos:+.4f}  std={std_pos:.4f}")
-            print(f"  vehicle absent   : n={len(pres_vals_neg):5d}  mu={mean_neg:+.4f}  std={std_neg:.4f}")
+            print(
+                f"  vehicle present  : n={len(pres_vals_pos):5d}  mu={mean_pos:+.4f}  std={std_pos:.4f}"
+            )
+            print(
+                f"  vehicle absent   : n={len(pres_vals_neg):5d}  mu={mean_neg:+.4f}  std={std_neg:.4f}"
+            )
             print(f"  separation (d')  : {sep:.3f}  (>1 = usable signal, <0.5 = weak)")
         else:
             print("  WARNING: one detection class absent from val set — check labels.")
