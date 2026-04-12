@@ -219,12 +219,12 @@ class CRLConfig:
     cosine_period:        int   = 20
     n_epochs:             int   = 100
     num_workers:          int   = 8
-    early_stop_patience:  int   = 10
+    early_stop_patience:  int   = 15
 
     # Loss weights
     beta_start:           float = 0.0
-    beta_end:             float = 4.0
-    beta_anneal_epochs:   int   = 20
+    beta_end:             float = 1.0
+    beta_anneal_epochs:   int   = 40
     lambda_causal:        float = 5.0
     lambda_interv:        float = 2.0
     lambda_disent:        float = 0.5

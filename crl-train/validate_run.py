@@ -218,10 +218,12 @@ def check_representation_quality(
         return z[:, sl]
 
     # --- MIG ---
-    mig = compute_mig(
-        z_val,
-        {"vehicle_type": vt_val, "detection": det_val, "interv_type": iv_val},
-    )
+    # MIG for interv_type must use train split (interventions only applied there).
+    # Vehicle-type and detection MIG use val split for an unbiased estimate.
+    mig_veh = compute_mig(z_val, {"vehicle_type": vt_val, "detection": det_val})
+    mig_interv = compute_mig(z_tr, {"interv_type": iv_tr})
+    mig = {**mig_veh, **mig_interv}
+    mig["mean_mig"] = float(np.mean([mig["mig_vehicle_type"], mig["mig_detection"], mig["mig_interv_type"]]))
     metrics.update(mig)
 
     _check_above(mig["mig_vehicle_type"], 0.2,
@@ -308,8 +310,10 @@ def check_representation_quality(
     # --- Noise localisation checks (core scientific requirement) ---
     # Noise types should be linearly separable in z_noise (localised there)
     # but NOT in z_veh (vehicle dims should be clean of noise labels).
-    noise_sep_noise = noise_type_separation_score(blk(z_val, enc.noise_idx), iv_val)
-    noise_sep_veh   = noise_type_separation_score(blk(z_val, slice(0, enc.noise_idx.start)), iv_val)
+    # Use train split: interventions are only applied during training (is_train=True),
+    # so iv_val is always 0 and cannot measure noise separation.
+    noise_sep_noise = noise_type_separation_score(blk(z_tr, enc.noise_idx), iv_tr)
+    noise_sep_veh   = noise_type_separation_score(blk(z_tr, slice(0, enc.noise_idx.start)), iv_tr)
     metrics["noise_sep_in_z_noise"] = noise_sep_noise
     metrics["noise_sep_in_z_veh"]   = noise_sep_veh
     _check_above(
