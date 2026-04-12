@@ -389,7 +389,7 @@ def check_causal_structure(
             apply_intervention(x_orig[i], k, mod_cfg.sample_rate)
             for i in range(x_orig.shape[0])
         ]).to(device)
-        z, _, _ = model.encode_modality(sensor, x_k)
+        z, _, _, _ = model.encode_modality(sensor, x_k)
         z_noise_centroids.append(z[:, enc.noise_idx].mean(0).cpu().numpy())
         z_type_centroids.append(z[:, enc.type_idx].mean(0).cpu().numpy())
 

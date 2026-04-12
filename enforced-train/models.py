@@ -56,49 +56,57 @@ class ClassificationCNN(nn.Module):
     def __init__(self, in_channels, num_classes, config, use_mel=True):
         super().__init__()
         self.config = config
-        
+
         self.conv1 = nn.Conv2d(
             in_channels,
             config.CHANNELS[0],
             kernel_size=config.KERNEL,
             padding=config.PADS,
         )
+        self.bn1 = nn.BatchNorm2d(config.CHANNELS[0])
         self.conv2 = nn.Conv2d(
             config.CHANNELS[0],
             config.CHANNELS[1],
             kernel_size=config.KERNEL,
             padding=config.PADS,
         )
+        self.bn2 = nn.BatchNorm2d(config.CHANNELS[1])
         self.conv3 = nn.Conv2d(
             config.CHANNELS[1],
             config.CHANNELS[2],
             kernel_size=config.KERNEL,
             padding=config.PADS,
         )
+        self.bn3 = nn.BatchNorm2d(config.CHANNELS[2])
         self.conv4 = nn.Conv2d(
             config.CHANNELS[2],
             config.CHANNELS[3],
             kernel_size=config.KERNEL,
             padding=config.PADS,
         )
+        self.bn4 = nn.BatchNorm2d(config.CHANNELS[3])
+        # pool applied after conv1 and conv2; adaptive pool collapses the tail
+        # regardless of input resolution (works for both audio and seismic)
         self.pool = nn.MaxPool2d(2, 2)
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((1, 1))
 
         self.fc1 = nn.LazyLinear(config.HIDDEN)
         self.fc2 = nn.Linear(config.HIDDEN, num_classes)
         self.dropout = nn.Dropout(config.DROPOUT)
 
     def forward(self, x):
-        x = self.pool(torch.tanh(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = self.pool(torch.tanh(self.conv3(x)))
-        x = self.pool(F.relu(self.conv4(x)))
+        x = self.pool(F.relu(self.bn1(self.conv1(x))))
+        x = self.pool(F.relu(self.bn2(self.conv2(x))))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = F.relu(self.bn4(self.conv4(x)))
+        x = self.adaptive_pool(x)
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
         return self.fc2(x)
 
     def get_optimizer(self):
-        return optim.Adam(self.parameters(), lr=self.config.LEARNING_RATE)
+        return optim.AdamW(self.parameters(), lr=self.config.LEARNING_RATE, weight_decay=1e-4)
 
 
 # =====================================================================
