@@ -47,6 +47,7 @@ class CombinedLoss(nn.Module):
         self.cfg = config
         self.current_beta = config.beta_start
         self.current_lambda_l1 = 0.0
+        self.current_lambda_causal = 0.0
 
     def update_beta(self, epoch: int):
         """Call once per epoch before the training loop."""
@@ -61,6 +62,12 @@ class CombinedLoss(nn.Module):
         lambda_l1_graph_anneal_epochs.  Call once per epoch."""
         t = min(epoch / max(self.cfg.lambda_l1_graph_anneal_epochs, 1), 1.0)
         self.current_lambda_l1 = t * self.cfg.lambda_l1_graph
+
+    def update_lambda_causal(self, epoch: int):
+        """Linearly ramp lambda_causal from 0 → cfg.lambda_causal over
+        lambda_causal_anneal_epochs.  Call once per epoch."""
+        t = min(epoch / max(self.cfg.lambda_causal_anneal_epochs, 1), 1.0)
+        self.current_lambda_causal = t * self.cfg.lambda_causal
 
     def _modality_terms(
         self, outputs: dict, mod: str, interv_mask: torch.Tensor | None, beta: float
@@ -103,7 +110,7 @@ class CombinedLoss(nn.Module):
         total = (
             L_recon
             + beta * L_kl
-            + self.cfg.lambda_causal * L_causal
+            + self.current_lambda_causal * L_causal
             + self.cfg.lambda_disent * L_disent
             + self.cfg.lambda_collapse * L_collapse
         )
@@ -210,9 +217,10 @@ class CombinedLoss(nn.Module):
             + self.current_lambda_l1 * L_l1_graph
             + self.cfg.lambda_interv * L_interv
             + self.cfg.lambda_task * (L_task + L_det)
-            + self.cfg.lambda_causal * L_temporal  # reuse causal weight for temporal
+            + self.current_lambda_causal * L_temporal  # reuse causal weight for temporal
         )
         metrics["total"] = total.item()
         metrics["beta"] = beta
         metrics["l1_w"] = self.current_lambda_l1
+        metrics["causal_w"] = self.current_lambda_causal
         return total, metrics

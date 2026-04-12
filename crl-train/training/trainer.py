@@ -46,7 +46,7 @@ from crl_vehicle.models.downstream import VehicleDetectionHead
 from crl_vehicle.losses.combined import CombinedLoss
 from crl_vehicle.data.transforms import apply_interventions_batch_gpu, N_INTERVENTIONS
 from training.scheduler import build_scheduler
-from training.eval import sample_level_eval, plot_confusion_matrices
+from training.eval import run_full_eval, sample_level_eval, plot_confusion_matrices
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +364,18 @@ class Trainer:
             "scm_l1",
             "beta",
             "l1_w",
+            "causal_w",
+            # Structural quality metrics
+            "mean_mig",
+            "probe_type_acc",
+            "probe_type_f1",
+            "probe_presence_acc",
+            "probe_presence_f1",
+            "detection_auc",
+            "active_dim_frac",
+            "active_units_frac",
+            "noise_sep_in_z_noise",
+            "noise_sep_in_z_veh",
         ]
         with open(metrics_path, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=fieldnames).writeheader()
@@ -372,6 +384,7 @@ class Trainer:
         for epoch in range(epochs):
             self.loss_fn.update_beta(epoch)
             self.loss_fn.update_lambda_l1(epoch)
+            self.loss_fn.update_lambda_causal(epoch)
             train_metrics = self._train_epoch(loader_known, loader_pairs, epoch)
             # Single val pass: annealing beta (logging) + fixed beta (checkpointing).
             # Fixed-beta metric is epoch-invariant and used for model selection.
@@ -383,17 +396,43 @@ class Trainer:
             val_ckpt_metrics = both["fixed"]
             self.scheduler.step()
 
+            # Structural quality metrics (probe, MIG, collapse) — run every 5 epochs
+            # to amortise the cost of a second pass over the val loader.
+            struct_metrics = {}
+            if epoch % 5 == 0:
+                struct_metrics = run_full_eval(
+                    self.model, loader_known, val_loader, self.device
+                )
+
             row = {
                 "epoch": epoch,
                 "train_total": train_metrics.get("total", 0.0),
                 "val_total": val_metrics.get("total", 0.0),
                 "val_ckpt": val_ckpt_metrics.get("total", 0.0),
             }
-            row.update({k: val_metrics.get(k, 0.0) for k in fieldnames[4:]})
+            row.update({k: val_metrics.get(k, 0.0) for k in fieldnames[4:14]})
+            row["mean_mig"] = struct_metrics.get("mean_mig", "")
+            row["probe_type_acc"] = struct_metrics.get("probe_type_acc", "")
+            row["probe_type_f1"] = struct_metrics.get("probe_type_f1", "")
+            row["probe_presence_acc"] = struct_metrics.get("probe_presence_acc", "")
+            row["probe_presence_f1"] = struct_metrics.get("probe_presence_f1", "")
+            row["detection_auc"] = struct_metrics.get("detection_auc", "")
+            row["active_dim_frac"] = struct_metrics.get("active_dim_frac", "")
+            row["active_units_frac"] = struct_metrics.get("active_units_frac", "")
+            row["noise_sep_in_z_noise"] = struct_metrics.get("noise_sep_in_z_noise", "")
+            row["noise_sep_in_z_veh"] = struct_metrics.get("noise_sep_in_z_veh", "")
 
             with open(metrics_path, "a", newline="") as f:
                 csv.DictWriter(f, fieldnames=fieldnames).writerow(row)
 
+            struct_str = ""
+            if struct_metrics:
+                struct_str = (
+                    f" mig={struct_metrics.get('mean_mig', 0):.3f}"
+                    f" probe_type_f1={struct_metrics.get('probe_type_f1', 0):.3f}"
+                    f" auc={struct_metrics.get('detection_auc', 0):.3f}"
+                    f" active={struct_metrics.get('active_dim_frac', 0):.2f}"
+                )
             print(
                 f"Epoch {epoch:3d} | "
                 f"train={train_metrics.get('total', 0):.4f} "
@@ -401,7 +440,8 @@ class Trainer:
                 f"val_ckpt={val_ckpt_metrics.get('total', 0):.4f} "
                 f"scm_l1={val_metrics.get('scm_l1', 0):.3f} "
                 f"β={self.loss_fn.current_beta:.2f} "
-                f"λ_l1={self.loss_fn.current_lambda_l1:.4f}"
+                f"λ_causal={self.loss_fn.current_lambda_causal:.2f}"
+                f"{struct_str}"
             )
 
             val_ckpt = val_ckpt_metrics.get("total", float("inf"))

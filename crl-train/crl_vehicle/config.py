@@ -219,16 +219,17 @@ class CRLConfig:
     cosine_period:        int   = 20
     n_epochs:             int   = 100
     num_workers:          int   = 8
-    early_stop_patience:  int   = 15
+    early_stop_patience:  int   = 25
 
     # Loss weights
     beta_start:           float = 0.0
     beta_end:             float = 1.0
     beta_anneal_epochs:   int   = 40
     lambda_causal:        float = 5.0
+    lambda_causal_anneal_epochs: int = 20  # ramp 0 → lambda_causal over this many epochs
     lambda_interv:        float = 2.0
     lambda_disent:        float = 0.5
-    lambda_task:          float = 5.0
+    lambda_task:          float = 2.0
     lambda_l1_graph:             float = 0.01   # L1 sparsity on SCM adjacency weights
     lambda_l1_graph_anneal_epochs: int = 20    # ramp 0 → lambda_l1_graph over this many epochs
 
