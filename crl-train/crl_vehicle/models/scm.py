@@ -42,7 +42,7 @@ class SCM(nn.Module):
         if group_sizes is not None:
             mask = torch.zeros(d_z, d_z)
             starts = [0]
-            for s in group_sizes[:-1]:
+            for s in group_sizes:
                 starts.append(starts[-1] + s)
             # group 1 = type, group 2 = instance
             type_start, type_end = starts[1], starts[2]
