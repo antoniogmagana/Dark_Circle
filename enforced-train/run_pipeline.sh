@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# Exit immediately if a pipeline fails entirely
-set -e 
-
 # --- 1. Interactive Mode Selection ---
 echo "============================================================"
 echo " SELECT TRAINING MODES"
@@ -38,26 +35,22 @@ echo "  1) DetectionCNN"
 echo "  2) ClassificationCNN"
 echo "  3) WaveformClassificationCNN"
 echo "  4) ClassificationLSTM"
-echo "  5) IterativeMiniRocket"
-echo "  6) InceptionTime"
-echo "  7) TCN"
-echo "  8) BiGRU"
-echo "  9) ALL MODELS"
+echo "  5) InceptionTime"
+echo "  6) BiGRU"
+echo "  7) ALL MODELS"
 echo ""
 read -p "Models > " model_input
 
 selected_models=()
-if [[ "$model_input" == *"9"* ]] || [[ "${model_input,,}" == *"all"* ]]; then
-    selected_models=("DetectionCNN" "ClassificationCNN" "WaveformClassificationCNN" "ClassificationLSTM" "IterativeMiniRocket" "InceptionTime" "TCN" "BiGRU")
+if [[ "$model_input" == *"7"* ]] || [[ "${model_input,,}" == *"all"* ]]; then
+    selected_models=("DetectionCNN" "ClassificationCNN" "WaveformClassificationCNN" "ClassificationLSTM" "InceptionTime" "BiGRU")
 else
     [[ "$model_input" == *"1"* ]] && selected_models+=("DetectionCNN")
     [[ "$model_input" == *"2"* ]] && selected_models+=("ClassificationCNN")
     [[ "$model_input" == *"3"* ]] && selected_models+=("WaveformClassificationCNN")
     [[ "$model_input" == *"4"* ]] && selected_models+=("ClassificationLSTM")
-    [[ "$model_input" == *"5"* ]] && selected_models+=("IterativeMiniRocket")
-    [[ "$model_input" == *"6"* ]] && selected_models+=("InceptionTime")
-    [[ "$model_input" == *"7"* ]] && selected_models+=("TCN")
-    [[ "$model_input" == *"8"* ]] && selected_models+=("BiGRU")
+    [[ "$model_input" == *"5"* ]] && selected_models+=("InceptionTime")
+    [[ "$model_input" == *"6"* ]] && selected_models+=("BiGRU")
 fi
 
 # --- 3. Validation & Confirmation ---
@@ -111,24 +104,38 @@ fi
 echo ""
 echo "Sensors to train: ${selected_sensors[*]}"
 
-# --- 5. Unified Model Training Pipeline ---
+# --- 5. Unified Model Training Pipeline (parallel by sensor within each mode) ---
 echo ""
 for mode in "${selected_modes[@]}"; do
-    for sensor in "${selected_sensors[@]}"; do
+    echo "============================================================"
+    echo "MODE: $mode — launching sensor jobs in parallel"
+    echo "============================================================"
+
+    # Launch all seismic jobs in the background
+    if [[ " ${selected_sensors[*]} " =~ " seismic " ]]; then
         for model in "${selected_models[@]}"; do
             CURRENT_RUN_ID=$(date +%Y%m%d_%H%M%S)
-
-            echo "============================================================"
-            echo "STARTING RUN -> MODE: $mode | SENSOR: $sensor | MODEL: $model | RUN_ID: $CURRENT_RUN_ID"
-            echo "============================================================"
-
-            # Run training loop
-            RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode TRAIN_SENSOR=$sensor MODEL_NAME=$model poetry run python train.py
-
-            # Force a 1-second delay to guarantee unique RUN_IDs
+            echo "  [BG] seismic | $model | $CURRENT_RUN_ID"
+            RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode TRAIN_SENSOR=seismic MODEL_NAME=$model \
+                poetry run python train.py &
             sleep 1
         done
-    done
+    fi
+
+    # Launch all audio jobs in the background (concurrent with seismic)
+    if [[ " ${selected_sensors[*]} " =~ " audio " ]]; then
+        for model in "${selected_models[@]}"; do
+            CURRENT_RUN_ID=$(date +%Y%m%d_%H%M%S)
+            echo "  [BG] audio   | $model | $CURRENT_RUN_ID"
+            RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode TRAIN_SENSOR=audio MODEL_NAME=$model \
+                poetry run python train.py &
+            sleep 1
+        done
+    fi
+
+    echo "  Waiting for all $mode jobs to finish..."
+    wait
+    echo "  $mode complete."
 done
 
 # --- 6. Evaluation ---
