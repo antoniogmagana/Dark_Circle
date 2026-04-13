@@ -399,8 +399,19 @@ class Trainer:
             if "det_heads" not in name:
                 p.requires_grad = False
 
-        ref = "seismic" if "seismic" in self.model.sensors else self.model.sensors[0]
-        det_head  = self.model.det_heads[ref]
+        for sensor in self.model.sensors:
+            self._train_sensor_downstream(sensor, train_loader, val_loader, epochs)
+
+        self._fused_eval(val_loader)
+
+    def _train_sensor_downstream(
+        self,
+        sensor: str,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        epochs: int,
+    ):
+        det_head = self.model.det_heads[sensor]
 
         # Independent optimizer + scheduler per task head
         opt_det  = torch.optim.AdamW(det_head.presence.parameters(),      lr=self.cfg.lr)
@@ -415,7 +426,7 @@ class Trainer:
         type_weight = torch.tensor([24.3933, 22.925, 1.42813, 4.64756], device=self.device)
         inst_weight = torch.ones(13, device=self.device)
 
-        metrics_path = self.save_dir / "downstream_metrics.csv"
+        metrics_path = self.save_dir / f"downstream_metrics_{sensor}.csv"
         fieldnames = [
             "epoch",
             "train_det_loss",
@@ -436,7 +447,7 @@ class Trainer:
         pat_det = pat_cls = pat_inst = 0
         stopped_det = stopped_cls = stopped_inst = False
 
-        print("\n=== Downstream Head Training ===")
+        print(f"\n=== Downstream Head Training [{sensor}] ===")
         for epoch in range(epochs):
             if stopped_det and stopped_cls and stopped_inst:
                 break
@@ -449,15 +460,22 @@ class Trainer:
 
             n_train_steps = 0
             for batch in train_loader:
-                x_ref = batch[f"x_{ref}"].to(self.device)
-                vtype = batch["vehicle_type"].to(self.device)
-                inst  = batch["instance_type"].to(self.device)
-                det   = batch["detection_label"].to(self.device)
+                avail = batch[f"{sensor}_avail"]
+                if not avail.any():
+                    n_train_steps += 1
+                    if self.cfg.steps_per_epoch and n_train_steps >= self.cfg.steps_per_epoch:
+                        break
+                    continue
+
+                x_sensor = batch[f"x_{sensor}"][avail].to(self.device)
+                vtype = batch["vehicle_type"][avail].to(self.device)
+                inst  = batch["instance_type"][avail].to(self.device)
+                det   = batch["detection_label"][avail].to(self.device)
 
                 with torch.no_grad():
-                    e_pres, e_type, e_inst, _ = self.model.encode_modality(ref, x_ref)
+                    e_pres, e_type, e_inst, _ = self.model.encode_modality(sensor, x_sensor)
 
-                # Detection head — all samples
+                # Detection head — all available samples
                 if not stopped_det:
                     opt_det.zero_grad()
                     pres_logit = det_head.presence(e_pres)
@@ -501,7 +519,7 @@ class Trainer:
                 if self.cfg.steps_per_epoch and n_train_steps >= self.cfg.steps_per_epoch:
                     break
 
-            val_m = self._eval_downstream(val_loader)
+            val_m = self._eval_downstream(val_loader, sensor)
             sched_det.step(-val_m["val_det_f1"])
             sched_cls.step(-val_m["val_cls_f1"])
             sched_inst.step(-val_m["val_inst_f1"])
@@ -523,7 +541,7 @@ class Trainer:
                 pat_det = 0
                 torch.save(
                     det_head.presence.state_dict(),
-                    self.save_dir / f"presence_head_{ref}_best.pth",
+                    self.save_dir / f"presence_head_{sensor}_best.pth",
                 )
                 status.append(f"det✓ F1={best_det_f1:.4f}")
             elif not stopped_det:
@@ -537,7 +555,7 @@ class Trainer:
                 pat_cls = 0
                 torch.save(
                     det_head.type_head.state_dict(),
-                    self.save_dir / f"type_head_{ref}_best.pth",
+                    self.save_dir / f"type_head_{sensor}_best.pth",
                 )
                 status.append(f"cls✓ F1={best_cls_f1:.4f}")
             elif not stopped_cls:
@@ -551,7 +569,7 @@ class Trainer:
                 pat_inst = 0
                 torch.save(
                     det_head.instance_head.state_dict(),
-                    self.save_dir / f"inst_head_{ref}_best.pth",
+                    self.save_dir / f"inst_head_{sensor}_best.pth",
                 )
                 status.append(f"inst✓ F1={best_inst_f1:.4f}")
             elif not stopped_inst:
@@ -572,7 +590,7 @@ class Trainer:
             )
 
         print(
-            f"Downstream complete. "
+            f"[{sensor}] Downstream complete. "
             f"Best det F1={best_det_f1:.4f}  "
             f"cls F1={best_cls_f1:.4f}  "
             f"inst F1={best_inst_f1:.4f}"
@@ -580,25 +598,25 @@ class Trainer:
 
         # Load best weights for diagnostics
         for fname, subhead in [
-            (f"presence_head_{ref}_best.pth", det_head.presence),
-            (f"type_head_{ref}_best.pth",     det_head.type_head),
-            (f"inst_head_{ref}_best.pth",     det_head.instance_head),
+            (f"presence_head_{sensor}_best.pth", det_head.presence),
+            (f"type_head_{sensor}_best.pth",     det_head.type_head),
+            (f"inst_head_{sensor}_best.pth",     det_head.instance_head),
         ]:
             p = self.save_dir / fname
             if p.exists():
-                subhead.load_state_dict(torch.load(p, map_location=self.device))
+                subhead.load_state_dict(torch.load(p, map_location=self.device, weights_only=True))
 
-        diag_dir = self.save_dir / "diagnostics"
+        diag_dir = self.save_dir / f"diagnostics_{sensor}"
         print(f"  Generating confusion matrices → {diag_dir}/")
         df_preds = sample_level_eval(
             self.model, val_loader, self.device,
-            primary_sensor=ref,
+            primary_sensor=sensor,
             max_batches=self.cfg.steps_per_epoch,
         )
         plot_confusion_matrices(df_preds, diag_dir)
 
     @torch.no_grad()
-    def _eval_downstream(self, loader: DataLoader) -> dict:
+    def _eval_downstream(self, loader: DataLoader, sensor: str) -> dict:
         from sklearn.metrics import accuracy_score, f1_score
 
         self.model.eval()
@@ -606,18 +624,20 @@ class Trainer:
         cls_true, cls_pred = [], []
         inst_true, inst_pred = [], []
 
-        ref = "seismic" if "seismic" in self.model.sensors else self.model.sensors[0]
-
         for n_eval, batch in enumerate(loader):
             if self.cfg.steps_per_epoch and n_eval >= self.cfg.steps_per_epoch:
                 break
-            x_ref  = batch[f"x_{ref}"].to(self.device)
-            vtype  = batch["vehicle_type"]
-            inst   = batch["instance_type"]
-            det    = batch["detection_label"]
+            avail = batch[f"{sensor}_avail"]
+            if not avail.any():
+                continue
 
-            e_pres, e_type, e_inst, _ = self.model.encode_modality(ref, x_ref)
-            pres_logit, type_logits, inst_logits = self.model.det_heads[ref](
+            x_sensor = batch[f"x_{sensor}"][avail].to(self.device)
+            vtype = batch["vehicle_type"][avail]
+            inst  = batch["instance_type"][avail]
+            det   = batch["detection_label"][avail]
+
+            e_pres, e_type, e_inst, _ = self.model.encode_modality(sensor, x_sensor)
+            pres_logit, type_logits, inst_logits = self.model.det_heads[sensor](
                 e_pres, e_type, e_inst
             )
 
@@ -659,6 +679,138 @@ class Trainer:
             "val_inst_acc": inst_acc,
             "val_inst_f1":  inst_f1,
         }
+
+    @torch.no_grad()
+    def _fused_eval(self, val_loader: DataLoader) -> None:
+        """
+        Final verification pass after all per-sensor downstream heads are trained.
+
+        Averages predictions across available sensors (weighted equally) and
+        computes overall F1 per task head (presence, type, instance).  Saves
+        confusion matrices and a per-sample CSV to diagnostics_fused/.
+
+        Detection:  average sigmoid(pres_logit) across sensors, threshold at 0.5.
+        Type/inst:  average softmax(logits) across sensors, argmax.
+                    Only evaluated on ground-truth det==1 samples with valid labels.
+        """
+        from sklearn.metrics import f1_score, accuracy_score
+        from training.eval import plot_confusion_matrices
+
+        import pandas as pd
+
+        self.model.eval()
+
+        det_true, det_pred_fused = [], []
+        type_true, type_pred_fused = [], []
+        inst_true, inst_pred_fused = [], []
+        rows = []
+
+        n_eval = 0
+        for batch in val_loader:
+            if self.cfg.steps_per_epoch and n_eval >= self.cfg.steps_per_epoch:
+                break
+
+            det_gt   = batch["detection_label"]
+            vtype_gt = batch["vehicle_type"]
+            inst_gt  = batch["instance_type"]
+            seg_ids  = batch["segment_id"].tolist()
+            intervs  = batch["interv_idx"].tolist()
+            B        = det_gt.shape[0]
+
+            # Accumulate per-sensor probability tensors
+            ref_head   = self.model.det_heads[self.model.sensors[0]]
+            n_types    = ref_head.type_head.head[-1].out_features
+            n_insts    = ref_head.instance_head.head[-1].out_features
+            det_probs  = torch.zeros(B)
+            type_probs = torch.zeros(B, n_types)
+            inst_probs = torch.zeros(B, n_insts)
+            n_sensors  = torch.zeros(B)
+
+            for sensor in self.model.sensors:
+                avail = batch[f"{sensor}_avail"]
+                if not avail.any():
+                    continue
+                x_s = batch[f"x_{sensor}"][avail].to(self.device)
+                e_pres, e_type, e_inst, _ = self.model.encode_modality(sensor, x_s)
+                pres_logit, type_logits, inst_logits = self.model.det_heads[sensor](
+                    e_pres, e_type, e_inst
+                )
+                det_probs[avail]  += torch.sigmoid(pres_logit).cpu()
+                type_probs[avail] += torch.softmax(type_logits, dim=-1).cpu()
+                inst_probs[avail] += torch.softmax(inst_logits, dim=-1).cpu()
+                n_sensors[avail]  += 1
+
+            # Samples with at least one available sensor
+            any_avail = n_sensors > 0
+            if not any_avail.any():
+                n_eval += 1
+                continue
+
+            # Normalise by number of contributing sensors
+            n_s = n_sensors[any_avail].unsqueeze(1)
+            det_p_norm   = (det_probs[any_avail] / n_sensors[any_avail]).numpy()
+            type_p_norm  = (type_probs[any_avail] / n_s).numpy()
+            inst_p_norm  = (inst_probs[any_avail] / n_s).numpy()
+
+            det_pred  = (det_p_norm >= 0.5).astype(int)
+            type_pred = type_p_norm.argmax(axis=1)
+            inst_pred = inst_p_norm.argmax(axis=1)
+
+            det_gt_sub   = det_gt[any_avail].numpy()
+            vtype_gt_sub = vtype_gt[any_avail].numpy()
+            inst_gt_sub  = inst_gt[any_avail].numpy()
+
+            det_true.extend(det_gt_sub.tolist())
+            det_pred_fused.extend(det_pred.tolist())
+
+            type_mask = (det_gt_sub == 1) & (vtype_gt_sub >= 0)
+            type_true.extend(vtype_gt_sub[type_mask].tolist())
+            type_pred_fused.extend(type_pred[type_mask].tolist())
+
+            inst_mask = (det_gt_sub == 1) & (inst_gt_sub >= 0)
+            inst_true.extend(inst_gt_sub[inst_mask].tolist())
+            inst_pred_fused.extend(inst_pred[inst_mask].tolist())
+
+            seg_ids_sub  = [seg_ids[i]  for i in range(B) if any_avail[i]]
+            intervs_sub  = [intervs[i]  for i in range(B) if any_avail[i]]
+            for j in range(len(seg_ids_sub)):
+                ti = int(vtype_gt_sub[j])
+                ii = int(inst_gt_sub[j])
+                rows.append({
+                    "segment_id": seg_ids_sub[j],
+                    "interv_idx": intervs_sub[j],
+                    "true_det":   int(det_gt_sub[j]),
+                    "pred_det":   int(det_pred[j]),
+                    "true_type":  ti,
+                    "pred_type":  int(type_pred[j]) if ti >= 0 else -1,
+                    "true_inst":  ii,
+                    "pred_inst":  int(inst_pred[j]) if ii >= 0 else -1,
+                })
+
+            n_eval += 1
+
+        self.model.train()
+
+        def _metrics(true, pred, name):
+            if not true:
+                print(f"  [fused] {name}: no valid samples")
+                return 0.0, 0.0
+            acc = accuracy_score(true, pred)
+            f1  = f1_score(true, pred, average="weighted", zero_division=0)
+            print(f"  [fused] {name}: acc={acc:.4f}  f1={f1:.4f}")
+            return acc, f1
+
+        print("\n=== Fused Evaluation (all sensors combined) ===")
+        _metrics(det_true,  det_pred_fused,  "presence")
+        _metrics(type_true, type_pred_fused, "type")
+        _metrics(inst_true, inst_pred_fused, "instance")
+
+        diag_dir = self.save_dir / "diagnostics_fused"
+        diag_dir.mkdir(parents=True, exist_ok=True)
+        df_preds = pd.DataFrame(rows)
+        if not df_preds.empty:
+            plot_confusion_matrices(df_preds, diag_dir, tag="fused")
+            print(f"  Confusion matrices → {diag_dir}/")
 
     @torch.no_grad()
     def calibrate_vote_weights(self, val_loader: DataLoader) -> dict:

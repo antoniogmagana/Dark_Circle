@@ -152,6 +152,10 @@ _INTERV_NAMES = {
 
 _DET_NAMES  = ["absent", "present"]
 _TYPE_NAMES = ["pedestrian", "light", "sport", "utility"]
+_INST_NAMES = [
+    "polaris", "warhog", "pickup", "walk", "bicycle", "motorcycle",
+    "scooter", "forester", "mustang", "ev", "cx30", "miata", "gle350",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +180,8 @@ def sample_level_eval(
         pred_det    : model detection prediction (0/1)
         true_type   : ground-truth vehicle type (-2/-1=invalid, 0-3=class)
         pred_type   : model type prediction; -1 when true_type invalid
+        true_inst   : ground-truth instance label (-1=invalid, 0-12=class)
+        pred_inst   : model instance prediction; -1 when true_inst invalid
 
     max_batches: cap on batches to evaluate (None = full loader).
     """
@@ -190,12 +196,14 @@ def sample_level_eval(
         intervs   = batch["interv_idx"].tolist()
         true_det  = batch["detection_label"].tolist()
         true_type = batch["vehicle_type"].tolist()
+        true_inst = batch["instance_type"].tolist()
 
         e_pres, e_type, e_inst, _ = model.encode_modality(primary_sensor, x)
-        pres_logit, type_logits, _ = model.det_heads[primary_sensor](e_pres, e_type, e_inst)
+        pres_logit, type_logits, inst_logits = model.det_heads[primary_sensor](e_pres, e_type, e_inst)
 
         pred_det      = (pres_logit > 0).long().cpu().tolist()
         pred_type_all = type_logits.argmax(dim=1).cpu().tolist()
+        pred_inst_all = inst_logits.argmax(dim=1).cpu().tolist()
 
         for j in range(len(seg_ids)):
             rows.append({
@@ -205,6 +213,8 @@ def sample_level_eval(
                 "pred_det":   pred_det[j],
                 "true_type":  true_type[j],
                 "pred_type":  pred_type_all[j] if true_type[j] >= 0 else -1,
+                "true_inst":  true_inst[j],
+                "pred_inst":  pred_inst_all[j] if true_inst[j] >= 0 else -1,
             })
 
     model.train()
@@ -266,7 +276,28 @@ def plot_confusion_matrices(
         fig.savefig(out_dir / f"type_cm{suffix}.png", dpi=150)
         plt.close(fig)
 
-    # 3. Detection accuracy per intervention type
+    # 3. Instance confusion matrix (valid labels only)
+    inst_df = df[(df["true_inst"] >= 0)] if "true_inst" in df.columns else pd.DataFrame()
+    if not inst_df.empty:
+        cm_inst = confusion_matrix(
+            inst_df["true_inst"], inst_df["pred_inst"],
+            labels=list(range(len(_INST_NAMES))),
+        )
+        fig, ax = plt.subplots(figsize=(10, 10))
+        sns.heatmap(
+            cm_inst, annot=True, fmt="d", cmap="Blues",
+            xticklabels=_INST_NAMES, yticklabels=_INST_NAMES, ax=ax,
+        )
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("Assumed (ground truth)")
+        ax.set_title("Vehicle Instance Classification")
+        plt.xticks(rotation=45, ha="right")
+        plt.yticks(rotation=0)
+        fig.tight_layout()
+        fig.savefig(out_dir / f"inst_cm{suffix}.png", dpi=150)
+        plt.close(fig)
+
+    # 4. Detection accuracy per intervention type
     interv_accs = {}
     for idx, grp in df.groupby("interv_idx"):
         if len(grp) == 0:
@@ -292,7 +323,7 @@ def plot_confusion_matrices(
         fig.savefig(out_dir / f"det_acc_by_interv{suffix}.png", dpi=150)
         plt.close(fig)
 
-    # 4. Per-sample CSV
+    # 5. Per-sample CSV
     df_out = df.copy()
     df_out["interv_name"]   = df_out["interv_idx"].map(
         lambda i: _INTERV_NAMES.get(int(i), f"interv_{i}")
@@ -311,4 +342,11 @@ def plot_confusion_matrices(
     df_out["pred_type_name"] = df_out["pred_type"].map(
         lambda v: _TYPE_NAMES[int(v)] if 0 <= int(v) < len(_TYPE_NAMES) else "n/a"
     )
+    if "true_inst" in df_out.columns:
+        df_out["true_inst_name"] = df_out["true_inst"].map(
+            lambda v: _INST_NAMES[int(v)] if 0 <= int(v) < len(_INST_NAMES) else "n/a"
+        )
+        df_out["pred_inst_name"] = df_out["pred_inst"].map(
+            lambda v: _INST_NAMES[int(v)] if 0 <= int(v) < len(_INST_NAMES) else "n/a"
+        )
     df_out.to_csv(out_dir / f"predictions{suffix}.csv", index=False)
