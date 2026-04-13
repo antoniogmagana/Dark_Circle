@@ -263,15 +263,26 @@ def check_downstream_performance(
     _result(INFO, "  presence probe F1", f"{probe_pres_f1:.4f}")
     _result(INFO, "  type probe F1",     f"{probe_type_f1:.4f}")
 
-    # Fine-tuned head
-    head_ckpt = save_dir / f"det_head_{primary_sensor}_best.pth"
-    if not head_ckpt.exists():
-        _result(WARN, "Phase 2 head checkpoint not found",
-                f"expected {head_ckpt} — run --phase downstream first")
+    # Fine-tuned head — trainer saves the three sub-heads separately
+    pres_ckpt = save_dir / f"presence_head_{primary_sensor}_best.pth"
+    type_ckpt = save_dir / f"type_head_{primary_sensor}_best.pth"
+    inst_ckpt = save_dir / f"inst_head_{primary_sensor}_best.pth"
+
+    missing = [p.name for p in (pres_ckpt, type_ckpt, inst_ckpt) if not p.exists()]
+    if missing:
+        _result(WARN, "Phase 2 head checkpoint(s) not found",
+                f"missing: {missing} — run --phase downstream first")
         return
 
-    model.det_heads[primary_sensor].load_state_dict(
-        torch.load(head_ckpt, map_location=device, weights_only=True)
+    head = model.det_heads[primary_sensor]
+    head.presence.load_state_dict(
+        torch.load(pres_ckpt, map_location=device, weights_only=True)
+    )
+    head.type_head.load_state_dict(
+        torch.load(type_ckpt, map_location=device, weights_only=True)
+    )
+    head.instance_head.load_state_dict(
+        torch.load(inst_ckpt, map_location=device, weights_only=True)
     )
 
     det_true, det_pred, det_scores = [], [], []

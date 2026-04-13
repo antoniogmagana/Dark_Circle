@@ -224,13 +224,15 @@ class CRLConfig:
     lambda_type:   float = 2.0    # weight on vehicle type CE loss
     lambda_inst:   float = 1.0    # weight on instance CE loss
     lambda_recon:  float = 0.1    # weight on reconstruction regularizer
+    lambda_tc:     float = 0.5    # weight on total-correlation disentanglement penalty
+                                  # applied to e_type and e_pres to reduce z_veh noise leakage
 
     # Data windowing (controls sliding-window stride in SensorDataset)
     horizon_stride_sec: float = 0.1   # seconds between successive anchor windows
     n_horizons:         int   = 10    # max horizon n for MultiHorizonPairDataset (unused in training)
 
     # Training throughput
-    steps_per_epoch: int | None = 100   # cap gradient steps per epoch (None = full epoch)
+    steps_per_epoch: int | None = None  # cap gradient steps per epoch (None = full epoch)
 
     # Paths
     save_dir:        str   = "saved_crl"
