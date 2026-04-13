@@ -383,6 +383,7 @@ class Trainer:
     @torch.no_grad()
     def _eval_crl(self, loader: DataLoader) -> dict:
         self.model.eval()
+        self.loss_fn.eval()
         totals: dict[str, float] = {}
         n = 0
         for batch in loader:
@@ -394,6 +395,7 @@ class Trainer:
             if self.cfg.steps_per_epoch and n >= self.cfg.steps_per_epoch:
                 break
         self.model.train()
+        self.loss_fn.train()
         return {k: v / max(n, 1) for k, v in totals.items()}
 
     # ------------------------------------------------------------------
