@@ -399,10 +399,17 @@ class Trainer:
             if "det_heads" not in name:
                 p.requires_grad = False
 
-        head_opt = torch.optim.AdamW(self.model.head_parameters(), lr=self.cfg.lr)
-        head_sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            head_opt, factor=0.5, patience=3
-        )
+        ref = "seismic" if "seismic" in self.model.sensors else self.model.sensors[0]
+        det_head  = self.model.det_heads[ref]
+
+        # Independent optimizer + scheduler per task head
+        opt_det  = torch.optim.AdamW(det_head.presence.parameters(),      lr=self.cfg.lr)
+        opt_cls  = torch.optim.AdamW(det_head.type_head.parameters(),     lr=self.cfg.lr)
+        opt_inst = torch.optim.AdamW(det_head.instance_head.parameters(), lr=self.cfg.lr)
+
+        sched_det  = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_det,  factor=0.5, patience=3)
+        sched_cls  = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_cls,  factor=0.5, patience=3)
+        sched_inst = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_inst, factor=0.5, patience=3)
 
         det_weight  = torch.tensor([1.0, 1.0], device=self.device)
         type_weight = torch.tensor([24.3933, 22.925, 1.42813, 4.64756], device=self.device)
@@ -424,111 +431,163 @@ class Trainer:
         with open(metrics_path, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=fieldnames).writeheader()
 
-        best_f1 = 0.0
-        patience_ctr = 0
+        # Independent best/patience tracking per task head
+        best_det_f1  = best_cls_f1 = best_inst_f1 = 0.0
+        pat_det = pat_cls = pat_inst = 0
+        stopped_det = stopped_cls = stopped_inst = False
 
         print("\n=== Downstream Head Training ===")
         for epoch in range(epochs):
+            if stopped_det and stopped_cls and stopped_inst:
+                break
+
             self.model.eval()
-            for head in self.model.det_heads.values():
-                head.train()
+            det_head.train()
 
             epoch_det = epoch_cls = epoch_inst = 0.0
             n_det = n_cls = n_inst = 0
 
-            ref = "seismic" if "seismic" in self.model.sensors else self.model.sensors[0]
-
             n_train_steps = 0
             for batch in train_loader:
-                x_ref  = batch[f"x_{ref}"].to(self.device)
-                vtype  = batch["vehicle_type"].to(self.device)
-                inst   = batch["instance_type"].to(self.device)
-                det    = batch["detection_label"].to(self.device)
+                x_ref = batch[f"x_{ref}"].to(self.device)
+                vtype = batch["vehicle_type"].to(self.device)
+                inst  = batch["instance_type"].to(self.device)
+                det   = batch["detection_label"].to(self.device)
 
                 with torch.no_grad():
                     e_pres, e_type, e_inst, _ = self.model.encode_modality(ref, x_ref)
 
-                head_opt.zero_grad()
-                pres_logit, type_logits, inst_logits = self.model.det_heads[ref](
-                    e_pres, e_type, e_inst
-                )
+                # Detection head — all samples
+                if not stopped_det:
+                    opt_det.zero_grad()
+                    pres_logit = det_head.presence(e_pres)
+                    det_2c = torch.stack([-pres_logit, pres_logit], dim=1)
+                    det_loss = F.cross_entropy(det_2c, det, weight=det_weight)
+                    det_loss.backward()
+                    opt_det.step()
+                    epoch_det += det_loss.item()
+                    n_det += 1
+                else:
+                    with torch.no_grad():
+                        pres_logit = det_head.presence(e_pres)
 
-                det_2c = torch.stack([-pres_logit, pres_logit], dim=1)
-                det_loss = F.cross_entropy(det_2c, det, weight=det_weight)
-
+                # Type head — detected-present samples with valid type label
                 type_mask = (det == 1) & (vtype >= 0)
-                cls_loss = torch.tensor(0.0, device=self.device)
-                if type_mask.any():
+                if not stopped_cls and type_mask.any():
+                    opt_cls.zero_grad()
+                    type_logits = det_head.type_head(e_type)
                     cls_loss = F.cross_entropy(
                         type_logits[type_mask], vtype[type_mask], weight=type_weight
                     )
+                    cls_loss.backward()
+                    opt_cls.step()
+                    epoch_cls += cls_loss.item()
+                    n_cls += 1
 
+                # Instance head — detected-present samples with valid instance label
                 inst_mask = (det == 1) & (inst >= 0)
-                inst_loss = torch.tensor(0.0, device=self.device)
-                if inst_mask.any():
+                if not stopped_inst and inst_mask.any():
+                    opt_inst.zero_grad()
+                    inst_logits = det_head.instance_head(e_inst)
                     inst_loss = F.cross_entropy(
                         inst_logits[inst_mask], inst[inst_mask], weight=inst_weight
                     )
+                    inst_loss.backward()
+                    opt_inst.step()
+                    epoch_inst += inst_loss.item()
+                    n_inst += 1
 
-                loss = det_loss + cls_loss + inst_loss
-                loss.backward()
-                head_opt.step()
-
-                epoch_det  += det_loss.item();  n_det  += 1
-                epoch_cls  += cls_loss.item() if type_mask.any() else 0.0
-                n_cls      += int(type_mask.any())
-                epoch_inst += inst_loss.item() if inst_mask.any() else 0.0
-                n_inst     += int(inst_mask.any())
                 n_train_steps += 1
                 if self.cfg.steps_per_epoch and n_train_steps >= self.cfg.steps_per_epoch:
                     break
 
             val_m = self._eval_downstream(val_loader)
-            head_sched.step(-val_m["val_cls_f1"])
+            sched_det.step(-val_m["val_det_f1"])
+            sched_cls.step(-val_m["val_cls_f1"])
+            sched_inst.step(-val_m["val_inst_f1"])
 
             row = {
-                "epoch":          epoch,
-                "train_det_loss": epoch_det  / max(n_det,  1),
-                "train_cls_loss": epoch_cls  / max(n_cls,  1),
+                "epoch":           epoch,
+                "train_det_loss":  epoch_det  / max(n_det,  1),
+                "train_cls_loss":  epoch_cls  / max(n_cls,  1),
                 "train_inst_loss": epoch_inst / max(n_inst, 1),
                 **val_m,
             }
             with open(metrics_path, "a", newline="") as f:
                 csv.DictWriter(f, fieldnames=fieldnames).writerow(row)
 
+            status = []
+
+            if val_m["val_det_f1"] > best_det_f1:
+                best_det_f1 = val_m["val_det_f1"]
+                pat_det = 0
+                torch.save(
+                    det_head.presence.state_dict(),
+                    self.save_dir / f"presence_head_{ref}_best.pth",
+                )
+                status.append(f"det✓ F1={best_det_f1:.4f}")
+            elif not stopped_det:
+                pat_det += 1
+                if pat_det >= self.cfg.early_stop_patience:
+                    stopped_det = True
+                    status.append(f"det stopped (ep {epoch})")
+
+            if val_m["val_cls_f1"] > best_cls_f1:
+                best_cls_f1 = val_m["val_cls_f1"]
+                pat_cls = 0
+                torch.save(
+                    det_head.type_head.state_dict(),
+                    self.save_dir / f"type_head_{ref}_best.pth",
+                )
+                status.append(f"cls✓ F1={best_cls_f1:.4f}")
+            elif not stopped_cls:
+                pat_cls += 1
+                if pat_cls >= self.cfg.early_stop_patience:
+                    stopped_cls = True
+                    status.append(f"cls stopped (ep {epoch})")
+
+            if val_m["val_inst_f1"] > best_inst_f1:
+                best_inst_f1 = val_m["val_inst_f1"]
+                pat_inst = 0
+                torch.save(
+                    det_head.instance_head.state_dict(),
+                    self.save_dir / f"inst_head_{ref}_best.pth",
+                )
+                status.append(f"inst✓ F1={best_inst_f1:.4f}")
+            elif not stopped_inst:
+                pat_inst += 1
+                if pat_inst >= self.cfg.early_stop_patience:
+                    stopped_inst = True
+                    status.append(f"inst stopped (ep {epoch})")
+
             print(
                 f"Epoch {epoch:3d} | "
                 f"det={row['train_det_loss']:.4f} "
                 f"cls={row['train_cls_loss']:.4f} "
-                f"inst={row['train_inst_loss']:.4f} "
+                f"inst={row['train_inst_loss']:.4f} | "
                 f"det_f1={val_m['val_det_f1']:.4f} "
                 f"cls_f1={val_m['val_cls_f1']:.4f} "
                 f"inst_f1={val_m['val_inst_f1']:.4f}"
+                + (f"  [{', '.join(status)}]" if status else "")
             )
 
-            if val_m["val_cls_f1"] > best_f1:
-                best_f1 = val_m["val_cls_f1"]
-                patience_ctr = 0
-                for sensor, head in self.model.det_heads.items():
-                    torch.save(
-                        head.state_dict(),
-                        self.save_dir / f"det_head_{sensor}_best.pth",
-                    )
-                print(f"  ✓ New best cls F1={best_f1:.4f}")
-            else:
-                patience_ctr += 1
-                if patience_ctr >= self.cfg.early_stop_patience:
-                    print(f"  Early stopping at epoch {epoch}.")
-                    break
+        print(
+            f"Downstream complete. "
+            f"Best det F1={best_det_f1:.4f}  "
+            f"cls F1={best_cls_f1:.4f}  "
+            f"inst F1={best_inst_f1:.4f}"
+        )
 
-        print(f"Downstream complete. Best cls F1: {best_f1:.4f}")
+        # Load best weights for diagnostics
+        for fname, subhead in [
+            (f"presence_head_{ref}_best.pth", det_head.presence),
+            (f"type_head_{ref}_best.pth",     det_head.type_head),
+            (f"inst_head_{ref}_best.pth",     det_head.instance_head),
+        ]:
+            p = self.save_dir / fname
+            if p.exists():
+                subhead.load_state_dict(torch.load(p, map_location=self.device))
 
-        # Post-training diagnostics
-        best_head_path = self.save_dir / f"det_head_{ref}_best.pth"
-        if best_head_path.exists():
-            self.model.det_heads[ref].load_state_dict(
-                torch.load(best_head_path, map_location=self.device)
-            )
         diag_dir = self.save_dir / "diagnostics"
         print(f"  Generating confusion matrices → {diag_dir}/")
         df_preds = sample_level_eval(

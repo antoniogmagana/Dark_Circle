@@ -171,12 +171,6 @@ def main():
 
         trainer.train_downstream(train_loader, val_loader, args.ds_epochs)
 
-        for sensor, head in model.det_heads.items():
-            torch.save(
-                head.state_dict(),
-                save_dir / f"det_head_{sensor}_final.pth",
-            )
-
 
 if __name__ == "__main__":
     main()
