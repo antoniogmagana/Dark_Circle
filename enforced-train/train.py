@@ -118,6 +118,34 @@ def evaluate(model, loader, criterion, device, config):
     return avg_loss, accuracy, precision, recall, f1, per_class_acc
 
 
+def _compute_class_weights(
+    train_ds, config, device, weight_cap: float = 10.0
+) -> torch.Tensor:
+    """Compute inverse-frequency class weights from the training sample list.
+
+    Mirrors the label resolution logic in VehicleDataset.__getitem__ so the
+    weights reflect the exact label distribution seen during training.
+    """
+    reverse_class_map = {v: k for k, v in config.CLASS_MAP.items()}
+    counts = torch.zeros(config.NUM_CLASSES, dtype=torch.float32)
+
+    for dataset, instance, _sensor_node, _run_id, _step_idx, label_str in train_ds.samples:
+        if config.TRAINING_MODE == "detection":
+            label_int = 0 if label_str == "background" else 1
+        elif config.TRAINING_MODE == "category":
+            label_int = reverse_class_map.get(label_str, 0)
+        elif config.TRAINING_MODE == "instance":
+            vehicle_type = config.DATASET_VEHICLE_MAP[dataset][instance][1]
+            label_int = config.INSTANCE_TO_CLASS[vehicle_type]
+        else:
+            raise ValueError(f"Unknown TRAINING_MODE: {config.TRAINING_MODE}")
+        counts[label_int] += 1
+
+    total = counts.sum()
+    weights = (total / (config.NUM_CLASSES * counts)).clamp(max=weight_cap)
+    return weights.to(device)
+
+
 def main():
     device = config.DEVICE
     print("Using device:", device)
@@ -189,15 +217,12 @@ def main():
             break
 
     if len(config.CLASS_WEIGHTS) == config.NUM_CLASSES:
-        weights = torch.tensor(config.CLASS_WEIGHTS, device=device)
-        criterion = nn.CrossEntropyLoss(weight=weights)
+        weights = torch.tensor(config.CLASS_WEIGHTS, dtype=torch.float32, device=device)
+        print(f"Using class weights from config: {weights.tolist()}")
     else:
-        print(
-            f"Warning: CLASS_WEIGHTS len ({len(config.CLASS_WEIGHTS)}) "
-            f"!= NUM_CLASSES ({config.NUM_CLASSES}). "
-            f"Defaulting to unweighted loss."
-        )
-        criterion = nn.CrossEntropyLoss()
+        weights = _compute_class_weights(train_ds, config, device)
+        print(f"Computed class weights from dataset: {weights.tolist()}")
+    criterion = nn.CrossEntropyLoss(weight=weights)
 
     optimizer = model.get_optimizer()
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
