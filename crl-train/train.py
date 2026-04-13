@@ -104,7 +104,7 @@ def parse_args():
     p.add_argument(
         "--steps-per-epoch",
         type=int,
-        default=None,
+        default=100,
         help="Cap gradient steps per epoch (None = full epoch)",
     )
     return p.parse_args()
