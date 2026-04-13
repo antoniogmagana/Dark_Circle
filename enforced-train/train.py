@@ -184,14 +184,8 @@ def main():
     with torch.no_grad():
         for x_dummy, _, ds_names in train_loader:
             x_dummy = x_dummy.to(device)
-
             x_dummy = preprocess_for_training(x_dummy, config=config)
-
-            if hasattr(model, "fit_extractor"):
-                model.fit_extractor(x_dummy[:32])
-                model(x_dummy[:32])
-            else:
-                model(x_dummy)
+            model(x_dummy)
             break
 
     if len(config.CLASS_WEIGHTS) == config.NUM_CLASSES:
