@@ -282,7 +282,8 @@ class Trainer:
             struct_metrics = {}
             if epoch % 5 == 0:
                 struct_metrics = run_full_eval(
-                    self.model, train_loader, val_loader, self.device
+                    self.model, train_loader, val_loader, self.device,
+                    max_batches=self.cfg.steps_per_epoch,
                 )
 
             row = {
@@ -372,6 +373,8 @@ class Trainer:
             for k, v in metrics.items():
                 totals[k] = totals.get(k, 0.0) + v
             n += 1
+            if self.cfg.steps_per_epoch and n >= self.cfg.steps_per_epoch:
+                break
         self.model.train()
         return {k: v / max(n, 1) for k, v in totals.items()}
 

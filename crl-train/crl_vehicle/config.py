@@ -217,7 +217,7 @@ class CRLConfig:
     wd:                   float = 1e-4
     warmup_epochs:        int   = 5
     n_epochs:             int   = 100
-    num_workers:          int   = 8
+    num_workers:          int   = 60
     early_stop_patience:  int   = 25
 
     # Loss weights
@@ -230,7 +230,7 @@ class CRLConfig:
     n_horizons:         int   = 10    # max horizon n for MultiHorizonPairDataset (unused in training)
 
     # Training throughput
-    steps_per_epoch: int | None = None  # cap gradient steps per epoch (None = full epoch)
+    steps_per_epoch: int | None = 100   # cap gradient steps per epoch (None = full epoch)
 
     # Paths
     save_dir:        str   = "saved_crl"

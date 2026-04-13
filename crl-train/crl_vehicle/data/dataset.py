@@ -264,6 +264,28 @@ class SensorDataset(Dataset):
             self._seg_counter += 1
         return self._segment_id_map[key]
 
+    def _resample_entry(self, entry: dict, sensor: str) -> dict:
+        """
+        Resample entry["data"] from native_sr to target SR in-place (replaces array).
+        present array stays at native_sr length — it is only indexed by w*stride_native
+        which is still valid because stride_native/native_sr == stride_target/target_sr.
+        """
+        target_sr = _TARGET_SR[sensor]
+        native_sr = entry["native_sr"]
+        if native_sr == target_sr:
+            entry["target_sr"] = target_sr
+            return entry
+        key = (native_sr, target_sr)
+        if key not in self._resamplers:
+            self._resamplers[key] = torchaudio.transforms.Resample(
+                orig_freq=native_sr, new_freq=target_sr
+            )
+        tensor = torch.from_numpy(entry["data"])          # (1, T_native)
+        resampled = self._resamplers[key](tensor)         # (1, T_target)
+        entry["data"] = resampled.numpy()
+        entry["target_sr"] = target_sr
+        return entry
+
     def _load_file(self, path: Path, stem: str, sensor: str, dataset: str) -> dict:
         """Load parquet, split m3nvc segments. Returns {seg_key: (stem, n_windows)}."""
         try:
@@ -276,10 +298,12 @@ class SensorDataset(Dataset):
         if native_sr is None:
             return {}
 
+        target_sr = _TARGET_SR[sensor]
+        stride_target = max(int(target_sr * self.cfg.horizon_stride_sec), 1)
+
         result = {}
         has_segments = "scene_id" in df.columns and "run_id" in df.columns
 
-        stride_native = max(int(native_sr * self.cfg.horizon_stride_sec), 1)
         if has_segments:
             for (scene_id, run_id), seg_df in df.groupby(["scene_id", "run_id"], sort=True):
                 seg_key = (int(scene_id), int(run_id))
@@ -288,8 +312,9 @@ class SensorDataset(Dataset):
                     entry = self._df_to_entry(seg_df, sensor, native_sr)
                     if entry is None:
                         continue
+                    entry = self._resample_entry(entry, sensor)
                     self._cache[sensor][cache_key] = entry
-                nw = self._n_windows(self._cache[sensor][cache_key], native_sr, stride_native)
+                nw = self._n_windows(self._cache[sensor][cache_key], stride_target)
                 if nw >= 1:
                     result[seg_key] = (stem, nw)
         else:
@@ -298,21 +323,21 @@ class SensorDataset(Dataset):
                 entry = self._df_to_entry(df, sensor, native_sr)
                 if entry is None:
                     return {}
+                entry = self._resample_entry(entry, sensor)
                 self._cache[sensor][cache_key] = entry
-            nw = self._n_windows(self._cache[sensor][cache_key], native_sr, stride_native)
+            nw = self._n_windows(self._cache[sensor][cache_key], stride_target)
             if nw >= 1:
                 result[None] = (stem, nw)
 
         return result
 
-    def _n_windows(self, entry: dict, native_sr: int, stride_native: int | None = None) -> int:
-        win_len = int(native_sr * self.cfg.sample_seconds)
+    def _n_windows(self, entry: dict, stride: int) -> int:
+        target_sr = entry["target_sr"]
+        win_len = int(target_sr * self.cfg.sample_seconds)
         total = entry["data"].shape[-1]
         if total < win_len:
             return 0
-        if stride_native is None:
-            stride_native = max(int(native_sr * self.cfg.horizon_stride_sec), 1)
-        return (total - win_len) // stride_native + 1
+        return (total - win_len) // stride + 1
 
     @staticmethod
     def _df_to_entry(df: pd.DataFrame, sensor: str, native_sr: int) -> dict | None:
@@ -336,21 +361,6 @@ class SensorDataset(Dataset):
         return {"data": arr, "present": present, "native_sr": native_sr}
 
     # ------------------------------------------------------------------
-    # Resampling
-    # ------------------------------------------------------------------
-
-    def _resample(self, tensor: torch.Tensor, orig_sr: int, sensor: str) -> torch.Tensor:
-        target_sr = _TARGET_SR[sensor]
-        if orig_sr == target_sr:
-            return tensor
-        key = (orig_sr, target_sr)
-        if key not in self._resamplers:
-            self._resamplers[key] = torchaudio.transforms.Resample(
-                orig_freq=orig_sr, new_freq=target_sr
-            )
-        return self._resamplers[key](tensor)
-
-    # ------------------------------------------------------------------
     # Window extraction (per modality, independently)
     # ------------------------------------------------------------------
 
@@ -358,15 +368,14 @@ class SensorDataset(Dataset):
         self, sensor: str, stem: str, seg_key, w: int, interv_idx: int
     ) -> torch.Tensor:
         entry = self._cache[sensor][(stem, seg_key)]
-        native_sr = entry["native_sr"]
-        win_len = int(native_sr * self.cfg.sample_seconds)
-        stride_native = max(int(native_sr * self.cfg.horizon_stride_sec), 1)
-        start = w * stride_native
+        target_sr = entry["target_sr"]
+        win_len = int(target_sr * self.cfg.sample_seconds)
+        stride = max(int(target_sr * self.cfg.horizon_stride_sec), 1)
+        start = w * stride
         chunk = entry["data"][:, start: start + win_len].copy()
         tensor = torch.from_numpy(chunk)                              # [1, win_len]
-        tensor = self._resample(tensor, native_sr, sensor)            # [1, target_window_size]
         if self.is_train and interv_idx > 0:
-            tensor = apply_intervention(tensor, interv_idx, _TARGET_SR[sensor])
+            tensor = apply_intervention(tensor, interv_idx, target_sr)
         return rms_normalize(tensor)
 
     def _zero_window(self, sensor: str) -> torch.Tensor:

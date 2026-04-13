@@ -73,12 +73,14 @@ def run_full_eval(
     val_loader: DataLoader,
     device: torch.device,
     primary_sensor: str = "seismic",
+    max_batches: int | None = None,
 ) -> dict:
     """
     Collect embeddings over train and val splits, then compute:
         - Linear probe accuracy for each embedding block (pres, type, inst)
         - Detection AUC using the presence embedding
 
+    max_batches: cap on batches to collect per split (None = full loader).
     Returns a flat metrics dict suitable for logging.
     """
     model.eval()
@@ -86,7 +88,9 @@ def run_full_eval(
     def collect(loader):
         e_pres_list, e_type_list, e_inst_list = [], [], []
         vtypes, dets, insts = [], [], []
-        for batch in loader:
+        for i, batch in enumerate(loader):
+            if max_batches is not None and i >= max_batches:
+                break
             x = batch[f"x_{primary_sensor}"].to(device)
             ep, et, ei, _ = model.encode_modality(primary_sensor, x)
             e_pres_list.append(ep.cpu().numpy())
