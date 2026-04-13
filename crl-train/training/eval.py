@@ -1,14 +1,13 @@
 """
 Evaluation utilities.
 
-compute_mig()                — Mutual Information Gap (Kim & Mnih 2018).
-linear_probe_accuracy()      — logistic regression probe per latent block.
-run_full_eval()              — collects z over a DataLoader and computes all metrics.
-collapse_metrics()           — detects posterior collapse (active dim fraction, AU).
-noise_type_separation_score()— linear separability of noise types in a latent block.
+linear_probe_accuracy()  — logistic regression probe per embedding block.
+run_full_eval()          — collects embeddings over a DataLoader and computes metrics.
+sample_level_eval()      — per-sample inference for diagnostic CSVs.
+plot_confusion_matrices() — confusion matrix plots saved to disk.
 
-These are diagnostic tools run after CRL pre-training to measure
-disentanglement quality before launching downstream head training.
+These are diagnostic tools run periodically during CRL pre-training to
+measure embedding quality before downstream head training.
 """
 
 from pathlib import Path
@@ -26,71 +25,7 @@ from sklearn.metrics import (
     accuracy_score,
     f1_score,
     roc_auc_score,
-    mutual_info_score,
-    confusion_matrix,
 )
-from sklearn.preprocessing import KBinsDiscretizer
-
-
-# ---------------------------------------------------------------------------
-# MIG score
-# ---------------------------------------------------------------------------
-
-def compute_mig(
-    z_samples: np.ndarray,
-    factor_labels: dict[str, np.ndarray],
-    n_bins: int = 10,
-) -> dict[str, float]:
-    """
-    Mutual Information Gap (Kim & Mnih 2018).
-
-    For each ground-truth factor v_k, compute MI with every z_i dimension.
-    MIG_k = (MI_top1(v_k) - MI_top2(v_k)) / H(v_k)
-    where top1/top2 are the two highest-MI z dimensions for factor k.
-
-    Args:
-        z_samples    : (N, d_z) float array of encoder samples
-        factor_labels: dict mapping factor name → (N,) integer label array
-                       e.g. {"vehicle_type": ..., "detection": ..., "interv_type": ...}
-        n_bins       : number of bins for discretising continuous z dims
-
-    Returns dict with per-factor MIG scores and "mean_mig".
-    """
-    # Discretise z (required for mutual_info_score)
-    disc = KBinsDiscretizer(n_bins=n_bins, encode="ordinal", strategy="quantile")
-    z_disc = disc.fit_transform(z_samples).astype(int)  # (N, d_z)
-
-    results = {}
-    mig_values = []
-
-    for factor_name, labels in factor_labels.items():
-        labels = np.asarray(labels)
-        d_z = z_disc.shape[1]
-
-        # MI between each z dim and this factor
-        mis = np.array([
-            mutual_info_score(labels, z_disc[:, i])
-            for i in range(d_z)
-        ])
-        mis_sorted = np.sort(mis)[::-1]
-
-        if len(mis_sorted) < 2:
-            mig_k = 0.0
-        else:
-            # Entropy of the factor
-            counts = np.bincount(labels[labels >= 0])
-            probs = counts / counts.sum()
-            h_k = -np.sum(probs * np.log(probs + 1e-8))
-            if h_k < 1e-8:
-                mig_k = 0.0
-            else:
-                mig_k = float((mis_sorted[0] - mis_sorted[1]) / h_k)
-
-        results[f"mig_{factor_name}"] = mig_k
-        mig_values.append(mig_k)
-
-    results["mean_mig"] = float(np.mean(mig_values)) if mig_values else 0.0
-    return results
 
 
 # ---------------------------------------------------------------------------
@@ -107,11 +42,10 @@ def linear_probe_accuracy(
     """
     Fit a logistic regression on z_train, evaluate on z_val.
     Returns accuracy and weighted F1.
-
     Filters out invalid labels (< 0) before fitting.
     """
     valid_train = y_train >= 0
-    valid_val = y_val >= 0
+    valid_val   = y_val   >= 0
 
     if valid_train.sum() < 2 or len(np.unique(y_train[valid_train])) < 2:
         return {f"{label_name}_acc": 0.0, f"{label_name}_f1": 0.0}
@@ -123,10 +57,8 @@ def linear_probe_accuracy(
         return {f"{label_name}_acc": 0.0, f"{label_name}_f1": 0.0}
 
     pred = clf.predict(z_val[valid_val])
-    acc = accuracy_score(y_val[valid_val], pred)
-    f1 = f1_score(
-        y_val[valid_val], pred, average="weighted", zero_division=0
-    )
+    acc  = accuracy_score(y_val[valid_val], pred)
+    f1   = f1_score(y_val[valid_val], pred, average="weighted", zero_division=0)
     return {f"{label_name}_acc": float(acc), f"{label_name}_f1": float(f1)}
 
 
@@ -143,94 +75,52 @@ def run_full_eval(
     primary_sensor: str = "seismic",
 ) -> dict:
     """
-    Collect latents over train and val splits, then compute:
-        - MIG for vehicle_type, detection, interv_type
-        - Linear probe accuracy per latent block
-        - Detection AUC
+    Collect embeddings over train and val splits, then compute:
+        - Linear probe accuracy for each embedding block (pres, type, inst)
+        - Detection AUC using the presence embedding
 
     Returns a flat metrics dict suitable for logging.
     """
     model.eval()
 
     def collect(loader):
-        zs, mus, vtypes, dets, intervs = [], [], [], [], []
+        e_pres_list, e_type_list, e_inst_list = [], [], []
+        vtypes, dets, insts = [], [], []
         for batch in loader:
             x = batch[f"x_{primary_sensor}"].to(device)
-            z, mu, _, _ = model.encode_modality(primary_sensor, x)
-            zs.append(z.cpu().numpy())
-            mus.append(mu.cpu().numpy())
+            ep, et, ei, _ = model.encode_modality(primary_sensor, x)
+            e_pres_list.append(ep.cpu().numpy())
+            e_type_list.append(et.cpu().numpy())
+            e_inst_list.append(ei.cpu().numpy())
             vtypes.append(batch["vehicle_type"].numpy())
             dets.append(batch["detection_label"].numpy())
-            intervs.append(batch["interv_idx"].numpy())
+            insts.append(batch["instance_type"].numpy())
         return (
-            np.concatenate(zs),
-            np.concatenate(mus),
+            np.concatenate(e_pres_list),
+            np.concatenate(e_type_list),
+            np.concatenate(e_inst_list),
             np.concatenate(vtypes),
             np.concatenate(dets),
-            np.concatenate(intervs),
+            np.concatenate(insts),
         )
 
-    z_tr, mu_tr, vt_tr, det_tr, iv_tr = collect(train_loader)
-    z_val, mu_val, vt_val, det_val, iv_val = collect(val_loader)
+    ep_tr, et_tr, ei_tr, vt_tr, det_tr, inst_tr = collect(train_loader)
+    ep_val, et_val, ei_val, vt_val, det_val, inst_val = collect(val_loader)
 
     metrics = {}
 
-    # --- MIG ---
-    mig = compute_mig(
-        z_val,
-        {
-            "vehicle_type": vt_val,
-            "detection": det_val,
-            "interv_type": iv_val,
-        },
-    )
-    metrics.update(mig)
+    # Linear probes per embedding block
+    metrics.update(linear_probe_accuracy(ep_tr, det_tr, ep_val, det_val, label_name="probe_pres"))
+    metrics.update(linear_probe_accuracy(et_tr, vt_tr,  et_val, vt_val,  label_name="probe_type"))
+    metrics.update(linear_probe_accuracy(ei_tr, inst_tr, ei_val, inst_val, label_name="probe_inst"))
 
-    # --- Linear probes per latent block ---
-    enc = model.encoders[primary_sensor]
-    d_z = enc.d_z
-
-    def block(z, sl):
-        return z[:, sl]
-
-    # Type block (most diagnostic)
-    metrics.update(linear_probe_accuracy(
-        block(z_tr, enc.type_idx), vt_tr,
-        block(z_val, enc.type_idx), vt_val,
-        label_name="probe_type",
-    ))
-    # Presence block
-    metrics.update(linear_probe_accuracy(
-        block(z_tr, enc.presence_idx), det_tr,
-        block(z_val, enc.presence_idx), det_val,
-        label_name="probe_presence",
-    ))
-    # Full z
-    metrics.update(linear_probe_accuracy(
-        z_tr, vt_tr, z_val, vt_val, label_name="probe_full_z"
-    ))
-
-    # --- Collapse metrics ---
-    metrics.update(collapse_metrics(z_val, mu_val))
-
-    # --- Noise type separation ---
-    enc = model.encoders[primary_sensor]
-    metrics["noise_sep_in_z_noise"] = noise_type_separation_score(
-        z_val[:, enc.noise_idx], iv_val
-    )
-    noise_start = enc.noise_idx.start
-    metrics["noise_sep_in_z_veh"] = noise_type_separation_score(
-        z_val[:, :noise_start], iv_val
-    )
-
-    # --- Detection AUC ---
-    # Use presence block sigmoid as detection score
-    pres_scores_val = torch.sigmoid(
-        torch.from_numpy(block(z_val, enc.presence_idx))
-    ).squeeze(-1).numpy()
+    # Detection AUC: sigmoid of linear probe score on e_pres
     if len(np.unique(det_val)) == 2:
         try:
-            auc = roc_auc_score(det_val, pres_scores_val)
+            clf_det = LogisticRegression(max_iter=500, C=1.0)
+            clf_det.fit(ep_tr, det_tr)
+            det_scores = clf_det.predict_proba(ep_val)[:, 1]
+            auc = roc_auc_score(det_val, det_scores)
             metrics["detection_auc"] = float(auc)
         except Exception:
             metrics["detection_auc"] = 0.0
@@ -242,63 +132,7 @@ def run_full_eval(
 
 
 # ---------------------------------------------------------------------------
-# Collapse-prevention diagnostics
-# ---------------------------------------------------------------------------
-
-def collapse_metrics(
-    z: np.ndarray, mu: np.ndarray | None = None
-) -> dict[str, float]:
-    """
-    Measures whether the latent space has collapsed (any dims unused).
-
-    active_dim_frac  : fraction of z dims with std > 0.05.  Target ≥ 0.80.
-    spread_ratio     : min_std / max_std.  1.0 = all dims used equally.
-    active_units_frac: (Burda et al.) fraction of dims with Var[mu_i] > 0.01.
-                       Only computed when mu is provided.
-
-    z  : (N, d_z)
-    mu : (N, d_z) optional — posterior mean from the encoder
-    """
-    stds = z.std(axis=0)
-    active_frac = float((stds > 0.05).mean())
-    spread_ratio = float(stds.min() / (stds.max() + 1e-8))
-    metrics: dict[str, float] = {
-        "active_dim_frac": active_frac,
-        "spread_ratio": spread_ratio,
-    }
-    if mu is not None:
-        mu_var = mu.var(axis=0)
-        metrics["active_units_frac"] = float((mu_var > 0.01).mean())
-    return metrics
-
-
-def noise_type_separation_score(
-    z_block: np.ndarray,
-    interv_labels: np.ndarray,
-) -> float:
-    """
-    Linear separability of noise types in a latent block.
-
-    Trains a logistic classifier on z_block to predict intervention type
-    (0=clean, 1-7=noise type) and returns held-out accuracy.
-
-    High score in z_noise block is DESIRED — noise is localised there.
-    Low score in z_veh block is DESIRED — vehicle dims are clean of noise.
-
-    z_block      : (N, d_block)
-    interv_labels: (N,) int — 0=clean, 1-7=noise type
-    Returns float accuracy.
-    """
-    valid = interv_labels >= 0
-    if valid.sum() < 2 or len(np.unique(interv_labels[valid])) < 2:
-        return 0.0
-    clf = LogisticRegression(max_iter=300, C=1.0)
-    clf.fit(z_block[valid], interv_labels[valid])
-    return float(accuracy_score(interv_labels[valid], clf.predict(z_block[valid])))
-
-
-# ---------------------------------------------------------------------------
-# Intervention label names (interv_idx 0=clean, 1-7=noise types)
+# Labels and names
 # ---------------------------------------------------------------------------
 
 _INTERV_NAMES = {
@@ -328,35 +162,30 @@ def sample_level_eval(
     primary_sensor: str = "seismic",
 ) -> pd.DataFrame:
     """
-    Run inference over *loader* and return a DataFrame with one row per sample:
+    Run inference over *loader* using downstream det_heads and return a
+    DataFrame with one row per sample:
 
-        segment_id   : int   — unique segment identifier from the dataset
-        interv_idx   : int   — 0=clean, 1-7=noise type applied
-        true_det     : int   — ground-truth detection label (0=absent, 1=present)
-        pred_det     : int   — model detection prediction (0/1)
-        true_type    : int   — ground-truth vehicle type (-2/-1=invalid, 0-3=class)
-        pred_type    : int   — model type prediction (0-3); -1 when true_type invalid
-
-    Rows where true_type < 0 (background / multi-vehicle) are kept so
-    detection confusion can still be inspected for those samples, but
-    pred_type is set to -1 to flag them as excluded from type CM.
+        segment_id  : unique segment identifier
+        interv_idx  : 0=clean, 1-7=noise type applied
+        true_det    : ground-truth detection label (0/1)
+        pred_det    : model detection prediction (0/1)
+        true_type   : ground-truth vehicle type (-2/-1=invalid, 0-3=class)
+        pred_type   : model type prediction; -1 when true_type invalid
     """
     model.eval()
     rows = []
 
     for batch in loader:
-        x = batch[f"x_{primary_sensor}"].to(device)
+        x         = batch[f"x_{primary_sensor}"].to(device)
         seg_ids   = batch["segment_id"].tolist()
         intervs   = batch["interv_idx"].tolist()
         true_det  = batch["detection_label"].tolist()
         true_type = batch["vehicle_type"].tolist()
 
-        _, mu, _, _ = model.encode_modality(primary_sensor, x)
-        enc = model.encoders[primary_sensor]
-        z_pres, z_type, z_inst, _, _ = enc.split_z_raw(mu)
-        pres_logit, type_logits, _ = model.det_heads[primary_sensor](z_pres, z_type, z_inst)
+        e_pres, e_type, e_inst, _ = model.encode_modality(primary_sensor, x)
+        pres_logit, type_logits, _ = model.det_heads[primary_sensor](e_pres, e_type, e_inst)
 
-        pred_det  = (pres_logit > 0).long().cpu().tolist()
+        pred_det      = (pres_logit > 0).long().cpu().tolist()
         pred_type_all = type_logits.argmax(dim=1).cpu().tolist()
 
         for i in range(len(seg_ids)):
@@ -383,28 +212,20 @@ def plot_confusion_matrices(
     tag: str = "",
 ) -> None:
     """
-    Generate and save three diagnostic plots to *out_dir*:
+    Generate and save diagnostic plots to *out_dir*:
 
         1. detection_cm{tag}.png       — binary detection confusion matrix
         2. type_cm{tag}.png            — 4-class vehicle type confusion matrix
-                                         (samples with true_type < 0 excluded)
-        3. det_acc_by_interv{tag}.png  — bar chart: detection accuracy per
-                                         noise intervention type
-
-    Also writes per-sample predictions to:
-        predictions{tag}.csv
-
-    Args:
-        df      : output of sample_level_eval()
-        out_dir : directory to save figures (created if absent)
-        tag     : optional suffix appended to filenames (e.g. "_epoch10")
+        3. det_acc_by_interv{tag}.png  — detection accuracy per intervention type
+        4. predictions{tag}.csv        — per-sample predictions
     """
+    from sklearn.metrics import confusion_matrix
+
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-
     suffix = f"_{tag}" if tag else ""
 
-    # --- 1. Detection confusion matrix ---
+    # 1. Detection confusion matrix
     cm_det = confusion_matrix(df["true_det"], df["pred_det"], labels=[0, 1])
     fig, ax = plt.subplots(figsize=(4, 4))
     sns.heatmap(
@@ -418,7 +239,7 @@ def plot_confusion_matrices(
     fig.savefig(out_dir / f"detection_cm{suffix}.png", dpi=150)
     plt.close(fig)
 
-    # --- 2. Vehicle type confusion matrix (valid labels only) ---
+    # 2. Vehicle type confusion matrix (valid labels only)
     type_df = df[df["true_type"] >= 0].copy()
     if not type_df.empty:
         cm_type = confusion_matrix(
@@ -436,7 +257,7 @@ def plot_confusion_matrices(
         fig.savefig(out_dir / f"type_cm{suffix}.png", dpi=150)
         plt.close(fig)
 
-    # --- 3. Detection accuracy per intervention type ---
+    # 3. Detection accuracy per intervention type
     interv_accs = {}
     for idx, grp in df.groupby("interv_idx"):
         if len(grp) == 0:
@@ -462,15 +283,15 @@ def plot_confusion_matrices(
         fig.savefig(out_dir / f"det_acc_by_interv{suffix}.png", dpi=150)
         plt.close(fig)
 
-    # --- 4. Per-sample CSV ---
+    # 4. Per-sample CSV
     df_out = df.copy()
-    df_out["interv_name"] = df_out["interv_idx"].map(
+    df_out["interv_name"]   = df_out["interv_idx"].map(
         lambda i: _INTERV_NAMES.get(int(i), f"interv_{i}")
     )
-    df_out["true_det_name"]  = df_out["true_det"].map(
+    df_out["true_det_name"] = df_out["true_det"].map(
         lambda v: _DET_NAMES[int(v)] if int(v) in (0, 1) else str(v)
     )
-    df_out["pred_det_name"]  = df_out["pred_det"].map(
+    df_out["pred_det_name"] = df_out["pred_det"].map(
         lambda v: _DET_NAMES[int(v)] if int(v) in (0, 1) else str(v)
     )
     df_out["true_type_name"] = df_out["true_type"].map(

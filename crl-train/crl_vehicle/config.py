@@ -2,13 +2,10 @@
 CRLConfig — single source of truth for all hyperparameters.
 
 Design principle: audio and seismic are processed completely independently
-through separate SpectrogramFrontend → SSM → CausalEncoder → SCM chains.
-They share the same d_z latent structure (same causal variables) but have
-distinct signal processing parameters. Late fusion only happens at the
-downstream head.
-
-Per-modality parameters live in ModalityConfig; shared architecture and
-training parameters live in CRLConfig.
+through separate SpectrogramFrontend → SSM → MultiTaskEncoder chains.
+Each modality produces three task-specific embeddings (presence, type,
+instance) via separate projection branches, eliminating gradient competition
+between differently-sized latent blocks.
 
 Audio target SR  : 16000 Hz → window_size=16000, n_fft=512, hop_length=160
                               → T' = 16000 // 160 + 1 = 101 frames
@@ -192,70 +189,41 @@ class CRLConfig:
     # Data
     sample_seconds:  float = 1.0    # window duration in seconds
 
-    # SSM (shared across modalities — both produce T'=25)
+    # SSM (shared across modalities)
     d_model:         int   = 64     # feature dimension in/out of SSM
     ssm_nhead:       int   = 4      # Transformer attention heads
     ssm_layers:      int   = 2      # Transformer encoder layers
     ssm_dropout:     float = 0.1
 
-    # Encoder latent dims (same causal variables for both modalities)
-    d_z_presence:    int   = 1      # is vehicle present?
-    d_z_type:        int   = 4      # vehicle type (# classes)
-    d_z_instance:    int   = 8      # vehicle instance (13 non-background classes)
-    d_z_proximity:   int   = 1      # scalar proximity
-    d_z_noise:       int   = 4      # unstructured nuisance
-    # total d_z = 18
+    # Task-specific embedding dimensions (separate branch per task)
+    # Larger dims give the encoder more capacity per task without cross-task
+    # gradient competition through a shared projection.
+    d_pres: int = 16    # presence embedding (binary: vehicle present/absent)
+    d_type: int = 32    # type embedding (4 classes: pedestrian/light/sport/utility)
+    d_inst: int = 64    # instance embedding (13 classes)
 
-    # SCM
-    scm_hidden:      int   = 32
-
-    # Whether the SSM + CausalEncoder weights are shared across modalities.
-    # False = separate weights per modality (default: more capacity, less transfer).
-    # True  = shared weights (stronger inductive bias that both sensors encode
-    #         the same causal structure).
+    # Whether the SSM + encoder weights are shared across modalities.
     share_encoder:   bool  = False
 
-    # Downstream fusion strategy for detection/classification heads:
-    #   "concat"  — concatenate z_audio and z_seismic → 2*d_z features
+    # Downstream fusion strategy for inference:
     #   "vote"    — separate heads per modality, average probabilities
-    #   "any"     — use whichever modality is available (no fusion)
+    #   "any"     — use whichever modality is available
     fusion:          str   = "vote"
 
     # Training
     batch_size:           int   = 64
     lr:                   float = 1e-3
-    lr_min:               float = 1e-5
+    lr_min:               float = 1e-4
     wd:                   float = 1e-4
     warmup_epochs:        int   = 5
-    cosine_period:        int   = 20
     n_epochs:             int   = 100
     num_workers:          int   = 8
     early_stop_patience:  int   = 25
 
     # Loss weights
-    beta_start:           float = 0.0
-    beta_end:             float = 1.0
-    beta_anneal_epochs:   int   = 40
-    lambda_causal:        float = 5.0
-    lambda_causal_anneal_epochs: int = 20  # ramp 0 → lambda_causal over this many epochs
-    lambda_interv:        float = 2.0
-    lambda_disent:        float = 0.5
-    lambda_task:          float = 2.0
-    lambda_l1_graph:             float = 0.01   # L1 sparsity on SCM adjacency weights
-    lambda_l1_graph_anneal_epochs: int = 20    # ramp 0 → lambda_l1_graph over this many epochs
-
-    # Curriculum
-    unknown_interv_start_epoch: int = 10
-    unknown_interv_ramp_epochs: int = 10
-
-    # Multi-horizon pair construction
-    n_horizons:         int   = 10    # n ∈ {1..n_horizons} for temporal pairs
-    horizon_stride_sec: float = 0.1   # seconds between successive x(t) anchor windows
-
-    # All-interventions contrast loss weights
-    lambda_contrast: float = 2.0   # invariance of vehicle dims across interventions
-    lambda_equiv:    float = 0.5   # equivariance: noise dims must vary across interventions
-    lambda_collapse: float = 1.0   # posterior collapse penalty
+    lambda_type:   float = 2.0    # weight on vehicle type CE loss
+    lambda_inst:   float = 1.0    # weight on instance CE loss
+    lambda_recon:  float = 0.1    # weight on reconstruction regularizer
 
     # Training throughput
     steps_per_epoch: int | None = None  # cap gradient steps per epoch (None = full epoch)
@@ -264,8 +232,9 @@ class CRLConfig:
     save_dir:        str   = "saved_crl"
 
     @property
-    def d_z(self) -> int:
-        return self.d_z_presence + self.d_z_type + self.d_z_instance + self.d_z_proximity + self.d_z_noise
+    def d_embed(self) -> int:
+        """Total concatenated embedding dimension (for decoder input)."""
+        return self.d_pres + self.d_type + self.d_inst
 
     def modality_cfg(self, modality: str) -> ModalityConfig:
         if modality == "audio":

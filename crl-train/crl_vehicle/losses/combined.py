@@ -1,250 +1,184 @@
 """
-CombinedLoss
+SupervisedMultiTaskLoss
 
-Aggregates all loss terms from both modalities into a single scalar.
-Handles β-annealing of the KL weight.
+Three supervised losses applied to the task-specific embeddings produced by
+MultiTaskEncoder + CRLHeads during backbone pre-training:
 
-Expected keys in the `outputs` dict (built by the Trainer per forward pass):
+    L_pres  = BCE(pres_logit, detection_label)         — all samples
+    L_type  = CE(type_logits, vehicle_type)            — masked: present AND type >= 0
+    L_inst  = CE(inst_logits, instance_type)           — masked: present AND inst >= 0
+    L_recon = MSE(x_hat, x_target)                    — optional regularizer
+
+    L_total = L_pres + lambda_type * L_type + lambda_inst * L_inst + lambda_recon * L_recon
+
+Expected keys in the `outputs` dict (built by Trainer.forward):
     Per modality (suffix "_audio" or "_seismic"):
-        x_hat_{mod}       : (B, K, T')  decoder reconstruction
-        x_target_{mod}    : (B, K, T')  filterbank target
-        mu_{mod}          : (B, d_z)
-        log_var_{mod}     : (B, d_z)
-        z_{mod}           : (B, d_z)    reparameterised latent
-        z_tn_{mod}        : (B, d_z)    latent at t+n (horizon-pair path only)
-        z_scm_{mod}       : (B, d_z)    SCM prediction
-        avail_{mod}       : (B,) bool   availability mask
+        e_pres_{mod}      : (B, d_pres)  presence embedding
+        e_type_{mod}      : (B, d_type)  type embedding
+        e_inst_{mod}      : (B, d_inst)  instance embedding
+        pres_logit_{mod}  : (B,)         presence logit (from CRLHeads)
+        type_logits_{mod} : (B, n_type)  type logits
+        inst_logits_{mod} : (B, n_inst)  instance logits
+        x_hat_{mod}       : (B, K, T')   reconstructed spectrogram
+        x_target_{mod}    : (B, K, T')   stop-grad filterbank target
+        avail_{mod}       : (B,) bool    modality availability mask
 
-    Horizon-pair path (MultiHorizonPairDataset):
-        horizon_n         : (B,) long   temporal horizon index n ∈ {1..n_horizons}
-
-    Shared (one SCM per experiment):
-        interv_mask       : (B, d_z) or None
-        interv_logits     : (B, n_targets) or None  — unknown interv cls
-        interv_targets    : (B,) long or None
-
-    Downstream:
-        vehicle_logits    : (B, n_classes) or None
-        vehicle_labels    : (B,) long or None
-        det_logits        : (B, 2) or None
-        det_labels        : (B,) long or None
+    Shared:
+        detection_label   : (B,) long    0=absent, 1=present
+        vehicle_type      : (B,) long    0-3=class, <0=invalid
+        instance_type     : (B,) long    0-12=instance, <0=invalid
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from crl_vehicle.losses.elbo import reconstruction_loss, kl_divergence
-from crl_vehicle.losses.causal import scm_consistency_loss
-from crl_vehicle.losses.disentangle import total_correlation_loss, posterior_collapse_penalty
+
+# Type class weights (from training set frequencies — minority classes upweighted)
+_TYPE_WEIGHTS = [24.3933, 22.925, 1.42813, 4.64756]
+
+# Instance class weights (uniform — update from training set if frequencies are known)
+_INST_WEIGHTS = [1.0] * 13
 
 
-class CombinedLoss(nn.Module):
+class SupervisedMultiTaskLoss(nn.Module):
 
     def __init__(self, config):
         """config : CRLConfig"""
         super().__init__()
         self.cfg = config
-        self.current_beta = config.beta_start
-        self.current_lambda_l1 = 0.0
-        self.current_lambda_causal = 0.0
-
-    def update_beta(self, epoch: int):
-        """Call once per epoch before the training loop."""
-        t = min(epoch / max(self.cfg.beta_anneal_epochs, 1), 1.0)
-        self.current_beta = (
-            self.cfg.beta_start
-            + t * (self.cfg.beta_end - self.cfg.beta_start)
+        self.register_buffer(
+            "type_weight",
+            torch.tensor(_TYPE_WEIGHTS, dtype=torch.float32),
+        )
+        self.register_buffer(
+            "inst_weight",
+            torch.tensor(_INST_WEIGHTS, dtype=torch.float32),
         )
 
-    def update_lambda_l1(self, epoch: int):
-        """Linearly ramp lambda_l1 from 0 → cfg.lambda_l1_graph over
-        lambda_l1_graph_anneal_epochs.  Call once per epoch."""
-        t = min(epoch / max(self.cfg.lambda_l1_graph_anneal_epochs, 1), 1.0)
-        self.current_lambda_l1 = t * self.cfg.lambda_l1_graph
+    def _modality_losses(
+        self,
+        outputs: dict,
+        mod: str,
+        det_labels: torch.Tensor,
+        type_labels: torch.Tensor,
+        inst_labels: torch.Tensor,
+        device: torch.device,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
+        """
+        Compute per-modality losses.
+        Returns (L_pres, L_type, L_inst, L_recon, metrics_dict).
+        Returns zero tensors if this modality is unavailable in the batch.
+        """
+        zero = torch.zeros((), device=device)
+        avail = outputs.get(f"avail_{mod}")
 
-    def update_lambda_causal(self, epoch: int):
-        """Linearly ramp lambda_causal from 0 → cfg.lambda_causal over
-        lambda_causal_anneal_epochs.  Call once per epoch."""
-        t = min(epoch / max(self.cfg.lambda_causal_anneal_epochs, 1), 1.0)
-        self.current_lambda_causal = t * self.cfg.lambda_causal
-
-    def _modality_terms(
-        self, outputs: dict, mod: str, interv_mask: torch.Tensor | None, beta: float
-    ) -> tuple[torch.Tensor, dict]:
-        """Compute per-modality ELBO + causal + disentanglement losses."""
-        avail = outputs.get(f"avail_{mod}")   # (B,) bool or None
-
-        # If the modality is completely absent in this batch, return zeros.
         if avail is not None and not avail.any():
-            device = outputs.get("acyclicity", torch.tensor(0.0)).device
-            zero = torch.tensor(0.0, device=device)
-            return zero, {
+            return zero, zero, zero, zero, {
+                f"pres_{mod}": 0.0,
+                f"type_{mod}": 0.0,
+                f"inst_{mod}": 0.0,
                 f"recon_{mod}": 0.0,
-                f"kl_{mod}": 0.0,
-                f"causal_{mod}": 0.0,
-                f"disent_{mod}": 0.0,
             }
 
-        # Only compute loss over samples where this modality is available
-        def mask_select(key):
+        def sel(key):
             t = outputs[key]
             if avail is not None:
                 return t[avail]
             return t
 
-        x_hat = mask_select(f"x_hat_{mod}")
-        x_tgt = mask_select(f"x_target_{mod}")
-        mu = mask_select(f"mu_{mod}")
-        log_var = mask_select(f"log_var_{mod}")
-        z = mask_select(f"z_{mod}")
-        z_scm = mask_select(f"z_scm_{mod}")
-        im = mask_select("interv_mask") if interv_mask is not None else None
+        pres_logit  = sel(f"pres_logit_{mod}")    # (B',)
+        type_logits = sel(f"type_logits_{mod}")   # (B', 4)
+        inst_logits = sel(f"inst_logits_{mod}")   # (B', 13)
+        x_hat       = sel(f"x_hat_{mod}")         # (B', K, T')
+        x_target    = sel(f"x_target_{mod}")      # (B', K, T')
 
-        L_recon = reconstruction_loss(x_hat, x_tgt)
-        L_kl = kl_divergence(mu, log_var, im)
-        L_causal = scm_consistency_loss(z, z_scm)
-        L_disent = total_correlation_loss(z)
-        L_collapse = posterior_collapse_penalty(log_var)
+        det  = det_labels[avail].float()  if avail is not None else det_labels.float()
+        vtype = type_labels[avail]        if avail is not None else type_labels
+        inst  = inst_labels[avail]        if avail is not None else inst_labels
 
-        total = (
-            L_recon
-            + beta * L_kl
-            + self.current_lambda_causal * L_causal
-            + self.cfg.lambda_disent * L_disent
-            + self.cfg.lambda_collapse * L_collapse
-        )
+        # Presence loss (all samples)
+        L_pres = F.binary_cross_entropy_with_logits(pres_logit, det)
+
+        # Type loss (present vehicles with valid type label only)
+        type_mask = (det == 1) & (vtype >= 0)
+        if type_mask.any():
+            L_type = F.cross_entropy(
+                type_logits[type_mask],
+                vtype[type_mask],
+                weight=self.type_weight,
+            )
+        else:
+            L_type = zero
+
+        # Instance loss (present vehicles with valid instance label only)
+        inst_mask = (det == 1) & (inst >= 0)
+        if inst_mask.any():
+            L_inst = F.cross_entropy(
+                inst_logits[inst_mask],
+                inst[inst_mask],
+                weight=self.inst_weight,
+            )
+        else:
+            L_inst = zero
+
+        # Reconstruction regularizer
+        L_recon = F.mse_loss(x_hat, x_target)
+
         metrics = {
+            f"pres_{mod}":  L_pres.item(),
+            f"type_{mod}":  L_type.item() if torch.is_tensor(L_type) else 0.0,
+            f"inst_{mod}":  L_inst.item() if torch.is_tensor(L_inst) else 0.0,
             f"recon_{mod}": L_recon.item(),
-            f"kl_{mod}": L_kl.item(),
-            f"causal_{mod}": L_causal.item(),
-            f"disent_{mod}": L_disent.item(),
-            f"collapse_{mod}": L_collapse.item(),
         }
-        return total, metrics
+        return L_pres, L_type, L_inst, L_recon, metrics
 
-    def forward(
-        self, outputs: dict, beta_override: float | None = None
-    ) -> tuple[torch.Tensor, dict]:
+    def forward(self, outputs: dict) -> tuple[torch.Tensor, dict]:
         """
         Returns (total_loss, metrics_dict).
         metrics_dict contains detached floats for logging.
-
-        Args:
-            beta_override: If provided, use this beta instead of current_beta.
-                           Pass cfg.beta_end to compute a fixed-beta loss that
-                           is comparable across epochs regardless of annealing
-                           schedule (used for checkpointing).
         """
-        beta = beta_override if beta_override is not None else self.current_beta
-        interv_mask = outputs.get("interv_mask")
+        det_labels  = outputs["detection_label"]
+        type_labels = outputs["vehicle_type"]
+        inst_labels = outputs["instance_type"]
+        device = det_labels.device
+
+        total_pres  = torch.zeros((), device=device)
+        total_type  = torch.zeros((), device=device)
+        total_inst  = torch.zeros((), device=device)
+        total_recon = torch.zeros((), device=device)
         metrics = {}
+        n_sensors = 0
 
-        # --- Per-modality terms ---
-        loss_audio, m_audio = self._modality_terms(outputs, "audio", interv_mask, beta)
-        loss_seismic, m_seismic = self._modality_terms(outputs, "seismic", interv_mask, beta)
-        metrics.update(m_audio)
-        metrics.update(m_seismic)
-
-        # --- Graph sparsity (L1 on lower-triangular adjacency weights) ---
-        L_l1_graph = outputs.get("scm_l1", torch.tensor(0.0))
-        metrics["scm_l1"] = L_l1_graph.item() if torch.is_tensor(L_l1_graph) else float(L_l1_graph)
-
-        _dev = L_l1_graph.device if torch.is_tensor(L_l1_graph) else torch.device("cpu")
-
-        # --- Unknown intervention classifier ---
-        L_interv = torch.zeros((), device=_dev)
-        interv_logits = outputs.get("interv_logits")
-        interv_targets = outputs.get("interv_targets")
-        if interv_logits is not None and interv_targets is not None:
-            L_interv = F.cross_entropy(interv_logits, interv_targets)
-        metrics["interv"] = L_interv.item() if torch.is_tensor(L_interv) else 0.0
-
-        # --- Downstream task losses (summed across modalities) ---
-        # Each modality independently predicts presence and type from its own
-        # z_presence / z_type block, so both encoders receive direct label gradient.
-        vehicle_labels = outputs.get("vehicle_labels")
-        det_labels = outputs.get("det_labels")
-
-        L_task = torch.zeros((), device=_dev)
-        L_det = torch.zeros((), device=_dev)
-
-        for key, val in outputs.items():
-            if key.startswith("vehicle_logits_") and vehicle_labels is not None:
-                # Exclude invalid labels (background=-1, multi=-2)
-                valid = vehicle_labels >= 0
-                if valid.any():
-                    L_task = L_task + F.cross_entropy(val[valid], vehicle_labels[valid])
-            elif key.startswith("det_logits_") and det_labels is not None:
-                L_det = L_det + F.cross_entropy(val, det_labels)
-
-        # Fallback: legacy single-key path (used by downstream Phase 2 trainer)
-        if not any(k.startswith("vehicle_logits_") for k in outputs):
-            vehicle_logits = outputs.get("vehicle_logits")
-            if vehicle_logits is not None and vehicle_labels is not None:
-                valid = vehicle_labels >= 0
-                if valid.any():
-                    L_task = F.cross_entropy(vehicle_logits[valid], vehicle_labels[valid])
-        if not any(k.startswith("det_logits_") for k in outputs):
-            det_logits = outputs.get("det_logits")
-            if det_logits is not None and det_labels is not None:
-                L_det = F.cross_entropy(det_logits, det_labels)
-
-        metrics["task_cls"] = L_task.item() if torch.is_tensor(L_task) else 0.0
-        metrics["task_det"] = L_det.item() if torch.is_tensor(L_det) else 0.0
-
-        # --- Instance classification loss ---
-        instance_labels = outputs.get("instance_labels")
-        L_instance = torch.zeros((), device=_dev)
-        for key, val in outputs.items():
-            if key.startswith("instance_logits_") and instance_labels is not None:
-                valid = instance_labels >= 0
-                if valid.any():
-                    L_instance = L_instance + F.cross_entropy(val[valid], instance_labels[valid])
-        metrics["task_instance"] = L_instance.item() if torch.is_tensor(L_instance) else 0.0
-
-        # --- Temporal consistency loss (horizon-pair path only) ---
-        # Vehicle-semantic dims (presence, type, proximity) should remain
-        # approximately stable across n * horizon_stride_sec seconds.
-        # Dividing by n relaxes the constraint for longer horizons.
-        L_temporal = torch.zeros((), device=_dev)
-        horizon_n = outputs.get("horizon_n")
         for mod in ["audio", "seismic"]:
-            z_t_key = f"z_{mod}"
-            z_tn_key = f"z_tn_{mod}"
-            if z_tn_key not in outputs:
+            if f"pres_logit_{mod}" not in outputs:
                 continue
-            avail = outputs.get(f"avail_{mod}")
-            z_t = outputs[z_t_key]
-            z_tn = outputs[z_tn_key]
-            if avail is not None:
-                z_t = z_t[avail]
-                z_tn = z_tn[avail]
-            # Vehicle semantic slice: all dims before noise block
-            # noise_start = d_z_presence + d_z_type + d_z_instance + d_z_proximity
-            noise_start = (
-                self.cfg.d_z_presence + self.cfg.d_z_type
-                + self.cfg.d_z_instance + self.cfg.d_z_proximity
+            L_pres, L_type, L_inst, L_recon, m = self._modality_losses(
+                outputs, mod, det_labels, type_labels, inst_labels, device
             )
-            z_veh_t  = z_t[:, :noise_start]
-            z_veh_tn = z_tn[:, :noise_start]
-            sq_err = (z_veh_t - z_veh_tn).pow(2).mean(dim=-1)  # (B',)
-            if horizon_n is not None:
-                n_float = horizon_n[avail].float() if avail is not None else horizon_n.float()
-                sq_err = sq_err / n_float.clamp(min=1.0)
-            L_temporal = L_temporal + sq_err.mean()
-        metrics["temporal"] = L_temporal.item()
+            total_pres  = total_pres  + L_pres
+            total_type  = total_type  + L_type
+            total_inst  = total_inst  + L_inst
+            total_recon = total_recon + L_recon
+            metrics.update(m)
+            n_sensors += 1
+
+        if n_sensors > 1:
+            total_pres  = total_pres  / n_sensors
+            total_type  = total_type  / n_sensors
+            total_inst  = total_inst  / n_sensors
+            total_recon = total_recon / n_sensors
 
         total = (
-            loss_audio
-            + loss_seismic
-            + self.current_lambda_l1 * L_l1_graph
-            + self.cfg.lambda_interv * L_interv
-            + self.cfg.lambda_task * (L_task + L_det + L_instance)
-            + self.current_lambda_causal * L_temporal  # reuse causal weight for temporal
+            total_pres
+            + self.cfg.lambda_type  * total_type
+            + self.cfg.lambda_inst  * total_inst
+            + self.cfg.lambda_recon * total_recon
         )
-        metrics["total"] = total.item()
-        metrics["beta"] = beta
-        metrics["l1_w"] = self.current_lambda_l1
-        metrics["causal_w"] = self.current_lambda_causal
+
+        metrics["loss_pres"]  = total_pres.item()
+        metrics["loss_type"]  = total_type.item()
+        metrics["loss_inst"]  = total_inst.item()
+        metrics["loss_recon"] = total_recon.item()
+        metrics["total"]      = total.item()
         return total, metrics

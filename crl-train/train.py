@@ -5,7 +5,6 @@ Usage:
     python train.py --phase crl   --data-dir ../data/parsed/train --val-dir ../data/parsed/val
     python train.py --phase downstream ...
     python train.py --phase full  ...
-    python train.py --phase eval  ...    # diagnostic eval only
 
 Pre-requisite: run  python old/split_data.py  first to split the parquet
 files into  data/parsed/{train,val,test_iobt}/
@@ -28,13 +27,10 @@ from torch.utils.data import DataLoader
 from crl_vehicle.config import CRLConfig, MODALITIES
 from crl_vehicle.data.dataset import (
     SensorDataset,
-    MultiHorizonPairDataset,
     collate_single,
-    collate_pairs,
 )
-from crl_vehicle.losses.combined import CombinedLoss
+from crl_vehicle.losses.combined import SupervisedMultiTaskLoss
 from training.trainer import CRLModel, Trainer
-from training.eval import run_full_eval
 
 
 # ---------------------------------------------------------------------------
@@ -59,58 +55,25 @@ def build_loaders(
     data_dir: str,
     val_dir: str,
     config: CRLConfig,
-    include_pairs: bool = True,
-) -> tuple[DataLoader, DataLoader | None, DataLoader]:
+) -> tuple[DataLoader, DataLoader]:
     train_ds = SensorDataset(data_dir, config, is_train=True)
-    val_ds = SensorDataset(val_dir, config, is_train=False)
+    val_ds   = SensorDataset(val_dir,  config, is_train=False)
 
-    train_loader = DataLoader(
-        train_ds,
+    loader_kwargs = dict(
         batch_size=config.batch_size,
-        shuffle=True,
         num_workers=config.num_workers,
         collate_fn=collate_single,
         pin_memory=True,
-        drop_last=True,
         prefetch_factor=4,
         persistent_workers=True,
+    )
+    train_loader = DataLoader(
+        train_ds, shuffle=True, drop_last=True, **loader_kwargs
     )
     val_loader = DataLoader(
-        val_ds,
-        batch_size=config.batch_size,
-        shuffle=False,
-        num_workers=config.num_workers,
-        collate_fn=collate_single,
-        pin_memory=True,
-        drop_last=False,
-        prefetch_factor=4,
-        persistent_workers=True,
+        val_ds, shuffle=False, drop_last=False, **loader_kwargs
     )
-
-    pair_loader = None
-    if include_pairs:
-        pair_ds = MultiHorizonPairDataset(train_ds)
-        if len(pair_ds) > 0:
-            pair_loader = DataLoader(
-                pair_ds,
-                batch_size=config.batch_size,
-                shuffle=True,
-                num_workers=config.num_workers,
-                collate_fn=collate_pairs,
-                pin_memory=True,
-                drop_last=True,
-                prefetch_factor=4,
-                persistent_workers=True,
-            )
-            print(
-                f"  Pair dataset: {len(pair_ds)} multi-horizon pairs (n=1..{config.n_horizons})."
-            )
-        else:
-            print(
-                "  Warning: no multi-horizon pairs found — unknown curriculum disabled."
-            )
-
-    return train_loader, pair_loader, val_loader
+    return train_loader, val_loader
 
 
 # ---------------------------------------------------------------------------
@@ -121,10 +84,10 @@ def build_loaders(
 def parse_args():
     p = argparse.ArgumentParser(description="CRL Vehicle Detection Pipeline")
     p.add_argument(
-        "--phase", choices=["crl", "downstream", "full", "eval"], default="full"
+        "--phase", choices=["crl", "downstream", "full"], default="full"
     )
     p.add_argument("--data-dir", default="../data_files/parsed/train")
-    p.add_argument("--val-dir", default="../data_files/parsed/val")
+    p.add_argument("--val-dir",  default="../data_files/parsed/val")
     p.add_argument(
         "--sensors",
         nargs="+",
@@ -132,15 +95,12 @@ def parse_args():
         choices=MODALITIES,
         help="Sensor modalities to use (default: all)",
     )
-    p.add_argument("--crl-epochs", type=int, default=50)
-    p.add_argument("--ds-epochs", type=int, default=50)
+    p.add_argument("--crl-epochs", type=int, default=100)
+    p.add_argument("--ds-epochs",  type=int, default=50)
     p.add_argument("--batch-size", type=int, default=128)
-    p.add_argument("--lr", type=float, default=None)
-    p.add_argument("--num-workers", type=int, default=None)
-    p.add_argument("--save-dir", default="./saved_crl")
-    p.add_argument(
-        "--ssm-backend", default="transformer", choices=["transformer", "mamba"]
-    )
+    p.add_argument("--lr",         type=float, default=None)
+    p.add_argument("--num-workers",type=int,   default=None)
+    p.add_argument("--save-dir",   default="./saved_crl")
     p.add_argument(
         "--steps-per-epoch",
         type=int,
@@ -152,10 +112,9 @@ def parse_args():
 
 def main():
     args = parse_args()
-    device = get_device()
+    device   = get_device()
     save_dir = Path(args.save_dir)
 
-    # Build config (apply CLI overrides)
     cfg = CRLConfig()
     if args.batch_size:
         cfg.batch_size = args.batch_size
@@ -172,25 +131,28 @@ def main():
     sensors = args.sensors or MODALITIES
     print(f"Sensors: {sensors}")
 
-    # Build data loaders
-    train_loader, pair_loader, val_loader = build_loaders(
-        args.data_dir, args.val_dir, cfg, include_pairs=True
-    )
+    train_loader, val_loader = build_loaders(args.data_dir, args.val_dir, cfg)
 
-    # Build model
     model = CRLModel(cfg, sensors=sensors)
     model.to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
 
-    loss_fn = CombinedLoss(cfg)
+    loss_fn = SupervisedMultiTaskLoss(cfg)
+    loss_fn.to(device)
     trainer = Trainer(model, loss_fn, cfg, device, save_dir)
 
     meta_path = save_dir / "meta.json"
 
     if args.phase in ("crl", "full"):
-        trainer.train_crl(train_loader, pair_loader, val_loader, cfg.n_epochs)
-        meta = {"sensors": sensors, "d_z": cfg.d_z, "n_epochs": cfg.n_epochs}
+        trainer.train_crl(train_loader, val_loader, cfg.n_epochs)
+        meta = {
+            "sensors": sensors,
+            "d_pres": cfg.d_pres,
+            "d_type": cfg.d_type,
+            "d_inst": cfg.d_inst,
+            "n_epochs": cfg.n_epochs,
+        }
         save_dir.mkdir(parents=True, exist_ok=True)
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
@@ -207,98 +169,6 @@ def main():
                 f"No CRL checkpoint at {ckpt}. Run --phase crl first."
             )
 
-        # --- Diagnostic: check whether z_pres (mu) separates detection labels ---
-        print("\n=== z_pres Diagnostic (val set) ===")
-        model.eval()
-        ref_sensor = "seismic" if "seismic" in sensors else sensors[0]
-        pres_vals_pos, pres_vals_neg = [], []
-        with torch.no_grad():
-            for batch in val_loader:
-                x = batch[f"x_{ref_sensor}"].to(device)
-                det = batch["detection_label"]
-                _, mu, _, _ = model.encode_modality(ref_sensor, x)
-                enc = model.encoders[ref_sensor]
-                z_pres, _, _, _, _ = enc.split_z_raw(mu)
-                z_pres_cpu = z_pres.squeeze(-1).cpu()
-                pres_vals_pos.extend(z_pres_cpu[det == 1].tolist())
-                pres_vals_neg.extend(z_pres_cpu[det == 0].tolist())
-        if pres_vals_pos and pres_vals_neg:
-            import statistics
-
-            mean_pos = statistics.mean(pres_vals_pos)
-            mean_neg = statistics.mean(pres_vals_neg)
-            std_pos = statistics.stdev(pres_vals_pos) if len(pres_vals_pos) > 1 else 0.0
-            std_neg = statistics.stdev(pres_vals_neg) if len(pres_vals_neg) > 1 else 0.0
-            sep = abs(mean_pos - mean_neg) / (0.5 * (std_pos + std_neg) + 1e-8)
-            print(
-                f"  vehicle present  : n={len(pres_vals_pos):5d}  mu={mean_pos:+.4f}  std={std_pos:.4f}"
-            )
-            print(
-                f"  vehicle absent   : n={len(pres_vals_neg):5d}  mu={mean_neg:+.4f}  std={std_neg:.4f}"
-            )
-            print(f"  separation (d')  : {sep:.3f}  (>1 = usable signal, <0.5 = weak)")
-        else:
-            print("  WARNING: one detection class absent from val set — check labels.")
-
-        # --- Diagnostic: check whether z_type (mu) separates vehicle type labels ---
-        print("\n=== z_type Diagnostic (val set) ===")
-        CLASS_NAMES = {0: "pedestrian", 1: "light", 2: "sport", 3: "utility"}
-        type_vals: dict[int, list[list[float]]] = {k: [] for k in CLASS_NAMES}  # cls -> list of d_z_type vectors
-        with torch.no_grad():
-            for batch in val_loader:
-                x = batch[f"x_{ref_sensor}"].to(device)
-                vtype = batch["vehicle_type"]
-                _, mu, _, _ = model.encode_modality(ref_sensor, x)
-                enc = model.encoders[ref_sensor]
-                _, z_type_raw, _, _, _ = enc.split_z_raw(mu)
-                z_type_cpu = z_type_raw.cpu()
-                for cls_idx in CLASS_NAMES:
-                    mask = vtype == cls_idx
-                    if mask.any():
-                        type_vals[cls_idx].extend(z_type_cpu[mask].tolist())
-        import statistics as _stats
-        n_type_dims = len(type_vals[0][0]) if type_vals[0] else 4
-        present_classes = [k for k in CLASS_NAMES if type_vals[k]]
-        if len(present_classes) < 2:
-            print("  WARNING: fewer than 2 vehicle classes in val set — cannot compute separation.")
-        else:
-            # Per-dim stats
-            per_dim_means: dict[int, list[float]] = {}   # cls -> [mu_d0, mu_d1, ...]
-            per_dim_stds:  dict[int, list[float]] = {}
-            for cls_idx in present_classes:
-                vecs = type_vals[cls_idx]
-                per_dim_means[cls_idx] = [_stats.mean(v[d] for v in vecs) for d in range(n_type_dims)]
-                per_dim_stds[cls_idx]  = [
-                    _stats.stdev(v[d] for v in vecs) if len(vecs) > 1 else 0.0
-                    for d in range(n_type_dims)
-                ]
-                n = len(vecs)
-                means_str = "  ".join(f"{per_dim_means[cls_idx][d]:+.3f}/{per_dim_stds[cls_idx][d]:.3f}" for d in range(n_type_dims))
-                print(f"  {CLASS_NAMES[cls_idx]:>10} (n={n:6d}): [{means_str}]")
-
-            # Max pairwise d' per dimension
-            max_dp_per_dim = []
-            for d in range(n_type_dims):
-                best_dp = 0.0
-                for i, ci in enumerate(present_classes):
-                    for cj in present_classes[i + 1:]:
-                        mu_i = per_dim_means[ci][d]
-                        mu_j = per_dim_means[cj][d]
-                        si   = per_dim_stds[ci][d]
-                        sj   = per_dim_stds[cj][d]
-                        dp   = abs(mu_i - mu_j) / (0.5 * (si + sj) + 1e-8)
-                        best_dp = max(best_dp, dp)
-                max_dp_per_dim.append(best_dp)
-
-            print(f"\n  Max pairwise d' per z_type dim: " + "  ".join(f"dim{d}={v:.3f}" for d, v in enumerate(max_dp_per_dim)))
-            overall_max = max(max_dp_per_dim)
-            if overall_max >= 1.0:
-                print(f"  Signal: STRONG (max d'={overall_max:.3f} ≥ 1.0) — z_type encodes class, investigate head/weights")
-            elif overall_max >= 0.5:
-                print(f"  Signal: WEAK   (max d'={overall_max:.3f} in [0.5, 1.0)) — marginal separation")
-            else:
-                print(f"  Signal: NONE   (max d'={overall_max:.3f} < 0.5) — z_type has no class signal; fix is upstream in CRL")
-
         trainer.train_downstream(train_loader, val_loader, args.ds_epochs)
 
         for sensor, head in model.det_heads.items():
@@ -306,21 +176,6 @@ def main():
                 head.state_dict(),
                 save_dir / f"det_head_{sensor}_final.pth",
             )
-
-    if args.phase == "eval":
-        ckpt = save_dir / "crl_best.pth"
-        if not ckpt.exists():
-            raise FileNotFoundError(f"No checkpoint at {ckpt}")
-        model.load_state_dict(torch.load(ckpt, map_location=device, weights_only=True))
-        primary = "seismic" if "seismic" in sensors else sensors[0]
-        metrics = run_full_eval(
-            model, train_loader, val_loader, device, primary_sensor=primary
-        )
-        print("\n=== Evaluation ===")
-        for k, v in sorted(metrics.items()):
-            print(f"  {k}: {v:.4f}")
-        with open(save_dir / "eval_metrics.json", "w") as f:
-            json.dump(metrics, f, indent=2)
 
 
 if __name__ == "__main__":

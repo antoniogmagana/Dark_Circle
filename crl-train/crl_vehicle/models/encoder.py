@@ -1,134 +1,136 @@
 """
-CausalEncoder
+MultiTaskEncoder
 
-Maps SSM output (B, T', d_model) to a structured latent z with five
-semantically-defined blocks:
+Maps SSM output (B, T', d_model) to three task-specific embeddings via
+separate projection branches. This eliminates gradient competition between
+differently-sized latent blocks (e.g. 1-dim presence vs 8-dim instance).
 
-    z_presence  (d_z_presence=1)  — is a vehicle present?
-    z_type      (d_z_type=4)      — which vehicle category?
-    z_instance  (d_z_instance=8)  — which specific vehicle instance?
-    z_proximity (d_z_proximity=1) — how close is it?
-    z_noise     (d_z_noise=4)     — unstructured nuisance / sensor noise
+    e_pres  (d_pres)  — vehicle presence embedding
+    e_type  (d_type)  — vehicle type embedding
+    e_inst  (d_inst)  — vehicle instance embedding
 
-Total d_z = 18.  Instantiate one per modality — each modality encodes
-the same causal variables independently.
+Each branch receives the same attention-pooled SSM context vector but has
+independent weights. Single linear projections (no ReLU) keep embeddings
+linearly separable for downstream probe training.
 
-Reparameterisation: VAE-style (mu, log_var) → z.
-split_z()  decomposes z into the five semantic blocks.
+CRLHeads: lightweight classification heads used only during CRL training to
+provide task supervision. These are discarded after backbone training.
 """
 
 import torch
 import torch.nn as nn
 
 
-class CausalEncoder(nn.Module):
+class AttentionPool(nn.Module):
     """
+    Soft attention pooling over a sequence dimension.
+    Linear(d_model → 1) → softmax over T' → weighted sum → (B, d_model).
+    """
+
+    def __init__(self, d_model: int):
+        super().__init__()
+        self.score = nn.Linear(d_model, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: (B, T', d_model)
+        Returns: (B, d_model) context vector
+        """
+        attn = torch.softmax(self.score(x), dim=1)   # (B, T', 1)
+        return (attn * x).sum(dim=1)                 # (B, d_model)
+
+
+class MultiTaskEncoder(nn.Module):
+    """
+    Branched encoder producing three independent task embeddings.
+
     Args:
-        d_model      : SSM output dimension (= CRLConfig.d_model)
-        d_z_presence : latent dim for vehicle presence (default 1)
-        d_z_type     : latent dim for vehicle type (default 4)
-        d_z_proximity: latent dim for proximity (default 1)
-        d_z_noise    : latent dim for nuisance factors (default 4)
+        d_model : SSM output dimension (= CRLConfig.d_model)
+        d_pres  : presence embedding dimension
+        d_type  : type embedding dimension
+        d_inst  : instance embedding dimension
     """
 
     def __init__(
         self,
         d_model: int,
-        d_z_presence: int = 1,
-        d_z_type: int = 4,
-        d_z_instance: int = 8,
-        d_z_proximity: int = 1,
-        d_z_noise: int = 4,
+        d_pres: int = 16,
+        d_type: int = 32,
+        d_inst: int = 64,
     ):
         super().__init__()
-        self.d_z_presence = d_z_presence
-        self.d_z_type = d_z_type
-        self.d_z_instance = d_z_instance
-        self.d_z_proximity = d_z_proximity
-        self.d_z_noise = d_z_noise
-        self.d_z = d_z_presence + d_z_type + d_z_instance + d_z_proximity + d_z_noise
+        self.d_pres = d_pres
+        self.d_type = d_type
+        self.d_inst = d_inst
 
-        # Soft attention pooling: collapse T' timesteps → single context vector
-        # Linear(d_model → 1) gives a scalar score per timestep; softmax over T'.
-        self.attn_score = nn.Linear(d_model, 1)
-
-        # Project context vector to (mu, log_var) for reparameterisation
-        self.proj = nn.Sequential(
-            nn.Linear(d_model, d_model),
-            nn.LayerNorm(d_model),
-            nn.GELU(),
-            nn.Linear(d_model, 2 * self.d_z),
-        )
-
-        # Semantic index slices for split_z()
-        s0 = 0
-        s1 = s0 + d_z_presence
-        s2 = s1 + d_z_type
-        s3 = s2 + d_z_instance
-        s4 = s3 + d_z_proximity
-        s5 = s4 + d_z_noise
-        self.presence_idx  = slice(s0, s1)
-        self.type_idx      = slice(s1, s2)
-        self.instance_idx  = slice(s2, s3)
-        self.proximity_idx = slice(s3, s4)
-        self.noise_idx     = slice(s4, s5)
+        self.attn_pool = AttentionPool(d_model)
+        self.proj_pres = nn.Linear(d_model, d_pres)
+        self.proj_type = nn.Linear(d_model, d_type)
+        self.proj_inst = nn.Linear(d_model, d_inst)
 
     def forward(
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        x : (B, T', d_model) — SSM output
+        x: (B, T', d_model) — SSM output
 
         Returns:
-            z       : (B, d_z)   reparameterised sample
-            mu      : (B, d_z)   posterior mean
-            log_var : (B, d_z)   posterior log-variance
+            e_pres : (B, d_pres) presence embedding
+            e_type : (B, d_type) type embedding
+            e_inst : (B, d_inst) instance embedding
         """
-        # Attention pooling over T' steps
-        scores = self.attn_score(x)           # (B, T', 1)
-        attn = torch.softmax(scores, dim=1)   # (B, T', 1)
-        ctx = (attn * x).sum(dim=1)           # (B, d_model)
+        h = self.attn_pool(x)                # (B, d_model)
+        return self.proj_pres(h), self.proj_type(h), self.proj_inst(h)
 
-        out = self.proj(ctx)                  # (B, 2*d_z)
-        mu, log_var = out.chunk(2, dim=-1)    # each (B, d_z)
 
-        # Clamp log_var to prevent KL explosion / posterior collapse
-        log_var = log_var.clamp(-6.0, 4.0)
+class CRLHeads(nn.Module):
+    """
+    Lightweight classification heads used only during CRL backbone training.
+    Discarded after CRL phase — downstream uses VehicleDetectionHead instead.
 
-        # Reparameterise
-        std = (0.5 * log_var).exp()
-        eps = torch.randn_like(std)
-        z = mu + eps * std                    # (B, d_z)
+    These are kept separate from downstream heads so that:
+    1. Downstream heads can be reset and retrained without affecting backbone.
+    2. CRL training uses simpler linear heads (lower risk of overfitting).
 
-        return z, mu, log_var
+    Args:
+        d_pres      : presence embedding dimension
+        d_type      : type embedding dimension
+        d_inst      : instance embedding dimension
+        n_type      : number of vehicle type classes (default 4)
+        n_inst      : number of vehicle instance classes (default 13)
+    """
 
-    def split_z(self, z: torch.Tensor) -> tuple:
+    def __init__(
+        self,
+        d_pres: int = 16,
+        d_type: int = 32,
+        d_inst: int = 64,
+        n_type: int = 4,
+        n_inst: int = 13,
+    ):
+        super().__init__()
+        self.pres_cls = nn.Linear(d_pres, 1)        # BCE: vehicle present?
+        self.type_cls = nn.Linear(d_type, n_type)   # CE: which type?
+        self.inst_cls = nn.Linear(d_inst, n_inst)   # CE: which instance?
+
+    def forward(
+        self,
+        e_pres: torch.Tensor,
+        e_type: torch.Tensor,
+        e_inst: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Decompose z into its five semantic blocks.
+        e_pres: (B, d_pres)
+        e_type: (B, d_type)
+        e_inst: (B, d_inst)
 
-        Returns (z_presence, z_type, z_instance, z_proximity, z_noise) where:
-            z_presence  : (B, 1)  — sigmoid → [0, 1]
-            z_type      : (B, 4)  — softmax → probability simplex
-            z_instance  : (B, 8)  — softmax → probability simplex over 13 classes
-            z_proximity : (B, 1)  — sigmoid → [0, 1]
-            z_noise     : (B, 4)  — unconstrained
+        Returns:
+            pres_logit  : (B,)        for BCEWithLogitsLoss
+            type_logits : (B, n_type) for CrossEntropyLoss
+            inst_logits : (B, n_inst) for CrossEntropyLoss
         """
-        z_presence  = torch.sigmoid(z[:, self.presence_idx])
-        z_type      = torch.softmax(z[:, self.type_idx], dim=-1)
-        z_instance  = torch.softmax(z[:, self.instance_idx], dim=-1)
-        z_proximity = torch.sigmoid(z[:, self.proximity_idx])
-        z_noise     = z[:, self.noise_idx]
-        return z_presence, z_type, z_instance, z_proximity, z_noise
-
-    def split_z_raw(self, z: torch.Tensor) -> tuple:
-        """
-        Like split_z() but returns raw logits (no sigmoid/softmax).
-        Use this when passing to a downstream linear head to avoid
-        double-squashing.
-        """
-        z_presence  = z[:, self.presence_idx]
-        z_type      = z[:, self.type_idx]
-        z_instance  = z[:, self.instance_idx]
-        z_proximity = z[:, self.proximity_idx]
-        z_noise     = z[:, self.noise_idx]
-        return z_presence, z_type, z_instance, z_proximity, z_noise
+        return (
+            self.pres_cls(e_pres).squeeze(-1),
+            self.type_cls(e_type),
+            self.inst_cls(e_inst),
+        )

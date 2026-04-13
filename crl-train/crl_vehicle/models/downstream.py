@@ -2,11 +2,11 @@
 VehicleDetectionHead
 
 Downstream heads for vehicle presence detection, type classification, and
-instance classification.  Operate on raw (pre-sigmoid/softmax) z slices
-from CausalEncoder.split_z_raw().
+instance classification. Operate on task-specific embeddings produced by
+MultiTaskEncoder — one embedding per task, per modality.
 
 Design principle: each modality gets its own head; the fusion strategy
-(voting, concat, or any-available) is handled in the Trainer.
+(voting or any-available) is handled in the Trainer.
 
 PresenceHead   : binary detection         — BCEWithLogitsLoss
 TypeHead       : 4-class vehicle type     — CrossEntropyLoss
@@ -20,100 +20,96 @@ import torch.nn as nn
 class PresenceHead(nn.Module):
     """
     Binary vehicle presence classifier.
-    Operates on z_presence (raw logit, shape (B, d_z_presence)).
+    Operates on e_pres (shape (B, d_pres)).
 
-    Single linear layer — the latent block should already encode presence
-    after CRL pre-training; a deeper head risks overfitting the linear probe.
+    Single linear layer — the presence embedding should already encode
+    presence after CRL pre-training; a deeper head risks overfitting.
     """
 
-    def __init__(self, d_z_presence: int = 1):
+    def __init__(self, d_pres: int = 16):
         super().__init__()
-        self.head = nn.Linear(d_z_presence, 1)
+        self.head = nn.Linear(d_pres, 1)
 
-    def forward(self, z_presence: torch.Tensor) -> torch.Tensor:
+    def forward(self, e_pres: torch.Tensor) -> torch.Tensor:
         """Returns (B,) logit — use BCEWithLogitsLoss."""
-        return self.head(z_presence).squeeze(-1)
+        return self.head(e_pres).squeeze(-1)
 
 
 class TypeHead(nn.Module):
     """
     4-class vehicle type classifier.
-    Operates on z_type (raw logits, shape (B, d_z_type)).
-
-    One hidden layer to allow mild non-linearity while remaining a
-    "nearly linear" probe during the linear probe evaluation phase.
+    Operates on e_type (shape (B, d_type)).
     """
 
-    def __init__(self, d_z_type: int = 4, n_classes: int = 4):
+    def __init__(self, d_type: int = 32, n_classes: int = 4):
         super().__init__()
         self.head = nn.Sequential(
-            nn.Linear(d_z_type, 32),
+            nn.Linear(d_type, 32),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(32, n_classes),
         )
 
-    def forward(self, z_type: torch.Tensor) -> torch.Tensor:
+    def forward(self, e_type: torch.Tensor) -> torch.Tensor:
         """Returns (B, n_classes) logits — use CrossEntropyLoss."""
-        return self.head(z_type)
+        return self.head(e_type)
 
 
 class InstanceHead(nn.Module):
     """
     13-class vehicle instance classifier.
-    Operates on z_instance (raw logits, shape (B, d_z_instance)).
-    Independent of z_type by design — supervised separately.
+    Operates on e_inst (shape (B, d_inst)).
     """
 
-    def __init__(self, d_z_instance: int = 8, n_instance_classes: int = 13):
+    def __init__(self, d_inst: int = 64, n_instance_classes: int = 13):
         super().__init__()
         self.head = nn.Sequential(
-            nn.Linear(d_z_instance, 32),
+            nn.Linear(d_inst, 64),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(32, n_instance_classes),
+            nn.Linear(64, n_instance_classes),
         )
 
-    def forward(self, z_instance: torch.Tensor) -> torch.Tensor:
+    def forward(self, e_inst: torch.Tensor) -> torch.Tensor:
         """Returns (B, n_instance_classes) logits — use CrossEntropyLoss."""
-        return self.head(z_instance)
+        return self.head(e_inst)
 
 
 class VehicleDetectionHead(nn.Module):
     """
-    Wrapper holding all three heads for a single modality.
+    Wrapper holding all three downstream heads for a single modality.
 
     Args:
-        d_z_presence      : size of z_presence block
-        d_z_type          : size of z_type block
-        d_z_instance      : size of z_instance block
+        d_pres            : presence embedding dimension
+        d_type            : type embedding dimension
+        d_inst            : instance embedding dimension
         n_classes         : number of vehicle type classes (default 4)
         n_instance_classes: number of vehicle instance classes (default 13)
     """
 
     def __init__(
         self,
-        d_z_presence: int = 1,
-        d_z_type: int = 4,
-        d_z_instance: int = 8,
+        d_pres: int = 16,
+        d_type: int = 32,
+        d_inst: int = 64,
         n_classes: int = 4,
         n_instance_classes: int = 13,
     ):
         super().__init__()
-        self.presence      = PresenceHead(d_z_presence)
-        self.type_head     = TypeHead(d_z_type, n_classes)
-        self.instance_head = InstanceHead(d_z_instance, n_instance_classes)
+        self.presence      = PresenceHead(d_pres)
+        self.type_head     = TypeHead(d_type, n_classes)
+        self.instance_head = InstanceHead(d_inst, n_instance_classes)
 
     def forward(
         self,
-        z_presence: torch.Tensor,
-        z_type: torch.Tensor,
-        z_instance: torch.Tensor,
+        e_pres: torch.Tensor,
+        e_type: torch.Tensor,
+        e_inst: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        z_presence : (B, d_z_presence)   raw presence logit block
-        z_type     : (B, d_z_type)       raw type logit block
-        z_instance : (B, d_z_instance)   raw instance logit block
+        e_pres: (B, d_pres)  presence embedding
+        e_type: (B, d_type)  type embedding
+        e_inst: (B, d_inst)  instance embedding
 
         Returns:
             presence_logit  : (B,)               for BCEWithLogitsLoss
@@ -121,7 +117,7 @@ class VehicleDetectionHead(nn.Module):
             instance_logits : (B, n_inst_classes) for CrossEntropyLoss
         """
         return (
-            self.presence(z_presence),
-            self.type_head(z_type),
-            self.instance_head(z_instance),
+            self.presence(e_pres),
+            self.type_head(e_type),
+            self.instance_head(e_inst),
         )
