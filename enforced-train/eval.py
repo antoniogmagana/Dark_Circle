@@ -313,7 +313,7 @@ def evaluate_best_ensemble(mode_dir):
                 meta = torch.load(meta_path, map_location="cpu", weights_only=False)
             except Exception:
                 continue
-            val_f1 = meta.get("val_f1", 0.0)
+            val_f1 = meta.get("val_f1", -1.0)
             if val_f1 > best_val_f1:
                 best_val_f1 = val_f1
                 best_run_dir = run_dir
@@ -432,8 +432,9 @@ def evaluate_best_ensemble(mode_dir):
     if not torch.equal(seismic_labels, audio_labels):
         print(
             "  [!] Label mismatch between seismic and audio test sets. "
-            "Ensemble results may be unreliable."
+            "Cannot produce a valid ensemble. Skipping."
         )
+        return
 
     all_labels = seismic_labels.numpy()
     total_samples = len(all_labels)
