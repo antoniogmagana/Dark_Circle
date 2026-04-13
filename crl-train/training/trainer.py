@@ -438,6 +438,7 @@ class Trainer:
 
             ref = "seismic" if "seismic" in self.model.sensors else self.model.sensors[0]
 
+            n_train_steps = 0
             for batch in train_loader:
                 x_ref  = batch[f"x_{ref}"].to(self.device)
                 vtype  = batch["vehicle_type"].to(self.device)
@@ -455,7 +456,7 @@ class Trainer:
                 det_2c = torch.stack([-pres_logit, pres_logit], dim=1)
                 det_loss = F.cross_entropy(det_2c, det, weight=det_weight)
 
-                type_mask = vtype >= 0
+                type_mask = (det == 1) & (vtype >= 0)
                 cls_loss = torch.tensor(0.0, device=self.device)
                 if type_mask.any():
                     cls_loss = F.cross_entropy(
@@ -478,6 +479,9 @@ class Trainer:
                 n_cls      += int(type_mask.any())
                 epoch_inst += inst_loss.item() if inst_mask.any() else 0.0
                 n_inst     += int(inst_mask.any())
+                n_train_steps += 1
+                if self.cfg.steps_per_epoch and n_train_steps >= self.cfg.steps_per_epoch:
+                    break
 
             val_m = self._eval_downstream(val_loader)
             head_sched.step(-val_m["val_cls_f1"])
@@ -527,7 +531,11 @@ class Trainer:
             )
         diag_dir = self.save_dir / "diagnostics"
         print(f"  Generating confusion matrices → {diag_dir}/")
-        df_preds = sample_level_eval(self.model, val_loader, self.device, primary_sensor=ref)
+        df_preds = sample_level_eval(
+            self.model, val_loader, self.device,
+            primary_sensor=ref,
+            max_batches=self.cfg.steps_per_epoch,
+        )
         plot_confusion_matrices(df_preds, diag_dir)
 
     @torch.no_grad()
@@ -541,7 +549,9 @@ class Trainer:
 
         ref = "seismic" if "seismic" in self.model.sensors else self.model.sensors[0]
 
-        for batch in loader:
+        for n_eval, batch in enumerate(loader):
+            if self.cfg.steps_per_epoch and n_eval >= self.cfg.steps_per_epoch:
+                break
             x_ref  = batch[f"x_{ref}"].to(self.device)
             vtype  = batch["vehicle_type"]
             inst   = batch["instance_type"]
@@ -555,7 +565,7 @@ class Trainer:
             det_pred.extend((pres_logit > 0).long().cpu().tolist())
             det_true.extend(det.tolist())
 
-            type_mask = vtype >= 0
+            type_mask = (det == 1) & (vtype >= 0)
             if type_mask.any():
                 cls_pred.extend(
                     type_logits[type_mask.to(self.device)].argmax(1).cpu().tolist()

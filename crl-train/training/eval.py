@@ -164,6 +164,7 @@ def sample_level_eval(
     loader: DataLoader,
     device: torch.device,
     primary_sensor: str = "seismic",
+    max_batches: int | None = None,
 ) -> pd.DataFrame:
     """
     Run inference over *loader* using downstream det_heads and return a
@@ -175,11 +176,15 @@ def sample_level_eval(
         pred_det    : model detection prediction (0/1)
         true_type   : ground-truth vehicle type (-2/-1=invalid, 0-3=class)
         pred_type   : model type prediction; -1 when true_type invalid
+
+    max_batches: cap on batches to evaluate (None = full loader).
     """
     model.eval()
     rows = []
 
-    for batch in loader:
+    for i, batch in enumerate(loader):
+        if max_batches is not None and i >= max_batches:
+            break
         x         = batch[f"x_{primary_sensor}"].to(device)
         seg_ids   = batch["segment_id"].tolist()
         intervs   = batch["interv_idx"].tolist()
@@ -192,14 +197,14 @@ def sample_level_eval(
         pred_det      = (pres_logit > 0).long().cpu().tolist()
         pred_type_all = type_logits.argmax(dim=1).cpu().tolist()
 
-        for i in range(len(seg_ids)):
+        for j in range(len(seg_ids)):
             rows.append({
-                "segment_id": seg_ids[i],
-                "interv_idx": intervs[i],
-                "true_det":   true_det[i],
-                "pred_det":   pred_det[i],
-                "true_type":  true_type[i],
-                "pred_type":  pred_type_all[i] if true_type[i] >= 0 else -1,
+                "segment_id": seg_ids[j],
+                "interv_idx": intervs[j],
+                "true_det":   true_det[j],
+                "pred_det":   pred_det[j],
+                "true_type":  true_type[j],
+                "pred_type":  pred_type_all[j] if true_type[j] >= 0 else -1,
             })
 
     model.train()
