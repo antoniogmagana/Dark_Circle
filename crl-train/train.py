@@ -138,7 +138,7 @@ def main():
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
 
-    loss_fn = SupervisedMultiTaskLoss(cfg)
+    loss_fn = SupervisedMultiTaskLoss(cfg, scm=model.scm)
     loss_fn.to(device)
     trainer = Trainer(model, loss_fn, cfg, device, save_dir)
 

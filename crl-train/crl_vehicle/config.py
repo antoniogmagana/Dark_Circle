@@ -221,11 +221,12 @@ class CRLConfig:
     early_stop_patience:  int   = 25
 
     # Loss weights
-    lambda_type:   float = 2.0    # weight on vehicle type CE loss
-    lambda_inst:   float = 1.0    # weight on instance CE loss
-    lambda_recon:  float = 0.1    # weight on reconstruction regularizer
-    lambda_tc:     float = 0.5    # weight on total-correlation disentanglement penalty
-                                  # applied to e_type and e_pres to reduce z_veh noise leakage
+    lambda_type:      float = 2.0    # weight on vehicle type CE loss
+    lambda_inst:      float = 1.0    # weight on instance CE loss
+    lambda_recon:     float = 0.1    # weight on reconstruction regularizer
+    lambda_tc:        float = 0.5    # weight on intra-z_veh TC penalty (e_pres × e_type)
+    lambda_tc_cross:  float = 0.5    # weight on cross-block TC penalty ([e_pres, e_type, e_inst])
+    lambda_causal:    float = 1.0    # weight on SCM consistency loss (intervention invariance)
 
     # Data windowing (controls sliding-window stride in SensorDataset)
     horizon_stride_sec: float = 0.1   # seconds between successive anchor windows

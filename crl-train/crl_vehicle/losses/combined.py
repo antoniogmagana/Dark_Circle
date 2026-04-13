@@ -4,14 +4,17 @@ SupervisedMultiTaskLoss
 Three supervised losses applied to the task-specific embeddings produced by
 MultiTaskEncoder + CRLHeads during backbone pre-training:
 
-    L_pres  = BCE(pres_logit, detection_label)         — all samples
-    L_type  = CE(type_logits, vehicle_type)            — masked: present AND type >= 0
-    L_inst  = CE(inst_logits, instance_type)           — masked: present AND inst >= 0
-    L_recon = MSE(x_hat, x_target)                    — optional regularizer
-    L_tc    = off-diagonal correlation penalty on z_veh = [e_pres, e_type]
+    L_pres   = BCE(pres_logit, detection_label)         — all samples
+    L_type   = CE(type_logits, vehicle_type)            — masked: present AND type >= 0
+    L_inst   = CE(inst_logits, instance_type)           — masked: present AND inst >= 0
+    L_recon  = MSE(x_hat, x_target)                    — optional regularizer
+    L_tc     = off-diagonal correlation penalty on z_veh = [e_pres, e_type]
+    L_tc_cross = off-diagonal correlation penalty on z_all = [e_pres, e_type, e_inst]
+    L_causal = SCM consistency loss: penalises change in [e_pres, e_type] under intervention
 
     L_total = L_pres + lambda_type*L_type + lambda_inst*L_inst
             + lambda_recon*L_recon + lambda_tc*L_tc
+            + lambda_tc_cross*L_tc_cross + lambda_causal*L_causal
 
 Class weights for type and instance losses are computed dynamically from
 cumulative sample counts seen during CRL training (not hardcoded).  After
@@ -43,6 +46,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from crl_vehicle.losses.disentangle import total_correlation_loss
+from crl_vehicle.losses.causal import scm_consistency_loss
 
 _N_TYPE = 4
 _N_INST = 13
@@ -50,10 +54,16 @@ _N_INST = 13
 
 class SupervisedMultiTaskLoss(nn.Module):
 
-    def __init__(self, config):
-        """config : CRLConfig"""
+    def __init__(self, config, scm=None):
+        """
+        config : CRLConfig
+        scm    : SCM instance (optional). When provided, SCM consistency loss
+                 (intervention invariance on e_pres and e_type) is added to
+                 the total loss weighted by config.lambda_causal.
+        """
         super().__init__()
         self.cfg = config
+        self.scm = scm
 
         # Cumulative sample counts per class — updated each forward() call.
         # Stored as non-grad buffers so they survive checkpoint save/load.
@@ -225,6 +235,94 @@ class SupervisedMultiTaskLoss(nn.Module):
         z_veh = torch.cat([e_pres, e_type], dim=-1)  # (B', d_pres + d_type)
         return total_correlation_loss(z_veh)
 
+    def _tc_loss_full_block(
+        self,
+        outputs: dict,
+        mod: str,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """
+        Cross-block total-correlation penalty on z_all = [e_pres, e_type, e_inst].
+
+        Penalises off-diagonal correlations across all three embedding blocks,
+        targeting the leakage of noise/instance information into vehicle
+        (presence, type) dimensions.  Applied only when ≥ 2 samples available.
+        Returns a scalar tensor (0 if modality unavailable).
+        """
+        zero = torch.zeros((), device=device)
+        avail = outputs.get(f"avail_{mod}")
+
+        e_pres = outputs.get(f"e_pres_{mod}")
+        e_type = outputs.get(f"e_type_{mod}")
+        e_inst = outputs.get(f"e_inst_{mod}")
+        if e_pres is None or e_type is None or e_inst is None:
+            return zero
+
+        if avail is not None:
+            e_pres = e_pres[avail]
+            e_type = e_type[avail]
+            e_inst = e_inst[avail]
+
+        if e_pres.shape[0] < 2:
+            return zero
+
+        z_all = torch.cat([e_pres, e_type, e_inst], dim=-1)  # (B', d_pres+d_type+d_inst)
+        return total_correlation_loss(z_all)
+
+    def _causal_loss_for_modality(
+        self,
+        outputs: dict,
+        mod: str,
+        interv_idx: torch.Tensor,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """
+        SCM consistency loss: enforces that e_pres and e_type are invariant
+        to environmental interventions (noise augmentations).
+
+        The intervention mask marks e_inst dimensions as "intervened" (the
+        noise effect is allowed there), and e_pres/e_type as non-intervened
+        (the SCM should be able to predict them without noise influence).
+
+        Returns a scalar tensor (0 if SCM not set or modality unavailable).
+        """
+        if self.scm is None:
+            return torch.zeros((), device=device)
+
+        zero = torch.zeros((), device=device)
+        avail = outputs.get(f"avail_{mod}")
+
+        e_pres = outputs.get(f"e_pres_{mod}")
+        e_type = outputs.get(f"e_type_{mod}")
+        e_inst = outputs.get(f"e_inst_{mod}")
+        if e_pres is None or e_type is None or e_inst is None:
+            return zero
+
+        if avail is not None:
+            e_pres     = e_pres[avail]
+            e_type     = e_type[avail]
+            e_inst     = e_inst[avail]
+            interv_idx = interv_idx[avail]
+
+        B = e_pres.shape[0]
+        if B < 1:
+            return zero
+
+        cfg = self.cfg
+        d_veh = cfg.d_pres + cfg.d_type
+
+        # Build intervention mask: 1 for e_inst dims (allowed to change),
+        # 0 for e_pres and e_type dims (should be invariant to noise).
+        mask = torch.zeros(B, cfg.d_embed, device=device)
+        intervened = (interv_idx > 0)  # (B,) bool
+        mask[intervened, d_veh:] = 1.0  # mark e_inst dims as intervened
+
+        z = torch.cat([e_pres, e_type, e_inst], dim=-1)  # (B, d_embed)
+        z_hat = self.scm(z, intervention_mask=mask)       # (B, d_embed)
+
+        # Penalise only the non-intervened vehicle blocks
+        return scm_consistency_loss(z[:, :d_veh], z_hat[:, :d_veh])
+
     def forward(self, outputs: dict) -> tuple[torch.Tensor, dict]:
         """
         Returns (total_loss, metrics_dict).
@@ -238,16 +336,19 @@ class SupervisedMultiTaskLoss(nn.Module):
         det_labels  = outputs["detection_label"]
         type_labels = outputs["vehicle_type"]
         inst_labels = outputs["instance_type"]
+        interv_idx  = outputs.get("interv_idx", torch.zeros_like(det_labels))
         device = det_labels.device
 
         if self.training:
             self._update_weights(type_labels, inst_labels, det_labels)
 
-        total_pres  = torch.zeros((), device=device)
-        total_type  = torch.zeros((), device=device)
-        total_inst  = torch.zeros((), device=device)
-        total_recon = torch.zeros((), device=device)
-        total_tc    = torch.zeros((), device=device)
+        total_pres     = torch.zeros((), device=device)
+        total_type     = torch.zeros((), device=device)
+        total_inst     = torch.zeros((), device=device)
+        total_recon    = torch.zeros((), device=device)
+        total_tc       = torch.zeros((), device=device)
+        total_tc_cross = torch.zeros((), device=device)
+        total_causal   = torch.zeros((), device=device)
         metrics = {}
         n_sensors = 0
 
@@ -257,34 +358,44 @@ class SupervisedMultiTaskLoss(nn.Module):
             L_pres, L_type, L_inst, L_recon, m = self._modality_losses(
                 outputs, mod, det_labels, type_labels, inst_labels, device
             )
-            L_tc = self._tc_loss_for_modality(outputs, mod, device)
-            total_pres  = total_pres  + L_pres
-            total_type  = total_type  + L_type
-            total_inst  = total_inst  + L_inst
-            total_recon = total_recon + L_recon
-            total_tc    = total_tc    + L_tc
+            L_tc       = self._tc_loss_for_modality(outputs, mod, device)
+            L_tc_cross = self._tc_loss_full_block(outputs, mod, device)
+            L_causal   = self._causal_loss_for_modality(outputs, mod, interv_idx, device)
+            total_pres     = total_pres     + L_pres
+            total_type     = total_type     + L_type
+            total_inst     = total_inst     + L_inst
+            total_recon    = total_recon    + L_recon
+            total_tc       = total_tc       + L_tc
+            total_tc_cross = total_tc_cross + L_tc_cross
+            total_causal   = total_causal   + L_causal
             metrics.update(m)
             n_sensors += 1
 
         if n_sensors > 1:
-            total_pres  = total_pres  / n_sensors
-            total_type  = total_type  / n_sensors
-            total_inst  = total_inst  / n_sensors
-            total_recon = total_recon / n_sensors
-            total_tc    = total_tc    / n_sensors
+            total_pres     = total_pres     / n_sensors
+            total_type     = total_type     / n_sensors
+            total_inst     = total_inst     / n_sensors
+            total_recon    = total_recon    / n_sensors
+            total_tc       = total_tc       / n_sensors
+            total_tc_cross = total_tc_cross / n_sensors
+            total_causal   = total_causal   / n_sensors
 
         total = (
             total_pres
-            + self.cfg.lambda_type  * total_type
-            + self.cfg.lambda_inst  * total_inst
-            + self.cfg.lambda_recon * total_recon
-            + self.cfg.lambda_tc    * total_tc
+            + self.cfg.lambda_type      * total_type
+            + self.cfg.lambda_inst      * total_inst
+            + self.cfg.lambda_recon     * total_recon
+            + self.cfg.lambda_tc        * total_tc
+            + self.cfg.lambda_tc_cross  * total_tc_cross
+            + self.cfg.lambda_causal    * total_causal
         )
 
-        metrics["loss_pres"]  = total_pres.item()
-        metrics["loss_type"]  = total_type.item()
-        metrics["loss_inst"]  = total_inst.item()
-        metrics["loss_recon"] = total_recon.item()
-        metrics["loss_tc"]    = total_tc.item()
-        metrics["total"]      = total.item()
+        metrics["loss_pres"]     = total_pres.item()
+        metrics["loss_type"]     = total_type.item()
+        metrics["loss_inst"]     = total_inst.item()
+        metrics["loss_recon"]    = total_recon.item()
+        metrics["loss_tc"]       = total_tc.item()
+        metrics["loss_tc_cross"] = total_tc_cross.item()
+        metrics["loss_causal"]   = total_causal.item()
+        metrics["total"]         = total.item()
         return total, metrics

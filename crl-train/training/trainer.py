@@ -35,6 +35,7 @@ from crl_vehicle.models.ssm import TemporalSSM
 from crl_vehicle.models.encoder import MultiTaskEncoder, CRLHeads
 from crl_vehicle.models.decoder import SpectralDecoder
 from crl_vehicle.models.downstream import VehicleDetectionHead
+from crl_vehicle.models.scm import SCM
 from crl_vehicle.losses.combined import SupervisedMultiTaskLoss
 from training.scheduler import build_scheduler
 from training.eval import run_full_eval, sample_level_eval, plot_confusion_matrices
@@ -98,6 +99,14 @@ class CRLModel(nn.Module):
                 mod_cfg=mod_cfg,
             )
 
+        # Shared SCM over concatenated latent z = [e_pres, e_type, e_inst].
+        # group_sizes orders the three embedding blocks so the SCM edge mask
+        # allows only z_type → z_inst edges (presence and type are roots).
+        self.scm = SCM(
+            d_z=config.d_embed,
+            group_sizes=[config.d_pres, config.d_type, config.d_inst],
+        )
+
         # Downstream heads (one per modality, separately trained)
         self.det_heads = nn.ModuleDict(
             {
@@ -134,6 +143,7 @@ class CRLModel(nn.Module):
             "detection_label": batch["detection_label"].to(device),
             "vehicle_type":    batch["vehicle_type"].to(device),
             "instance_type":   batch["instance_type"].to(device),
+            "interv_idx":      batch["interv_idx"].to(device),
         }
 
         for sensor in self.sensors:
@@ -256,11 +266,15 @@ class Trainer:
             "train_type",
             "train_inst",
             "train_recon",
+            "train_tc_cross",
+            "train_causal",
             "val_total",
             "val_pres",
             "val_type",
             "val_inst",
             "val_recon",
+            "val_tc_cross",
+            "val_causal",
             # Structural quality (computed every 5 epochs)
             "probe_pres_acc",
             "probe_pres_f1",
@@ -287,17 +301,21 @@ class Trainer:
                 )
 
             row = {
-                "epoch":        epoch,
-                "train_total":  train_metrics.get("total", 0.0),
-                "train_pres":   train_metrics.get("loss_pres", 0.0),
-                "train_type":   train_metrics.get("loss_type", 0.0),
-                "train_inst":   train_metrics.get("loss_inst", 0.0),
-                "train_recon":  train_metrics.get("loss_recon", 0.0),
-                "val_total":    val_metrics.get("total", 0.0),
-                "val_pres":     val_metrics.get("loss_pres", 0.0),
-                "val_type":     val_metrics.get("loss_type", 0.0),
-                "val_inst":     val_metrics.get("loss_inst", 0.0),
-                "val_recon":    val_metrics.get("loss_recon", 0.0),
+                "epoch":          epoch,
+                "train_total":    train_metrics.get("total", 0.0),
+                "train_pres":     train_metrics.get("loss_pres", 0.0),
+                "train_type":     train_metrics.get("loss_type", 0.0),
+                "train_inst":     train_metrics.get("loss_inst", 0.0),
+                "train_recon":    train_metrics.get("loss_recon", 0.0),
+                "train_tc_cross": train_metrics.get("loss_tc_cross", 0.0),
+                "train_causal":   train_metrics.get("loss_causal", 0.0),
+                "val_total":      val_metrics.get("total", 0.0),
+                "val_pres":       val_metrics.get("loss_pres", 0.0),
+                "val_type":       val_metrics.get("loss_type", 0.0),
+                "val_inst":       val_metrics.get("loss_inst", 0.0),
+                "val_recon":      val_metrics.get("loss_recon", 0.0),
+                "val_tc_cross":   val_metrics.get("loss_tc_cross", 0.0),
+                "val_causal":     val_metrics.get("loss_causal", 0.0),
                 "probe_pres_acc":  struct_metrics.get("probe_pres_acc", ""),
                 "probe_pres_f1":   struct_metrics.get("probe_pres_f1", ""),
                 "probe_type_acc":  struct_metrics.get("probe_type_acc", ""),
