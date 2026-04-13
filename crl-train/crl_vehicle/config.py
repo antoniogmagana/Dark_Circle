@@ -223,17 +223,17 @@ class CRLConfig:
     # Loss weights
     lambda_type:      float = 2.0    # weight on vehicle type CE loss
     lambda_inst:      float = 1.0    # weight on instance CE loss
-    lambda_recon:     float = 0.1    # weight on reconstruction regularizer
-    lambda_tc:        float = 0.5    # weight on intra-z_veh TC penalty (e_pres × e_type)
-    lambda_tc_cross:  float = 0.5    # weight on cross-block TC penalty ([e_pres, e_type, e_inst])
+    lambda_recon:     float = 0.0    # weight on reconstruction regularizer (disabled: competes with type signal)
+    lambda_tc:        float = 0.0    # weight on intra-z_veh TC penalty (disabled: infeasible with shared attn pool)
+    lambda_tc_cross:  float = 0.0    # weight on cross-block TC penalty (disabled: same reason as lambda_tc)
     lambda_causal:    float = 1.0    # weight on SCM consistency loss (intervention invariance)
 
     # Data windowing (controls sliding-window stride in SensorDataset)
-    horizon_stride_sec: float = 0.1   # seconds between successive anchor windows
+    horizon_stride_sec: float = 0.7   # seconds between successive anchor windows
     n_horizons:         int   = 10    # max horizon n for MultiHorizonPairDataset (unused in training)
 
     # Training throughput
-    steps_per_epoch: int | None = None  # cap gradient steps per epoch (None = full epoch)
+    steps_per_epoch: int | None = None  # cap training batches per epoch (None = full epoch); never applied to validation
 
     # Paths
     save_dir:        str   = "saved_crl"

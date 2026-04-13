@@ -297,7 +297,7 @@ class Trainer:
             if epoch % 5 == 0:
                 struct_metrics = run_full_eval(
                     self.model, train_loader, val_loader, self.device,
-                    max_batches=self.cfg.steps_per_epoch,
+                    max_batches=None,
                 )
 
             row = {
@@ -392,8 +392,6 @@ class Trainer:
             for k, v in metrics.items():
                 totals[k] = totals.get(k, 0.0) + v
             n += 1
-            if self.cfg.steps_per_epoch and n >= self.cfg.steps_per_epoch:
-                break
         self.model.train()
         self.loss_fn.train()
         return {k: v / max(n, 1) for k, v in totals.items()}
@@ -631,7 +629,7 @@ class Trainer:
         df_preds = sample_level_eval(
             self.model, val_loader, self.device,
             primary_sensor=sensor,
-            max_batches=self.cfg.steps_per_epoch,
+            max_batches=None,
         )
         plot_confusion_matrices(df_preds, diag_dir)
 
@@ -644,9 +642,7 @@ class Trainer:
         cls_true, cls_pred = [], []
         inst_true, inst_pred = [], []
 
-        for n_eval, batch in enumerate(loader):
-            if self.cfg.steps_per_epoch and n_eval >= self.cfg.steps_per_epoch:
-                break
+        for batch in loader:
             avail = batch[f"{sensor}_avail"]
             if not avail.any():
                 continue
@@ -727,8 +723,6 @@ class Trainer:
 
         n_eval = 0
         for batch in val_loader:
-            if self.cfg.steps_per_epoch and n_eval >= self.cfg.steps_per_epoch:
-                break
 
             det_gt   = batch["detection_label"]
             vtype_gt = batch["vehicle_type"]
