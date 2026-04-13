@@ -308,13 +308,6 @@ elif MODEL_NAME == "ClassificationLSTM":
     KERNELS = [_k0, _k1]
     STRIDES = [_s0, _s1]
 
-# --- miniROCKET ---
-elif MODEL_NAME == "IterativeMiniRocket":
-    LEARNING_RATE = 1e-3
-    DROPOUT = 0.3
-    MINIROCKET_FEATURES = 1000
-    # The tsai extractor defaults to 10,000 kernels automatically
-
 # --- InceptionTime ---
 elif MODEL_NAME == "InceptionTime":
     LEARNING_RATE = 1e-3
@@ -332,15 +325,6 @@ elif MODEL_NAME == "InceptionTime":
     # At audio rates (SEQ_LEN=16000), stride=80 -> 200 post-stem samples,
     # keeping INCEPTION_KERNELS meaningful and tensors small (B=128).
     INCEPTION_STEM_STRIDE = max(1, SEQ_LEN // 200)
-
-# --- TCN ---
-elif MODEL_NAME == "TCN":
-    LEARNING_RATE = 1e-3
-    TCN_CHANNELS = 64  # filters per dilated conv level
-    TCN_KERNEL_SIZE = 7  # kernel size for all dilated convolutions
-    TCN_LEVELS = 4  # dilation = 1,2,4,8 → receptive field ≈ 91 samples
-    HIDDEN = 128
-    DROPOUT = 0.2
 
 # --- BiGRU ---
 elif MODEL_NAME == "BiGRU":
@@ -371,9 +355,7 @@ SHAPE_MAP = {
     "ClassificationCNN": "2D",
     "WaveformClassificationCNN": "1D",
     "ClassificationLSTM": "1D",
-    "IterativeMiniRocket": "1D",
     "InceptionTime": "1D",
-    "TCN": "1D",
     "BiGRU": "1D",
 }
 USE_MEL = SHAPE_MAP.get(MODEL_NAME, "1D") == "2D"

@@ -4,8 +4,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 
-from tsai.models.MINIROCKET_Pytorch import MiniRocketFeatures, get_minirocket_features
-
 # NOTICE: global 'config' is no longer imported
 
 
@@ -303,72 +301,6 @@ class InceptionTime(nn.Module):
         return optim.Adam(self.parameters(), lr=self.config.LEARNING_RATE)
 
 
-class _TemporalBlock(nn.Module):
-    """Dilated causal residual block used by TCN."""
-
-    def __init__(self, in_channels, out_channels, kernel_size, dilation, dropout):
-        super().__init__()
-        padding = (kernel_size - 1) * dilation
-
-        self.conv1 = nn.utils.weight_norm(
-            nn.Conv1d(in_channels, out_channels, kernel_size, dilation=dilation, padding=padding)
-        )
-        self.conv2 = nn.utils.weight_norm(
-            nn.Conv1d(out_channels, out_channels, kernel_size, dilation=dilation, padding=padding)
-        )
-        self.dropout = nn.Dropout(dropout)
-        self.act = nn.ReLU()
-        self.downsample = (
-            nn.Conv1d(in_channels, out_channels, kernel_size=1)
-            if in_channels != out_channels else None
-        )
-
-    def forward(self, x):
-        seq_len = x.size(-1)
-        # Trim causal padding from the right to preserve sequence length
-        out = self.act(self.conv1(x)[..., :seq_len])
-        out = self.dropout(out)
-        out = self.act(self.conv2(out)[..., :seq_len])
-        out = self.dropout(out)
-        res = x if self.downsample is None else self.downsample(x)
-        return self.act(out + res)
-
-
-class TCN(nn.Module):
-    """
-    Temporal Convolutional Network with exponentially growing dilations.
-    Captures long-range temporal patterns in vehicle seismic/acoustic signals
-    while parallelizing like a CNN. Expects 1D Waveform: [B, C, T]
-    """
-
-    def __init__(self, in_channels, num_classes, config, use_mel=False):
-        super().__init__()
-        self.config = config
-
-        ch = config.TCN_CHANNELS
-        ks = config.TCN_KERNEL_SIZE
-        levels = config.TCN_LEVELS
-        dropout = config.DROPOUT
-
-        layers = []
-        for i in range(levels):
-            dilation = 2 ** i
-            in_ch = in_channels if i == 0 else ch
-            layers.append(_TemporalBlock(in_ch, ch, ks, dilation, dropout))
-
-        self.network = nn.Sequential(*layers)
-        self.gap = nn.AdaptiveAvgPool1d(1)
-        self.fc = nn.Linear(ch, num_classes)
-
-    def forward(self, x):
-        x = self.network(x)
-        x = self.gap(x).squeeze(-1)
-        return self.fc(x)
-
-    def get_optimizer(self):
-        return optim.Adam(self.parameters(), lr=self.config.LEARNING_RATE)
-
-
 class BiGRU(nn.Module):
     """
     CNN front-end + Bidirectional GRU.
@@ -426,65 +358,7 @@ class BiGRU(nn.Module):
 
 
 # =====================================================================
-# 4. NON-PYTORCH MODELS
-# =====================================================================
-
-class IterativeMiniRocket(nn.Module):
-    """
-    End-to-End PyTorch MiniRocket.
-    Extracts features batch-by-batch on the GPU and trains a linear head iteratively.
-    Expects 1D Waveform: [B, C, T]
-    """
-    def __init__(self, in_channels, num_classes, config, use_mel=False):
-        super().__init__()
-        self.config = config
-        self.c_in = in_channels
-        self.seq_len = int(config.REF_SAMPLE_RATE * config.SAMPLE_SECONDS)
-        self.num_features = getattr(config, 'MINIROCKET_FEATURES', 10000)
-        
-        # 1. The feature extractor (will be frozen)
-        self.mrf = MiniRocketFeatures(c_in=self.c_in, seq_len=self.seq_len, num_features=self.num_features)
-        
-        # 2. The Trainable Classification Head
-        self.fc = nn.LazyLinear(num_classes)
-        self.dropout = nn.Dropout(getattr(config, 'DROPOUT', 0.3))
-        
-        self.is_fitted = False
-
-    def fit_extractor(self, dummy_batch):
-        """Calculates random dilations and biases from a small data sample."""
-        if not self.is_fitted:
-            print("  -> [MiniRocket] Initializing random convolution kernels...", flush=True)
-            self.mrf.fit(dummy_batch)
-            self.is_fitted = True
-            
-            # Freeze the MRF convolutions so we ONLY train the Linear head
-            for param in self.mrf.parameters():
-                param.requires_grad = False
-
-    def forward(self, x):
-        # 1. Extract MiniRocket features in chunks to avoid 32-bit index overflow
-        chunk_size = 256
-        feature_chunks = []
-        with torch.no_grad():
-            for i in range(0, x.shape[0], chunk_size):
-                f = self.mrf(x[i:i + chunk_size])
-                if f.ndim == 3:
-                    f = f.squeeze(-1)
-                feature_chunks.append(f)
-        features = torch.cat(feature_chunks, dim=0)
-
-        # 2. Pass through the trainable head
-        x = self.dropout(features)
-        return self.fc(x)
-
-    def get_optimizer(self):
-        # Crucial: We only pass the linear layer parameters to the optimizer!
-        return optim.Adam(self.fc.parameters(), lr=self.config.LEARNING_RATE, weight_decay=1e-3)
-
-
-# =====================================================================
-# 5. MODEL REGISTRY
+# 4. MODEL REGISTRY
 # =====================================================================
 
 MODEL_REGISTRY = {
@@ -492,9 +366,7 @@ MODEL_REGISTRY = {
     "ClassificationCNN": ClassificationCNN,
     "WaveformClassificationCNN": WaveformClassificationCNN,
     "ClassificationLSTM": ClassificationLSTM,
-    "IterativeMiniRocket": IterativeMiniRocket,
     "InceptionTime": InceptionTime,
-    "TCN": TCN,
     "BiGRU": BiGRU,
 }
 

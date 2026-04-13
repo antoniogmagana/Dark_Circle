@@ -329,7 +329,7 @@ def main():
 
         scheduler.step(current_metric_value)
 
-    # Update meta with best val_f1 for use in fused evaluation weighting
+    # Update meta with best val_f1 for use in best-ensemble weighting
     meta = torch.load(config.META_SAVE_PATH, weights_only=False)
     meta["val_f1"] = best_val_f1
     torch.save(meta, config.META_SAVE_PATH)
