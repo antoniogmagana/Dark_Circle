@@ -70,11 +70,14 @@ def parse_report_file(filepath):
 def _sensor_from_path(filepath):
     """
     Infer the sensor name from the report file path.
-    Per-sensor:  saved_models/{mode}/{sensor}/{model}/{run_id}/report.txt
-    Fused:       saved_models/{mode}/fused/{model}_{run_id}/report_fused.txt
+    Per-sensor:     saved_models/{mode}/{sensor}/{model}/{run_id}/report.txt → parts[-4] = sensor
+    Best-ensemble:  saved_models/{mode}/best_ensemble/report.txt             → parts[-2] = 'best_ensemble'
     """
     parts = os.path.normpath(filepath).split(os.sep)
-    # parts[-1] = filename, [-2] = run_id, [-3] = model, [-4] = sensor/fused
+    # Check for best_ensemble (3-level deep: saved_models/{mode}/best_ensemble/report.txt)
+    if len(parts) >= 2 and parts[-2] == "best_ensemble":
+        return "best_ensemble"
+    # Per-sensor: saved_models/{mode}/{sensor}/{model}/{run_id}/report.txt
     if len(parts) >= 4:
         return parts[-4]
     return "unknown"
@@ -87,11 +90,11 @@ def main():
     sensor_pattern = os.path.join(
         "saved_models", "*", "*", "*", "*", "evaluation_report.txt"
     )
-    # Fused: saved_models/{mode}/fused/{model}_{run_id}/
-    fused_pattern = os.path.join(
-        "saved_models", "*", "fused", "*", "evaluation_report.txt"
+    # Best-ensemble: saved_models/{mode}/best_ensemble/
+    ensemble_pattern = os.path.join(
+        "saved_models", "*", "best_ensemble", "evaluation_report.txt"
     )
-    report_files = glob.glob(sensor_pattern) + glob.glob(fused_pattern)
+    report_files = glob.glob(sensor_pattern) + glob.glob(ensemble_pattern)
 
     if not report_files:
         print(
@@ -113,10 +116,13 @@ def main():
 
     df = pd.DataFrame(all_results)
 
-    # Sort by Mode, then rank by F1-Score first, then MCC
+    # Sort by Mode, then ensemble rows to bottom, then rank by F1-Score, then MCC
+    df["_is_ensemble"] = (df["Sensor"] == "best_ensemble").astype(int)
     df = df.sort_values(
-        by=["Mode", "F1-Score", "MCC"], ascending=[True, False, False]
+        by=["Mode", "_is_ensemble", "F1-Score", "MCC"],
+        ascending=[True, True, False, False],
     )
+    df = df.drop(columns=["_is_ensemble"])
 
     # Reorder columns for the Master CSV
     columns = [
@@ -137,12 +143,18 @@ def main():
     print("="*115)
 
     current_mode = ""
+    printed_ensemble_sep = False
     for index, row in df.iterrows():
         if row['Mode'] != current_mode:
             current_mode = row['Mode']
+            printed_ensemble_sep = False
             print(f"\n--- {current_mode.upper()} MODE ---")
-            print(f"{'Model':<30} | {'Acc':<6} | {'F1':<6} | {'MCC':<6} | {'AUC':<6} | {'Latency':<10} | {'FAR':<6} | {'Timestamp':<25}")
-            print("-" * 105)
+            print(f"{'Model':<30} | {'Sensor':<15} | {'Acc':<6} | {'F1':<6} | {'MCC':<6} | {'AUC':<6} | {'Latency':<10} | {'FAR':<6} | {'Timestamp':<25}")
+            print("-" * 120)
+
+        if row.get('Sensor') == 'best_ensemble' and not printed_ensemble_sep:
+            print(f"  --- BEST ENSEMBLE ---")
+            printed_ensemble_sep = True
 
         far_str = f"{row.get('FAR', float('nan')):.2%}" if pd.notna(row.get('FAR')) else "N/A"
         latency_str = f"{row.get('Latency_ms', float('nan')):.2f} ms" if pd.notna(row.get('Latency_ms')) else "N/A"
@@ -153,13 +165,14 @@ def main():
         f1 = row.get('F1-Score', float('nan'))
         mcc = row.get('MCC', float('nan'))
         auc = row.get('ROC-AUC', float('nan'))
+        sensor = str(row.get('Sensor', 'unknown'))
 
         acc_str = f"{acc:.4f}" if pd.notna(acc) else "N/A"
         f1_str = f"{f1:.4f}" if pd.notna(f1) else "N/A"
         mcc_str = f"{mcc:.4f}" if pd.notna(mcc) else "N/A"
         auc_str = f"{auc:.4f}" if pd.notna(auc) else "N/A"
 
-        print(f"{row['Model']:<30} | {acc_str:<6} | {f1_str:<6} | {mcc_str:<6} | {auc_str:<6} | {latency_str:<10} | {far_str:<6} | {time_str:<25}")
+        print(f"{row['Model']:<30} | {sensor:<15} | {acc_str:<6} | {f1_str:<6} | {mcc_str:<6} | {auc_str:<6} | {latency_str:<10} | {far_str:<6} | {time_str:<25}")
 
     print("="*115)
     print(
