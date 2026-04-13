@@ -3,6 +3,8 @@
     "audio",
     "seismic"
   ],
-  "d_z": 18,
-  "n_epochs": 50
+  "d_pres": 16,
+  "d_type": 32,
+  "d_inst": 64,
+  "n_epochs": 100
 }
