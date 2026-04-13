@@ -1,0 +1,15 @@
+Run Directory: 20260413_070442
+Mode: detection | Model: WaveformClassificationCNN
+----------------------------------------
+Accuracy: 0.8171
+MCC: 0.6275
+ROC-AUC: 0.8895
+Precision: 0.8180
+Recall: 0.8171
+F1-Score: 0.8174
+Latency: 0.1091 ms/sample
+False Alarm Rate: 19.961%
+
+Per-Class Accuracy:
+  Background (0): 0.8004
+  Target (1): 0.8294

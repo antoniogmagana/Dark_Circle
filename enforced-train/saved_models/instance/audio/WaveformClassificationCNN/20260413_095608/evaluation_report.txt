@@ -1,0 +1,26 @@
+Run Directory: 20260413_095608
+Mode: instance | Model: WaveformClassificationCNN
+----------------------------------------
+Accuracy: 0.4597
+MCC: 0.3738
+ROC-AUC: 0.8664
+Precision: 0.4791
+Recall: 0.4597
+F1-Score: 0.4596
+Latency: 0.0991 ms/sample
+
+Per-Class Accuracy:
+  bicycle (0): 0.0309
+  polaris (1): 0.0730
+  pickup (2): 0.1894
+  gle350 (3): 0.4756
+  scooter (4): 0.4011
+  cx30 (5): 0.6199
+  ev (6): 0.2600
+  motorcycle (7): 0.5976
+  mustang (8): 0.5429
+  forester (9): 0.1725
+  background (10): 0.5608
+  walk (11): 0.4171
+  miata (12): 0.5134
+  warhog (13): 0.0075
