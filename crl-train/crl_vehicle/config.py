@@ -211,13 +211,13 @@ class CRLConfig:
     fusion:          str   = "vote"
 
     # Training
-    batch_size:           int   = 64
-    lr:                   float = 1e-3
+    batch_size:           int   = 512
+    lr:                   float = 8e-3
     lr_min:               float = 1e-4
     wd:                   float = 1e-4
     warmup_epochs:        int   = 5
     n_epochs:             int   = 100
-    num_workers:          int   = 60
+    num_workers:          int   = 12
     early_stop_patience:  int   = 25
 
     # Loss weights

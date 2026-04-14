@@ -247,6 +247,7 @@ class Trainer:
         self.scheduler = build_scheduler(self.optimizer, config)
         self.best_val_loss = float("inf")
         self.patience_ctr = 0
+        self.scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
 
     # ------------------------------------------------------------------
     # CRL pre-training
@@ -297,7 +298,7 @@ class Trainer:
             if epoch % 5 == 0:
                 struct_metrics = run_full_eval(
                     self.model, train_loader, val_loader, self.device,
-                    max_batches=None,
+                    max_batches=50,
                 )
 
             row = {
@@ -366,11 +367,14 @@ class Trainer:
 
         for batch in loader:
             self.optimizer.zero_grad()
-            outputs = self.model.forward(batch, self.device)
-            loss, metrics = self.loss_fn(outputs)
-            loss.backward()
+            with torch.cuda.amp.autocast(enabled=(self.device.type == "cuda")):
+                outputs = self.model.forward(batch, self.device)
+                loss, metrics = self.loss_fn(outputs)
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-            self.optimizer.step()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
             for k, v in metrics.items():
                 total_metrics[k] = total_metrics.get(k, 0.0) + v
@@ -387,8 +391,9 @@ class Trainer:
         totals: dict[str, float] = {}
         n = 0
         for batch in loader:
-            outputs = self.model.forward(batch, self.device)
-            _, metrics = self.loss_fn(outputs)
+            with torch.cuda.amp.autocast(enabled=(self.device.type == "cuda")):
+                outputs = self.model.forward(batch, self.device)
+                _, metrics = self.loss_fn(outputs)
             for k, v in metrics.items():
                 totals[k] = totals.get(k, 0.0) + v
             n += 1

@@ -97,7 +97,7 @@ def parse_args():
     )
     p.add_argument("--crl-epochs", type=int, default=100)
     p.add_argument("--ds-epochs",  type=int, default=50)
-    p.add_argument("--batch-size", type=int, default=128)
+    p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--lr",         type=float, default=None)
     p.add_argument("--num-workers",type=int,   default=None)
     p.add_argument("--save-dir",   default="./saved_crl")
@@ -135,6 +135,8 @@ def main():
 
     model = CRLModel(cfg, sensors=sensors)
     model.to(device)
+    if torch.cuda.is_available():
+        model = torch.compile(model)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
 
