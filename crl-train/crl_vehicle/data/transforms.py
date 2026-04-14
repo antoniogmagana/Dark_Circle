@@ -4,7 +4,7 @@ Per-window signal transforms.
 All functions operate on (C, W) tensors — C sensor channels, W time samples.
 Applied independently to each modality; no cross-modal operations.
 
-RMS normalisation is always applied. Augmentations and interventions are applied
+Bit-depth normalisation is always applied. Augmentations and interventions are applied
 only during training, controlled by the dataset's is_train flag.
 
 Intervention types (synthetic causal interventions, interv_idx 1-7):
@@ -29,16 +29,28 @@ import torch.nn.functional as F
 # Core normalisation (always applied)
 # ---------------------------------------------------------------------------
 
-def rms_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-    """
-    Per-window RMS normalisation.  x: (C, W) → (C, W).
-    Per-channel so multi-axis sensors (e.g., accel) are normalised independently.
+_BIT_DEPTH_SCALE = {
+    "seismic": 2 ** 23,  # 24-bit signed
+    "audio":   2 ** 15,  # 16-bit signed
+}
 
-    Do NOT use global dataset statistics — vehicle passage events are
-    non-stationary; global normalisation suppresses the transient signal.
+
+def bit_normalize(x: torch.Tensor, sensor: str) -> torch.Tensor:
     """
-    rms = x.pow(2).mean(dim=-1, keepdim=True).sqrt()   # (C, 1)
-    return x / (rms + eps)
+    Per-window bit-depth normalisation.  x: (C, W) → (C, W).
+
+    Subtracts per-channel DC offset, then divides by the sensor's
+    bit-depth full-scale value so outputs are in [-1, 1].
+
+    Seismic signals use 24-bit count (divisor 2^23).
+    Audio signals use 16-bit count (divisor 2^15).
+
+    Mean subtraction is performed first (operates on raw-count values)
+    then division by the constant scale factor.
+    """
+    scale = _BIT_DEPTH_SCALE[sensor]
+    x = x - x.mean(dim=-1, keepdim=True)
+    return x / scale
 
 
 # ---------------------------------------------------------------------------
@@ -246,10 +258,10 @@ def apply_intervention(
 N_INTERVENTIONS = 7
 
 
-def apply_all_interventions(x: torch.Tensor, sample_rate: int) -> torch.Tensor:
+def apply_all_interventions(x: torch.Tensor, sample_rate: int, sensor: str) -> torch.Tensor:
     """
     Return N_INTERVENTIONS+1 versions of x: [x_clean, x_interv1, ..., x_interv7].
-    Each version is RMS-normalised independently.
+    Each version is bit-depth normalised independently.
 
     x: (C, W)
     Returns: (N_INTERVENTIONS+1, C, W)
@@ -258,7 +270,7 @@ def apply_all_interventions(x: torch.Tensor, sample_rate: int) -> torch.Tensor:
     Prefer apply_interventions_batch_gpu for training loops.
     """
     return torch.stack([
-        rms_normalize(apply_intervention(x, k, sample_rate))
+        bit_normalize(apply_intervention(x, k, sample_rate), sensor)
         for k in range(N_INTERVENTIONS + 1)
     ])
 

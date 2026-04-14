@@ -59,7 +59,7 @@ from crl_vehicle.config import (
     MODALITIES,
 )
 from crl_vehicle.data.transforms import (
-    rms_normalize,
+    bit_normalize,
     apply_intervention,
     N_INTERVENTIONS,
 )
@@ -376,7 +376,7 @@ class SensorDataset(Dataset):
         tensor = torch.from_numpy(chunk)                              # [1, win_len]
         if self.is_train and interv_idx > 0:
             tensor = apply_intervention(tensor, interv_idx, target_sr)
-        return rms_normalize(tensor)
+        return bit_normalize(tensor, sensor)
 
     def _zero_window(self, sensor: str) -> torch.Tensor:
         mod_cfg = self.cfg.modality_cfg(sensor)
