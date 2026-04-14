@@ -372,5 +372,6 @@ def apply_interventions_batch_gpu(
 
 def _rms_normalize_batch(x: torch.Tensor) -> torch.Tensor:
     """x: (B, C, W) → (B, C, W), per-sample RMS normalisation."""
+    x = x - x.mean(dim=-1, keepdim=True)          # DC removal — match rms_normalize()
     rms = x.pow(2).mean(dim=-1, keepdim=True).sqrt()
     return x / (rms + 1e-8)
