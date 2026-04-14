@@ -5,19 +5,17 @@ Orchestrates the supervised multi-task CRL training pipeline.
 Each modality has its own:
     - SpectrogramFrontend
     - TemporalSSM
-    - MultiTaskEncoder  (produces e_pres, e_type, e_inst)
+    - MultiTaskEncoder  (produces e_pres, e_type)
     - CRLHeads          (lightweight CRL-phase classifier heads, discarded after)
-    - SpectralDecoder   (reconstruction regularizer)
     - VehicleDetectionHead (downstream-phase heads, separately trained)
 
 CRL pre-training phase:
-    Supervised losses on three task-specific embeddings:
-        BCE(presence) + CE(type) + CE(instance) + MSE(reconstruction)
-    Interventions are applied as data augmentation only — no intervention
-    loss term, no curriculum scheduling.
+    Supervised losses on two task-specific embeddings:
+        BCE(presence) + CE(type)
+    Interventions are applied as data augmentation only.
 
 Downstream phase:
-    CRL backbone frozen. Three VehicleDetectionHead heads trained on frozen
+    CRL backbone frozen. VehicleDetectionHead heads trained on frozen
     embeddings using the same supervised losses with class-weighted CE.
 """
 
@@ -29,13 +27,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from crl_vehicle.config import CRLConfig, MODALITIES, CLASS_MAP, INSTANCE_MAP
+from crl_vehicle.config import CRLConfig, MODALITIES, CLASS_MAP
 from crl_vehicle.models.spectrogram import SpectrogramFrontend
 from crl_vehicle.models.ssm import TemporalSSM
 from crl_vehicle.models.encoder import MultiTaskEncoder, CRLHeads
-from crl_vehicle.models.decoder import SpectralDecoder
 from crl_vehicle.models.downstream import VehicleDetectionHead
-from crl_vehicle.models.scm import SCM
 from crl_vehicle.losses.combined import SupervisedMultiTaskLoss
 from training.scheduler import build_scheduler
 from training.eval import run_full_eval, sample_level_eval, plot_confusion_matrices
@@ -68,10 +64,8 @@ class CRLModel(nn.Module):
         self.ssms        = nn.ModuleDict()
         self.encoders    = nn.ModuleDict()
         self.crl_heads   = nn.ModuleDict()
-        self.decoders    = nn.ModuleDict()
 
         n_type = len(CLASS_MAP)
-        n_inst = len(INSTANCE_MAP)
 
         for sensor in self.sensors:
             mod_cfg = config.modality_cfg(sensor)
@@ -84,28 +78,12 @@ class CRLModel(nn.Module):
                 d_model=config.d_model,
                 d_pres=config.d_pres,
                 d_type=config.d_type,
-                d_inst=config.d_inst,
             )
             self.crl_heads[sensor] = CRLHeads(
                 d_pres=config.d_pres,
                 d_type=config.d_type,
-                d_inst=config.d_inst,
                 n_type=n_type,
-                n_inst=n_inst,
             )
-            self.decoders[sensor] = SpectralDecoder(
-                d_z=config.d_embed,
-                d_model=config.d_model,
-                mod_cfg=mod_cfg,
-            )
-
-        # Shared SCM over concatenated latent z = [e_pres, e_type, e_inst].
-        # group_sizes orders the three embedding blocks so the SCM edge mask
-        # allows only z_type → z_inst edges (presence and type are roots).
-        self.scm = SCM(
-            d_z=config.d_embed,
-            group_sizes=[config.d_pres, config.d_type, config.d_inst],
-        )
 
         # Downstream heads (one per modality, separately trained)
         self.det_heads = nn.ModuleDict(
@@ -113,9 +91,7 @@ class CRLModel(nn.Module):
                 sensor: VehicleDetectionHead(
                     d_pres=config.d_pres,
                     d_type=config.d_type,
-                    d_inst=config.d_inst,
                     n_classes=n_type,
-                    n_instance_classes=n_inst,
                 )
                 for sensor in self.sensors
             }
@@ -123,16 +99,14 @@ class CRLModel(nn.Module):
 
     def encode_modality(
         self, sensor: str, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Run Filterbank → SSM → MultiTaskEncoder for one modality.
-        Returns (e_pres, e_type, e_inst, y) where y is the filterbank output.
-        Returning y avoids a redundant filterbank forward pass for reconstruction.
+        Returns (e_pres, e_type).
         """
         y = self.filterbanks[sensor](x)        # (B, K*C, T')
         h = self.ssms[sensor](y)               # (B, T', d_model)
-        e_pres, e_type, e_inst = self.encoders[sensor](h)
-        return e_pres, e_type, e_inst, y
+        return self.encoders[sensor](h)
 
     def forward(self, batch: dict, device: torch.device) -> dict:
         """
@@ -142,8 +116,6 @@ class CRLModel(nn.Module):
         outputs = {
             "detection_label": batch["detection_label"].to(device),
             "vehicle_type":    batch["vehicle_type"].to(device),
-            "instance_type":   batch["instance_type"].to(device),
-            "interv_idx":      batch["interv_idx"].to(device),
         }
 
         for sensor in self.sensors:
@@ -151,28 +123,15 @@ class CRLModel(nn.Module):
             avail = batch[f"{sensor}_avail"].to(device)
             outputs[f"avail_{sensor}"] = avail
 
-            e_pres, e_type, e_inst, y = self.encode_modality(sensor, x)
+            e_pres, e_type = self.encode_modality(sensor, x)
 
-            mod_cfg = self.cfg.modality_cfg(sensor)
-            K = mod_cfg.filterbank_out_channels
-            T = mod_cfg.t_prime
-            x_target = y.detach().view(x.shape[0], K, T)
-
-            # Concatenate embeddings for reconstruction
-            e_cat = torch.cat([e_pres, e_type, e_inst], dim=-1)  # (B, d_embed)
-            x_hat = self.decoders[sensor](e_cat)
-
-            outputs[f"e_pres_{sensor}"]   = e_pres
-            outputs[f"e_type_{sensor}"]   = e_type
-            outputs[f"e_inst_{sensor}"]   = e_inst
-            outputs[f"x_hat_{sensor}"]    = x_hat
-            outputs[f"x_target_{sensor}"] = x_target
+            outputs[f"e_pres_{sensor}"] = e_pres
+            outputs[f"e_type_{sensor}"] = e_type
 
             # CRL task supervision logits
-            pres_logit, type_logits, inst_logits = self.crl_heads[sensor](e_pres, e_type, e_inst)
+            pres_logit, type_logits = self.crl_heads[sensor](e_pres, e_type)
             outputs[f"pres_logit_{sensor}"]  = pres_logit
             outputs[f"type_logits_{sensor}"] = type_logits
-            outputs[f"inst_logits_{sensor}"] = inst_logits
 
         return outputs
 
@@ -195,8 +154,8 @@ class CRLModel(nn.Module):
             x = x_audio if sensor == "audio" else x_seismic
             if x is None:
                 continue
-            e_pres, e_type, e_inst, _ = self.encode_modality(sensor, x)
-            pres_logit, type_logit, _ = self.det_heads[sensor](e_pres, e_type, e_inst)
+            e_pres, e_type = self.encode_modality(sensor, x)
+            pres_logit, type_logit = self.det_heads[sensor](e_pres, e_type)
             det_probs.append(torch.sigmoid(pres_logit) * weights[sensor])
             type_probs.append(torch.softmax(type_logit, dim=-1) * weights[sensor])
             ws.append(weights[sensor])
@@ -265,24 +224,16 @@ class Trainer:
             "train_total",
             "train_pres",
             "train_type",
-            "train_inst",
-            "train_recon",
-            "train_tc_cross",
-            "train_causal",
+            "train_tc",
             "val_total",
             "val_pres",
             "val_type",
-            "val_inst",
-            "val_recon",
-            "val_tc_cross",
-            "val_causal",
+            "val_tc",
             # Structural quality (computed every 5 epochs)
             "probe_pres_acc",
             "probe_pres_f1",
             "probe_type_acc",
             "probe_type_f1",
-            "probe_inst_acc",
-            "probe_inst_f1",
             "detection_auc",
         ]
         with open(metrics_path, "w", newline="") as f:
@@ -302,28 +253,20 @@ class Trainer:
                 )
 
             row = {
-                "epoch":          epoch,
-                "train_total":    train_metrics.get("total", 0.0),
-                "train_pres":     train_metrics.get("loss_pres", 0.0),
-                "train_type":     train_metrics.get("loss_type", 0.0),
-                "train_inst":     train_metrics.get("loss_inst", 0.0),
-                "train_recon":    train_metrics.get("loss_recon", 0.0),
-                "train_tc_cross": train_metrics.get("loss_tc_cross", 0.0),
-                "train_causal":   train_metrics.get("loss_causal", 0.0),
-                "val_total":      val_metrics.get("total", 0.0),
-                "val_pres":       val_metrics.get("loss_pres", 0.0),
-                "val_type":       val_metrics.get("loss_type", 0.0),
-                "val_inst":       val_metrics.get("loss_inst", 0.0),
-                "val_recon":      val_metrics.get("loss_recon", 0.0),
-                "val_tc_cross":   val_metrics.get("loss_tc_cross", 0.0),
-                "val_causal":     val_metrics.get("loss_causal", 0.0),
-                "probe_pres_acc":  struct_metrics.get("probe_pres_acc", ""),
-                "probe_pres_f1":   struct_metrics.get("probe_pres_f1", ""),
-                "probe_type_acc":  struct_metrics.get("probe_type_acc", ""),
-                "probe_type_f1":   struct_metrics.get("probe_type_f1", ""),
-                "probe_inst_acc":  struct_metrics.get("probe_inst_acc", ""),
-                "probe_inst_f1":   struct_metrics.get("probe_inst_f1", ""),
-                "detection_auc":   struct_metrics.get("detection_auc", ""),
+                "epoch":         epoch,
+                "train_total":   train_metrics.get("total", 0.0),
+                "train_pres":    train_metrics.get("loss_pres", 0.0),
+                "train_type":    train_metrics.get("loss_type", 0.0),
+                "train_tc":      train_metrics.get("loss_tc", 0.0),
+                "val_total":     val_metrics.get("total", 0.0),
+                "val_pres":      val_metrics.get("loss_pres", 0.0),
+                "val_type":      val_metrics.get("loss_type", 0.0),
+                "val_tc":        val_metrics.get("loss_tc", 0.0),
+                "probe_pres_acc": struct_metrics.get("probe_pres_acc", ""),
+                "probe_pres_f1":  struct_metrics.get("probe_pres_f1", ""),
+                "probe_type_acc": struct_metrics.get("probe_type_acc", ""),
+                "probe_type_f1":  struct_metrics.get("probe_type_f1", ""),
+                "detection_auc":  struct_metrics.get("detection_auc", ""),
             }
             with open(metrics_path, "a", newline="") as f:
                 csv.DictWriter(f, fieldnames=fieldnames).writerow(row)
@@ -333,7 +276,6 @@ class Trainer:
                 struct_str = (
                     f" pres_f1={struct_metrics.get('probe_pres_f1', 0):.3f}"
                     f" type_f1={struct_metrics.get('probe_type_f1', 0):.3f}"
-                    f" inst_f1={struct_metrics.get('probe_inst_f1', 0):.3f}"
                     f" auc={struct_metrics.get('detection_auc', 0):.3f}"
                 )
             print(
@@ -437,49 +379,43 @@ class Trainer:
         det_head = self.model.det_heads[sensor]
 
         # Independent optimizer + scheduler per task head
-        opt_det  = torch.optim.AdamW(det_head.presence.parameters(),      lr=self.cfg.lr)
-        opt_cls  = torch.optim.AdamW(det_head.type_head.parameters(),     lr=self.cfg.lr)
-        opt_inst = torch.optim.AdamW(det_head.instance_head.parameters(), lr=self.cfg.lr)
+        opt_det = torch.optim.AdamW(det_head.presence.parameters(),  lr=self.cfg.lr)
+        opt_cls = torch.optim.AdamW(det_head.type_head.parameters(), lr=self.cfg.lr)
 
-        sched_det  = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_det,  factor=0.5, patience=3)
-        sched_cls  = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_cls,  factor=0.5, patience=3)
-        sched_inst = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_inst, factor=0.5, patience=3)
+        sched_det = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_det, factor=0.5, patience=3)
+        sched_cls = torch.optim.lr_scheduler.ReduceLROnPlateau(opt_cls, factor=0.5, patience=3)
 
         det_weight  = torch.tensor([1.0, 1.0], device=self.device)
         type_weight = torch.tensor([24.3933, 22.925, 1.42813, 4.64756], device=self.device)
-        inst_weight = torch.ones(13, device=self.device)
 
         metrics_path = self.save_dir / f"downstream_metrics_{sensor}.csv"
         fieldnames = [
             "epoch",
             "train_det_loss",
             "train_cls_loss",
-            "train_inst_loss",
             "val_det_acc",
             "val_det_f1",
             "val_cls_acc",
             "val_cls_f1",
-            "val_inst_acc",
-            "val_inst_f1",
         ]
         with open(metrics_path, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=fieldnames).writeheader()
 
         # Independent best/patience tracking per task head
-        best_det_f1  = best_cls_f1 = best_inst_f1 = 0.0
-        pat_det = pat_cls = pat_inst = 0
-        stopped_det = stopped_cls = stopped_inst = False
+        best_det_f1 = best_cls_f1 = 0.0
+        pat_det = pat_cls = 0
+        stopped_det = stopped_cls = False
 
         print(f"\n=== Downstream Head Training [{sensor}] ===")
         for epoch in range(epochs):
-            if stopped_det and stopped_cls and stopped_inst:
+            if stopped_det and stopped_cls:
                 break
 
             self.model.eval()
             det_head.train()
 
-            epoch_det = epoch_cls = epoch_inst = 0.0
-            n_det = n_cls = n_inst = 0
+            epoch_det = epoch_cls = 0.0
+            n_det = n_cls = 0
 
             n_train_steps = 0
             for batch in train_loader:
@@ -492,11 +428,10 @@ class Trainer:
 
                 x_sensor = batch[f"x_{sensor}"][avail].to(self.device)
                 vtype = batch["vehicle_type"][avail].to(self.device)
-                inst  = batch["instance_type"][avail].to(self.device)
                 det   = batch["detection_label"][avail].to(self.device)
 
                 with torch.no_grad():
-                    e_pres, e_type, e_inst, _ = self.model.encode_modality(sensor, x_sensor)
+                    e_pres, e_type = self.model.encode_modality(sensor, x_sensor)
 
                 # Detection head — all available samples
                 if not stopped_det:
@@ -525,19 +460,6 @@ class Trainer:
                     epoch_cls += cls_loss.item()
                     n_cls += 1
 
-                # Instance head — detected-present samples with valid instance label
-                inst_mask = (det == 1) & (inst >= 0)
-                if not stopped_inst and inst_mask.any():
-                    opt_inst.zero_grad()
-                    inst_logits = det_head.instance_head(e_inst)
-                    inst_loss = F.cross_entropy(
-                        inst_logits[inst_mask], inst[inst_mask], weight=inst_weight
-                    )
-                    inst_loss.backward()
-                    opt_inst.step()
-                    epoch_inst += inst_loss.item()
-                    n_inst += 1
-
                 n_train_steps += 1
                 if self.cfg.steps_per_epoch and n_train_steps >= self.cfg.steps_per_epoch:
                     break
@@ -545,13 +467,11 @@ class Trainer:
             val_m = self._eval_downstream(val_loader, sensor)
             sched_det.step(-val_m["val_det_f1"])
             sched_cls.step(-val_m["val_cls_f1"])
-            sched_inst.step(-val_m["val_inst_f1"])
 
             row = {
-                "epoch":           epoch,
-                "train_det_loss":  epoch_det  / max(n_det,  1),
-                "train_cls_loss":  epoch_cls  / max(n_cls,  1),
-                "train_inst_loss": epoch_inst / max(n_inst, 1),
+                "epoch":          epoch,
+                "train_det_loss": epoch_det / max(n_det, 1),
+                "train_cls_loss": epoch_cls / max(n_cls, 1),
                 **val_m,
             }
             with open(metrics_path, "a", newline="") as f:
@@ -587,43 +507,24 @@ class Trainer:
                     stopped_cls = True
                     status.append(f"cls stopped (ep {epoch})")
 
-            if val_m["val_inst_f1"] > best_inst_f1:
-                best_inst_f1 = val_m["val_inst_f1"]
-                pat_inst = 0
-                torch.save(
-                    det_head.instance_head.state_dict(),
-                    self.save_dir / f"inst_head_{sensor}_best.pth",
-                )
-                status.append(f"inst✓ F1={best_inst_f1:.4f}")
-            elif not stopped_inst:
-                pat_inst += 1
-                if pat_inst >= self.cfg.early_stop_patience:
-                    stopped_inst = True
-                    status.append(f"inst stopped (ep {epoch})")
-
             print(
                 f"Epoch {epoch:3d} | "
                 f"det={row['train_det_loss']:.4f} "
-                f"cls={row['train_cls_loss']:.4f} "
-                f"inst={row['train_inst_loss']:.4f} | "
+                f"cls={row['train_cls_loss']:.4f} | "
                 f"det_f1={val_m['val_det_f1']:.4f} "
-                f"cls_f1={val_m['val_cls_f1']:.4f} "
-                f"inst_f1={val_m['val_inst_f1']:.4f}"
+                f"cls_f1={val_m['val_cls_f1']:.4f}"
                 + (f"  [{', '.join(status)}]" if status else "")
             )
 
         print(
             f"[{sensor}] Downstream complete. "
-            f"Best det F1={best_det_f1:.4f}  "
-            f"cls F1={best_cls_f1:.4f}  "
-            f"inst F1={best_inst_f1:.4f}"
+            f"Best det F1={best_det_f1:.4f}  cls F1={best_cls_f1:.4f}"
         )
 
         # Load best weights for diagnostics
         for fname, subhead in [
             (f"presence_head_{sensor}_best.pth", det_head.presence),
             (f"type_head_{sensor}_best.pth",     det_head.type_head),
-            (f"inst_head_{sensor}_best.pth",     det_head.instance_head),
         ]:
             p = self.save_dir / fname
             if p.exists():
@@ -645,7 +546,6 @@ class Trainer:
         self.model.eval()
         det_true, det_pred = [], []
         cls_true, cls_pred = [], []
-        inst_true, inst_pred = [], []
 
         for batch in loader:
             avail = batch[f"{sensor}_avail"]
@@ -654,13 +554,10 @@ class Trainer:
 
             x_sensor = batch[f"x_{sensor}"][avail].to(self.device)
             vtype = batch["vehicle_type"][avail]
-            inst  = batch["instance_type"][avail]
             det   = batch["detection_label"][avail]
 
-            e_pres, e_type, e_inst, _ = self.model.encode_modality(sensor, x_sensor)
-            pres_logit, type_logits, inst_logits = self.model.det_heads[sensor](
-                e_pres, e_type, e_inst
-            )
+            e_pres, e_type = self.model.encode_modality(sensor, x_sensor)
+            pres_logit, type_logits = self.model.det_heads[sensor](e_pres, e_type)
 
             det_pred.extend((pres_logit > 0).long().cpu().tolist())
             det_true.extend(det.tolist())
@@ -672,13 +569,6 @@ class Trainer:
                 )
                 cls_true.extend(vtype[type_mask].tolist())
 
-            inst_mask = (det == 1) & (inst >= 0)
-            if inst_mask.any():
-                inst_pred.extend(
-                    inst_logits[inst_mask.to(self.device)].argmax(1).cpu().tolist()
-                )
-                inst_true.extend(inst[inst_mask].tolist())
-
         def _f1(true, pred):
             if not true:
                 return 0.0, 0.0
@@ -687,18 +577,15 @@ class Trainer:
                 f1_score(true, pred, average="weighted", zero_division=0),
             )
 
-        det_acc,  det_f1  = _f1(det_true,  det_pred)
-        cls_acc,  cls_f1  = _f1(cls_true,  cls_pred)
-        inst_acc, inst_f1 = _f1(inst_true, inst_pred)
+        det_acc, det_f1 = _f1(det_true, det_pred)
+        cls_acc, cls_f1 = _f1(cls_true, cls_pred)
 
         self.model.train()
         return {
-            "val_det_acc":  det_acc,
-            "val_det_f1":   det_f1,
-            "val_cls_acc":  cls_acc,
-            "val_cls_f1":   cls_f1,
-            "val_inst_acc": inst_acc,
-            "val_inst_f1":  inst_f1,
+            "val_det_acc": det_acc,
+            "val_det_f1":  det_f1,
+            "val_cls_acc": cls_acc,
+            "val_cls_f1":  cls_f1,
         }
 
     @torch.no_grad()
@@ -723,7 +610,6 @@ class Trainer:
 
         det_true, det_pred_fused = [], []
         type_true, type_pred_fused = [], []
-        inst_true, inst_pred_fused = [], []
         rows = []
 
         n_eval = 0
@@ -731,7 +617,6 @@ class Trainer:
 
             det_gt   = batch["detection_label"]
             vtype_gt = batch["vehicle_type"]
-            inst_gt  = batch["instance_type"]
             seg_ids  = batch["segment_id"].tolist()
             intervs  = batch["interv_idx"].tolist()
             B        = det_gt.shape[0]
@@ -739,10 +624,8 @@ class Trainer:
             # Accumulate per-sensor probability tensors
             ref_head   = self.model.det_heads[self.model.sensors[0]]
             n_types    = ref_head.type_head.head[-1].out_features
-            n_insts    = ref_head.instance_head.head[-1].out_features
             det_probs  = torch.zeros(B)
             type_probs = torch.zeros(B, n_types)
-            inst_probs = torch.zeros(B, n_insts)
             n_sensors  = torch.zeros(B)
 
             for sensor in self.model.sensors:
@@ -750,13 +633,10 @@ class Trainer:
                 if not avail.any():
                     continue
                 x_s = batch[f"x_{sensor}"][avail].to(self.device)
-                e_pres, e_type, e_inst, _ = self.model.encode_modality(sensor, x_s)
-                pres_logit, type_logits, inst_logits = self.model.det_heads[sensor](
-                    e_pres, e_type, e_inst
-                )
+                e_pres, e_type = self.model.encode_modality(sensor, x_s)
+                pres_logit, type_logits = self.model.det_heads[sensor](e_pres, e_type)
                 det_probs[avail]  += torch.sigmoid(pres_logit).cpu()
                 type_probs[avail] += torch.softmax(type_logits, dim=-1).cpu()
-                inst_probs[avail] += torch.softmax(inst_logits, dim=-1).cpu()
                 n_sensors[avail]  += 1
 
             # Samples with at least one available sensor
@@ -767,17 +647,14 @@ class Trainer:
 
             # Normalise by number of contributing sensors
             n_s = n_sensors[any_avail].unsqueeze(1)
-            det_p_norm   = (det_probs[any_avail] / n_sensors[any_avail]).numpy()
-            type_p_norm  = (type_probs[any_avail] / n_s).numpy()
-            inst_p_norm  = (inst_probs[any_avail] / n_s).numpy()
+            det_p_norm  = (det_probs[any_avail] / n_sensors[any_avail]).numpy()
+            type_p_norm = (type_probs[any_avail] / n_s).numpy()
 
             det_pred  = (det_p_norm >= 0.5).astype(int)
             type_pred = type_p_norm.argmax(axis=1)
-            inst_pred = inst_p_norm.argmax(axis=1)
 
             det_gt_sub   = det_gt[any_avail].numpy()
             vtype_gt_sub = vtype_gt[any_avail].numpy()
-            inst_gt_sub  = inst_gt[any_avail].numpy()
 
             det_true.extend(det_gt_sub.tolist())
             det_pred_fused.extend(det_pred.tolist())
@@ -786,15 +663,10 @@ class Trainer:
             type_true.extend(vtype_gt_sub[type_mask].tolist())
             type_pred_fused.extend(type_pred[type_mask].tolist())
 
-            inst_mask = (det_gt_sub == 1) & (inst_gt_sub >= 0)
-            inst_true.extend(inst_gt_sub[inst_mask].tolist())
-            inst_pred_fused.extend(inst_pred[inst_mask].tolist())
-
-            seg_ids_sub  = [seg_ids[i]  for i in range(B) if any_avail[i]]
-            intervs_sub  = [intervs[i]  for i in range(B) if any_avail[i]]
+            seg_ids_sub = [seg_ids[i] for i in range(B) if any_avail[i]]
+            intervs_sub = [intervs[i] for i in range(B) if any_avail[i]]
             for j in range(len(seg_ids_sub)):
                 ti = int(vtype_gt_sub[j])
-                ii = int(inst_gt_sub[j])
                 rows.append({
                     "segment_id": seg_ids_sub[j],
                     "interv_idx": intervs_sub[j],
@@ -802,8 +674,6 @@ class Trainer:
                     "pred_det":   int(det_pred[j]),
                     "true_type":  ti,
                     "pred_type":  int(type_pred[j]) if ti >= 0 else -1,
-                    "true_inst":  ii,
-                    "pred_inst":  int(inst_pred[j]) if ii >= 0 else -1,
                 })
 
             n_eval += 1
@@ -822,7 +692,6 @@ class Trainer:
         print("\n=== Fused Evaluation (all sensors combined) ===")
         _metrics(det_true,  det_pred_fused,  "presence")
         _metrics(type_true, type_pred_fused, "type")
-        _metrics(inst_true, inst_pred_fused, "instance")
 
         diag_dir = self.save_dir / "diagnostics_fused"
         diag_dir.mkdir(parents=True, exist_ok=True)
@@ -845,8 +714,8 @@ class Trainer:
             scores, labels = [], []
             for batch in val_loader:
                 x = batch[f"x_{sensor}"].to(self.device)
-                e_pres, e_type, e_inst, _ = self.model.encode_modality(sensor, x)
-                pres_logit, _, _ = self.model.det_heads[sensor](e_pres, e_type, e_inst)
+                e_pres, e_type = self.model.encode_modality(sensor, x)
+                pres_logit, _ = self.model.det_heads[sensor](e_pres, e_type)
                 scores.extend(torch.sigmoid(pres_logit).cpu().tolist())
                 labels.extend(batch["detection_label"].tolist())
             try:

@@ -2,22 +2,19 @@
 """
 run_experiments.py — Diagnostic ablation runner.
 
-Runs three CRL experiments in order to isolate the cause of non-convergence
-and low probe_type_f1. Each experiment writes its own save-dir under
-saved_crl/experiments/<name>/ and appends a summary to
-saved_crl/experiments/report.json when it finishes.
+Runs CRL experiments varying lambda_type and lambda_tc to understand how
+loss weighting affects type embedding quality (probe_type_f1).
 
 Experiments
 -----------
-exp1_no_tc      : lambda_tc=0, lambda_tc_cross=0
-                  Isolates whether the TC loss is destroying type signal.
+exp1_baseline   : default config (lambda_type=2.0, lambda_tc=0.0)
+                  Fresh baseline run — use these numbers to update BASELINE dict.
 
-exp2_no_tc_recon: lambda_tc=0, lambda_tc_cross=0, lambda_recon=0
-                  Stacked on exp1: checks if reconstruction further competes.
+exp2_tc_on      : lambda_tc=0.1
+                  Tests whether mild TC regularization helps disentanglement.
 
-exp3_no_losses  : lambda_tc=0, lambda_tc_cross=0, lambda_recon=0,
-                  lambda_causal=0
-                  Pure supervised baseline — only pres + type + inst CE losses.
+exp3_type_up    : lambda_type=4.0
+                  Tests whether stronger type supervision improves type_f1.
 
 Usage
 -----
@@ -28,14 +25,14 @@ Usage
     python run_experiments.py --steps-per-epoch 50
 
     # Only run specific experiments (space-separated names):
-    python run_experiments.py --only exp1_no_tc exp2_no_tc_recon
+    python run_experiments.py --only exp1_baseline exp2_tc_on
 
     # Change data paths if different from train.py defaults:
     python run_experiments.py --data-dir ../data_files/parsed/train \\
                               --val-dir  ../data_files/parsed/val
 
 All other hyperparameters (lr, batch size, architecture, etc.) are left at
-their CRLConfig defaults so results are directly comparable to the baseline.
+their CRLConfig defaults so results are directly comparable across experiments.
 """
 
 import argparse
@@ -64,30 +61,22 @@ from training.eval import run_full_eval
 
 EXPERIMENTS = [
     {
-        "name":        "exp1_no_tc",
-        "description": "No TC losses (lambda_tc=0, lambda_tc_cross=0)",
+        "name":        "exp1_baseline",
+        "description": "Default config (lambda_type=2.0, lambda_tc=0.0)",
+        "overrides":   {},
+    },
+    {
+        "name":        "exp2_tc_on",
+        "description": "Mild TC regularization (lambda_tc=0.1)",
         "overrides": {
-            "lambda_tc":       0.0,
-            "lambda_tc_cross": 0.0,
+            "lambda_tc": 0.1,
         },
     },
     {
-        "name":        "exp2_no_tc_recon",
-        "description": "No TC or reconstruction losses",
+        "name":        "exp3_type_up",
+        "description": "Stronger type supervision (lambda_type=4.0)",
         "overrides": {
-            "lambda_tc":       0.0,
-            "lambda_tc_cross": 0.0,
-            "lambda_recon":    0.0,
-        },
-    },
-    {
-        "name":        "exp3_no_losses",
-        "description": "Pure supervised baseline (only pres + type + inst CE)",
-        "overrides": {
-            "lambda_tc":       0.0,
-            "lambda_tc_cross": 0.0,
-            "lambda_recon":    0.0,
-            "lambda_causal":   0.0,
+            "lambda_type": 4.0,
         },
     },
 ]
@@ -139,7 +128,6 @@ def probe_summary(metrics: dict) -> str:
     return (
         f"pres_f1={metrics.get('probe_pres_f1', 0):.3f}  "
         f"type_f1={metrics.get('probe_type_f1', 0):.3f}  "
-        f"inst_f1={metrics.get('probe_inst_f1', 0):.3f}  "
         f"auc={metrics.get('detection_auc', 0):.3f}"
     )
 
@@ -181,7 +169,7 @@ def run_experiment(
     train_loader, val_loader = build_loaders(data_dir, val_dir, cfg)
 
     model   = CRLModel(cfg, sensors=MODALITIES).to(device)
-    loss_fn = SupervisedMultiTaskLoss(cfg, scm=model.scm).to(device)
+    loss_fn = SupervisedMultiTaskLoss(cfg).to(device)
     trainer = Trainer(model, loss_fn, cfg, device, save_dir)
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -226,16 +214,13 @@ def run_experiment(
 # ---------------------------------------------------------------------------
 
 BASELINE = {
-    "probe_type_f1":    0.197,
-    "probe_pres_f1":    0.792,
-    "probe_inst_f1":    0.098,
-    "detection_auc":    0.882,
-    "noise_sep_in_z_veh": 0.400,
+    "probe_type_f1": 0.0,   # update after first full training run
+    "probe_pres_f1": 0.0,
+    "detection_auc": 0.0,
 }
 
 TARGET = {
-    "probe_type_f1":    0.35,
-    "noise_sep_in_z_veh": 0.25,
+    "probe_type_f1": 0.35,
 }
 
 
@@ -254,15 +239,14 @@ def write_report(summaries: list[dict], report_path: Path) -> None:
             "MARGINAL" if delta_type_f1 > 0.01 else "NO_CHANGE"
         )
         report["comparison"].append({
-            "name":            s["name"],
-            "description":     s["description"],
-            "overrides":       s["overrides"],
-            "probe_type_f1":   round(m.get("probe_type_f1", 0), 4),
-            "probe_pres_f1":   round(m.get("probe_pres_f1", 0), 4),
-            "probe_inst_f1":   round(m.get("probe_inst_f1", 0), 4),
-            "detection_auc":   round(m.get("detection_auc",  0), 4),
-            "delta_type_f1":   round(delta_type_f1, 4),
-            "verdict":         verdict,
+            "name":          s["name"],
+            "description":   s["description"],
+            "overrides":     s["overrides"],
+            "probe_type_f1": round(m.get("probe_type_f1", 0), 4),
+            "probe_pres_f1": round(m.get("probe_pres_f1", 0), 4),
+            "detection_auc": round(m.get("detection_auc",  0), 4),
+            "delta_type_f1": round(delta_type_f1, 4),
+            "verdict":       verdict,
         })
 
     with open(report_path, "w") as f:

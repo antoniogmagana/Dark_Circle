@@ -200,7 +200,6 @@ class CRLConfig:
     # gradient competition through a shared projection.
     d_pres: int = 16    # presence embedding (binary: vehicle present/absent)
     d_type: int = 32    # type embedding (4 classes: pedestrian/light/sport/utility)
-    d_inst: int = 64    # instance embedding (13 classes)
 
     # Whether the SSM + encoder weights are shared across modalities.
     share_encoder:   bool  = False
@@ -222,11 +221,7 @@ class CRLConfig:
 
     # Loss weights
     lambda_type:      float = 2.0    # weight on vehicle type CE loss
-    lambda_inst:      float = 1.0    # weight on instance CE loss
-    lambda_recon:     float = 0.0    # weight on reconstruction regularizer (disabled: competes with type signal)
     lambda_tc:        float = 0.0    # weight on intra-z_veh TC penalty (disabled: infeasible with shared attn pool)
-    lambda_tc_cross:  float = 0.0    # weight on cross-block TC penalty (disabled: same reason as lambda_tc)
-    lambda_causal:    float = 1.0    # weight on SCM consistency loss (intervention invariance)
 
     # Data windowing (controls sliding-window stride in SensorDataset)
     horizon_stride_sec: float = 0.7   # seconds between successive anchor windows
@@ -240,8 +235,8 @@ class CRLConfig:
 
     @property
     def d_embed(self) -> int:
-        """Total concatenated embedding dimension (for decoder input)."""
-        return self.d_pres + self.d_type + self.d_inst
+        """Total concatenated embedding dimension."""
+        return self.d_pres + self.d_type
 
     def modality_cfg(self, modality: str) -> ModalityConfig:
         if modality == "audio":

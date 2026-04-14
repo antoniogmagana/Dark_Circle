@@ -140,7 +140,7 @@ def main():
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
 
-    loss_fn = SupervisedMultiTaskLoss(cfg, scm=model.scm)
+    loss_fn = SupervisedMultiTaskLoss(cfg)
     loss_fn.to(device)
     trainer = Trainer(model, loss_fn, cfg, device, save_dir)
 
@@ -149,10 +149,9 @@ def main():
     if args.phase in ("crl", "full"):
         trainer.train_crl(train_loader, val_loader, cfg.n_epochs)
         meta = {
-            "sensors": sensors,
-            "d_pres": cfg.d_pres,
-            "d_type": cfg.d_type,
-            "d_inst": cfg.d_inst,
+            "sensors":  sensors,
+            "d_pres":   cfg.d_pres,
+            "d_type":   cfg.d_type,
             "n_epochs": cfg.n_epochs,
         }
         save_dir.mkdir(parents=True, exist_ok=True)

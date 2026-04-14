@@ -155,7 +155,7 @@ def main():
     model = CRLModel(cfg, sensors=sensors).to(device)
     n = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Trainable parameters: {n:,}")
-    print(f"  Embedding dims: d_pres={cfg.d_pres}, d_type={cfg.d_type}, d_inst={cfg.d_inst}")
+    print(f"  Embedding dims: d_pres={cfg.d_pres}, d_type={cfg.d_type}")
 
     # ----------------------------------------------------------------
     _header("3. Shape trace: Filterbank → SSM → Encoder")
@@ -182,19 +182,9 @@ def main():
                 (x.shape[0], mod_cfg.t_prime, cfg.d_model),
             )
 
-            e_pres, e_type, e_inst = model.encoders[sensor](h)
+            e_pres, e_type = model.encoders[sensor](h)
             _check("  e_pres (B, d_pres)", e_pres, (x.shape[0], cfg.d_pres))
             _check("  e_type (B, d_type)", e_type, (x.shape[0], cfg.d_type))
-            _check("  e_inst (B, d_inst)", e_inst, (x.shape[0], cfg.d_inst))
-
-            import torch as _t
-            e_cat = _t.cat([e_pres, e_type, e_inst], dim=-1)
-            x_hat = model.decoders[sensor](e_cat)
-            _check(
-                "  decoder x_hat (B, K, T')",
-                x_hat,
-                (x.shape[0], mod_cfg.filterbank_out_channels, mod_cfg.t_prime),
-            )
 
     # ----------------------------------------------------------------
     _header("4. Full forward pass + loss")

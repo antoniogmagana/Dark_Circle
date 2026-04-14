@@ -83,21 +83,19 @@ def _collect_embeddings(
     loader,
     device: torch.device,
     sensor: str,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return (e_pres, e_type, e_inst, vehicle_type, detection_label) numpy arrays."""
-    ep_list, et_list, ei_list, vtypes, dets = [], [], [], [], []
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return (e_pres, e_type, vehicle_type, detection_label) numpy arrays."""
+    ep_list, et_list, vtypes, dets = [], [], [], []
     for batch in loader:
         x = batch[f"x_{sensor}"].to(device)
-        e_pres, e_type, e_inst, _ = model.encode_modality(sensor, x)
+        e_pres, e_type = model.encode_modality(sensor, x)
         ep_list.append(e_pres.cpu().numpy())
         et_list.append(e_type.cpu().numpy())
-        ei_list.append(e_inst.cpu().numpy())
         vtypes.append(batch["vehicle_type"].numpy())
         dets.append(batch["detection_label"].numpy())
     return (
         np.concatenate(ep_list),
         np.concatenate(et_list),
-        np.concatenate(ei_list),
         np.concatenate(vtypes),
         np.concatenate(dets),
     )
@@ -141,7 +139,7 @@ def check_unit_level(
                     f"got {tuple(h.shape)}, expected {exp_ssm}")
             all_shapes_ok = False
 
-        e_pres, e_type, e_inst = model.encoders[sensor](h)
+        e_pres, e_type = model.encoders[sensor](h)
         if tuple(e_pres.shape) != (B, cfg.d_pres):
             _result(FAIL, f"e_pres shape [{sensor}]",
                     f"got {tuple(e_pres.shape)}, expected ({B}, {cfg.d_pres})")
@@ -150,23 +148,10 @@ def check_unit_level(
             _result(FAIL, f"e_type shape [{sensor}]",
                     f"got {tuple(e_type.shape)}, expected ({B}, {cfg.d_type})")
             all_shapes_ok = False
-        if tuple(e_inst.shape) != (B, cfg.d_inst):
-            _result(FAIL, f"e_inst shape [{sensor}]",
-                    f"got {tuple(e_inst.shape)}, expected ({B}, {cfg.d_inst})")
-            all_shapes_ok = False
-        for name, t in [("e_pres", e_pres), ("e_type", e_type), ("e_inst", e_inst)]:
+        for name, t in [("e_pres", e_pres), ("e_type", e_type)]:
             if not t.isfinite().all():
                 _result(FAIL, f"{name} finite [{sensor}]", "non-finite values")
                 all_finite = False
-
-        # Reconstruction
-        import torch as _t
-        e_cat = _t.cat([e_pres, e_type, e_inst], dim=-1)
-        x_hat = model.decoders[sensor](e_cat)
-        exp_dec = (B, mod.filterbank_out_channels, mod.t_prime)
-        if tuple(x_hat.shape) != exp_dec:
-            _result(FAIL, f"decoder shape [{sensor}]",
-                    f"got {tuple(x_hat.shape)}, expected {exp_dec}")
             all_shapes_ok = False
 
     if all_shapes_ok:
@@ -263,12 +248,11 @@ def check_downstream_performance(
     _result(INFO, "  presence probe F1", f"{probe_pres_f1:.4f}")
     _result(INFO, "  type probe F1",     f"{probe_type_f1:.4f}")
 
-    # Fine-tuned head — trainer saves the three sub-heads separately
+    # Fine-tuned head — trainer saves sub-heads separately
     pres_ckpt = save_dir / f"presence_head_{primary_sensor}_best.pth"
     type_ckpt = save_dir / f"type_head_{primary_sensor}_best.pth"
-    inst_ckpt = save_dir / f"inst_head_{primary_sensor}_best.pth"
 
-    missing = [p.name for p in (pres_ckpt, type_ckpt, inst_ckpt) if not p.exists()]
+    missing = [p.name for p in (pres_ckpt, type_ckpt) if not p.exists()]
     if missing:
         _result(WARN, "Phase 2 head checkpoint(s) not found",
                 f"missing: {missing} — run --phase downstream first")
@@ -281,9 +265,6 @@ def check_downstream_performance(
     head.type_head.load_state_dict(
         torch.load(type_ckpt, map_location=device, weights_only=True)
     )
-    head.instance_head.load_state_dict(
-        torch.load(inst_ckpt, map_location=device, weights_only=True)
-    )
 
     det_true, det_pred, det_scores = [], [], []
     cls_true, cls_pred = [], []
@@ -293,8 +274,8 @@ def check_downstream_performance(
         vtype = batch["vehicle_type"]
         det   = batch["detection_label"]
 
-        e_pres, e_type, e_inst, _ = model.encode_modality(primary_sensor, x)
-        pres_logit, type_logits, _ = model.det_heads[primary_sensor](e_pres, e_type, e_inst)
+        e_pres, e_type = model.encode_modality(primary_sensor, x)
+        pres_logit, type_logits = model.det_heads[primary_sensor](e_pres, e_type)
 
         scores = torch.sigmoid(pres_logit).cpu().numpy()
         det_scores.extend(scores.tolist())
