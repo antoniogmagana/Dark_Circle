@@ -12,26 +12,23 @@
   },
   "experiments": [
     {
-      "name": "exp2_no_tc_recon",
-      "description": "No TC or reconstruction losses",
+      "name": "exp1_no_tc",
+      "description": "No TC losses (lambda_tc=0, lambda_tc_cross=0)",
       "overrides": {
         "lambda_tc": 0.0,
-        "lambda_tc_cross": 0.0,
-        "lambda_recon": 0.0
+        "lambda_tc_cross": 0.0
       },
-      "elapsed_min": 15.24,
+      "elapsed_min": 6.48,
       "final_metrics": {
-        "probe_pres_acc": 0.84640625,
-        "probe_pres_f1": 0.8466745051183514,
-        "probe_type_acc": 0.7146875,
-        "probe_type_f1": 0.8336067067614361,
-        "probe_inst_acc": 0.026875,
-        "probe_inst_f1": 0.052343274497869755,
-        "detection_auc": 0.9236229474121804
+        "probe_pres_acc": 0.5454296875,
+        "probe_pres_f1": 0.5481231784733956,
+        "probe_type_acc": 0.4988073426210807,
+        "probe_type_f1": 0.5136810015130587,
+        "probe_inst_acc": 0.2574065751719847,
+        "probe_inst_f1": 0.29800412091623396,
+        "detection_auc": 0.6193829603689243
       }
-    }
-  ],
-  "comparison": [
+    },
     {
       "name": "exp2_no_tc_recon",
       "description": "No TC or reconstruction losses",
@@ -40,11 +37,82 @@
         "lambda_tc_cross": 0.0,
         "lambda_recon": 0.0
       },
-      "probe_type_f1": 0.8336,
-      "probe_pres_f1": 0.8467,
-      "probe_inst_f1": 0.0523,
-      "detection_auc": 0.9236,
-      "delta_type_f1": 0.6366,
+      "elapsed_min": 6.37,
+      "final_metrics": {
+        "probe_pres_acc": 0.52861328125,
+        "probe_pres_f1": 0.5316751238850154,
+        "probe_type_acc": 0.4946935389082864,
+        "probe_type_f1": 0.5007053553519057,
+        "probe_inst_acc": 0.27261727797559376,
+        "probe_inst_f1": 0.3021055958203071,
+        "detection_auc": 0.5830411803740528
+      }
+    },
+    {
+      "name": "exp3_no_losses",
+      "description": "Pure supervised baseline (only pres + type + inst CE)",
+      "overrides": {
+        "lambda_tc": 0.0,
+        "lambda_tc_cross": 0.0,
+        "lambda_recon": 0.0,
+        "lambda_causal": 0.0
+      },
+      "elapsed_min": 6.36,
+      "final_metrics": {
+        "probe_pres_acc": 0.533671875,
+        "probe_pres_f1": 0.5411975691774612,
+        "probe_type_acc": 0.48093476682684,
+        "probe_type_f1": 0.49170597114656595,
+        "probe_inst_acc": 0.27393092958135995,
+        "probe_inst_f1": 0.3035494146848051,
+        "detection_auc": 0.5728291628216169
+      }
+    }
+  ],
+  "comparison": [
+    {
+      "name": "exp1_no_tc",
+      "description": "No TC losses (lambda_tc=0, lambda_tc_cross=0)",
+      "overrides": {
+        "lambda_tc": 0.0,
+        "lambda_tc_cross": 0.0
+      },
+      "probe_type_f1": 0.5137,
+      "probe_pres_f1": 0.5481,
+      "probe_inst_f1": 0.298,
+      "detection_auc": 0.6194,
+      "delta_type_f1": 0.3167,
+      "verdict": "IMPROVED"
+    },
+    {
+      "name": "exp2_no_tc_recon",
+      "description": "No TC or reconstruction losses",
+      "overrides": {
+        "lambda_tc": 0.0,
+        "lambda_tc_cross": 0.0,
+        "lambda_recon": 0.0
+      },
+      "probe_type_f1": 0.5007,
+      "probe_pres_f1": 0.5317,
+      "probe_inst_f1": 0.3021,
+      "detection_auc": 0.583,
+      "delta_type_f1": 0.3037,
+      "verdict": "IMPROVED"
+    },
+    {
+      "name": "exp3_no_losses",
+      "description": "Pure supervised baseline (only pres + type + inst CE)",
+      "overrides": {
+        "lambda_tc": 0.0,
+        "lambda_tc_cross": 0.0,
+        "lambda_recon": 0.0,
+        "lambda_causal": 0.0
+      },
+      "probe_type_f1": 0.4917,
+      "probe_pres_f1": 0.5412,
+      "probe_inst_f1": 0.3035,
+      "detection_auc": 0.5728,
+      "delta_type_f1": 0.2947,
       "verdict": "IMPROVED"
     }
   ]

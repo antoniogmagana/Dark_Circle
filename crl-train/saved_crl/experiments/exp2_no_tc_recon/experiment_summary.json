@@ -6,14 +6,14 @@
     "lambda_tc_cross": 0.0,
     "lambda_recon": 0.0
   },
-  "elapsed_min": 15.24,
+  "elapsed_min": 6.37,
   "final_metrics": {
-    "probe_pres_acc": 0.84640625,
-    "probe_pres_f1": 0.8466745051183514,
-    "probe_type_acc": 0.7146875,
-    "probe_type_f1": 0.8336067067614361,
-    "probe_inst_acc": 0.026875,
-    "probe_inst_f1": 0.052343274497869755,
-    "detection_auc": 0.9236229474121804
+    "probe_pres_acc": 0.52861328125,
+    "probe_pres_f1": 0.5316751238850154,
+    "probe_type_acc": 0.4946935389082864,
+    "probe_type_f1": 0.5007053553519057,
+    "probe_inst_acc": 0.27261727797559376,
+    "probe_inst_f1": 0.3021055958203071,
+    "detection_auc": 0.5830411803740528
   }
 }
