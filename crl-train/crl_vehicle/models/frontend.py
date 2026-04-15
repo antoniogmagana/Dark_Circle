@@ -92,8 +92,8 @@ class LearnableMorlet1D(nn.Module):
         # Create a fixed time vector `t` for the wavelet kernel, centered at 0.
         # This represents the time axis of the kernel in seconds.
         # It's stored as a buffer because it's fixed state, not a learnable parameter.
-        t = torch.arange(-(kernel_size // 2), kernel_size // 2, dtype=torch.float32) / sample_rate
-        self.register_buffer('t', t)
+        t_vec = torch.linspace(-(kernel_size // 2), kernel_size // 2, kernel_size, dtype=torch.float32) / sample_rate
+        self.register_buffer('t', t_vec)
         
         # These are the learnable scale parameters `s` for each of the `out_channels` wavelets. We
         # initialize them to cover a sensible frequency range for the given sample rate.
