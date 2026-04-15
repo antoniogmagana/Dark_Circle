@@ -105,6 +105,8 @@ def parse_args():
     p.add_argument("--lr",           type=float, default=None)
     p.add_argument("--num-workers",  type=int,   default=8)
     p.add_argument("--save-dir",     default="./saved_crl")
+    p.add_argument("--frontend",     type=str, default="multiscale", choices=["multiscale", "morlet"],
+                   help="Frontend architecture to use: 'multiscale' (early) or 'morlet' (late).")
     p.add_argument("--steps-per-epoch", type=int, default=None)
     return p.parse_args()
 
@@ -126,6 +128,7 @@ def main():
     if args.steps_per_epoch:
         cfg.steps_per_epoch = args.steps_per_epoch
     cfg.save_dir = str(save_dir)
+    cfg.frontend_type = args.frontend
 
     sensors = args.sensors or MODALITIES
     print(f"Sensors: {sensors}")
@@ -143,7 +146,12 @@ def main():
 
         save_dir.mkdir(parents=True, exist_ok=True)
         with open(save_dir / "meta.json", "w") as f:
-            json.dump({"sensors": sensors, "d_z": 10, "n_epochs": cfg.n_epochs}, f, indent=2)
+            json.dump({
+                "sensors": sensors,
+                "d_z": 10,
+                "n_epochs": cfg.n_epochs,
+                "frontend": args.frontend,
+            }, f, indent=2)
 
     if args.phase in ("downstream", "full"):
         ckpt = save_dir / "crl_best.pth"

@@ -2,17 +2,11 @@
 CRLConfig — single source of truth for all hyperparameters.
 
 Design principle: audio and seismic are processed completely independently
-through separate SpectrogramFrontend → SSM → MultiTaskEncoder chains.
-Each modality produces three task-specific embeddings (presence, type,
-instance) via separate projection branches, eliminating gradient competition
+through separate frontend → encoder chains, eliminating gradient competition
 between differently-sized latent blocks.
 
-Audio target SR  : 16000 Hz → window_size=16000, n_fft=512, hop_length=160
-                              → T' = 16000 // 160 + 1 = 101 frames
-                              → n_freq_bins = n_mels = 64
-Seismic target SR: 200 Hz   → window_size=200, n_fft=64, hop_length=8
-                              → T' = 200 // 8 + 1 = 26 frames
-                              → n_freq_bins = n_fft//2+1 = 33
+Audio target SR  : 16000 Hz (window_size=16000)
+Seismic target SR: 200 Hz   (window_size=200)
 """
 
 from dataclasses import dataclass, field
@@ -26,16 +20,6 @@ CLASS_MAP = {0: "pedestrian", 1: "light", 2: "sport", 3: "utility"}
 CATEGORY_TO_IDX = {v: k for k, v in CLASS_MAP.items()}
 LABEL_BACKGROUND = -1   # background recordings (m3nvc)
 LABEL_MULTI      = -2   # ambiguous multi-vehicle recordings
-
-INSTANCE_MAP = {
-    0: "polaris", 1: "warhog", 2: "pickup",
-    3: "walk", 4: "bicycle", 5: "motorcycle",
-    6: "scooter", 7: "forester", 8: "mustang",
-    9: "ev", 10: "cx30", 11: "miata", 12: "gle350",
-}
-INSTANCE_TO_IDX = {v: k for k, v in INSTANCE_MAP.items()}
-LABEL_INSTANCE_BACKGROUND = -1
-LABEL_INSTANCE_MULTI      = -2
 
 # Native sample rates per dataset and sensor modality
 NATIVE_SR = {
@@ -99,74 +83,18 @@ MODALITIES = ["audio", "seismic"]
 
 @dataclass
 class ModalityConfig:
-    """
-    Signal processing parameters for a single sensor modality.
-    Audio uses a mel spectrogram; seismic uses a linear-scale STFT.
-    """
+    """Signal processing parameters for a single sensor modality."""
     sample_rate:  int   = 200    # target SR after resampling
     window_size:  int   = 200    # samples per 1-second window (= sample_rate × 1s)
     n_channels:   int   = 1      # audio=1, seismic=1
-    n_fft:        int   = 64     # STFT window size in samples
-    hop_length:   int   = 8      # STFT frame hop in samples
-    n_mels:       int   = 0      # >0 → mel spectrogram; 0 → linear STFT (seismic)
-    f_min:        float = 0.0    # mel lower bound in Hz (audio only)
-    f_max:        float = 0.0    # mel upper bound in Hz (audio only; 0 = sr/2)
-
-    @property
-    def t_prime(self) -> int:
-        """Temporal frames produced by STFT with center=True padding."""
-        return self.window_size // self.hop_length + 1
-
-    @property
-    def n_freq_bins(self) -> int:
-        """Frequency bins output by the spectrogram frontend."""
-        if self.n_mels > 0:
-            return self.n_mels
-        return self.n_fft // 2 + 1
-
-    @property
-    def filterbank_out_channels(self) -> int:
-        """Total feature channels fed into TemporalSSM (freq_bins × n_channels)."""
-        return self.n_freq_bins * self.n_channels
 
 
 def default_audio_config() -> ModalityConfig:
-    """
-    Audio at 16 kHz target SR — mel spectrogram frontend.
-    1 second = 16000 samples; n_fft=512 (32 ms), hop=160 (10 ms).
-    T' = 16000 // 160 + 1 = 101 frames.
-    64 mel bins, 50 Hz – 8 kHz covers vehicle acoustic signatures.
-    """
-    return ModalityConfig(
-        sample_rate=16000,
-        window_size=16000,
-        n_channels=1,
-        n_fft=512,
-        hop_length=160,
-        n_mels=64,
-        f_min=50.0,
-        f_max=8000.0,
-    )
+    return ModalityConfig(sample_rate=16000, window_size=16000, n_channels=1)
 
 
 def default_seismic_config() -> ModalityConfig:
-    """
-    Seismic at 200 Hz target SR — linear STFT frontend.
-    1 second = 200 samples; n_fft=64 (320 ms), hop=8 (40 ms).
-    T' = 200 // 8 + 1 = 26 frames; 33 linear frequency bins (0–100 Hz).
-    Linear scale is appropriate: mel compression distorts the low-frequency
-    vehicle vibration bands (2–90 Hz) that contain diagnostic information.
-    """
-    return ModalityConfig(
-        sample_rate=200,
-        window_size=200,
-        n_channels=1,
-        n_fft=64,
-        hop_length=8,
-        n_mels=0,
-        f_min=0.0,
-        f_max=0.0,
-    )
+    return ModalityConfig(sample_rate=200, window_size=200, n_channels=1)
 
 
 # ---------------------------------------------------------------------------

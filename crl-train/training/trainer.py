@@ -26,7 +26,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from crl_vehicle.config import CRLConfig, MODALITIES, CLASS_MAP
-from crl_vehicle.models.frontend import MultiScale1DFrontend
+from crl_vehicle.models.frontend import MultiScale1DFrontend, LearnableMorlet1D
 from crl_vehicle.models.encoder_decoder import TemporalEncoder, FeatureDecoder
 from crl_vehicle.models.latent import CausalLatentSpace
 from crl_vehicle.models.intervention import UnknownInterventionClassifier, interv_idx_to_block_target
@@ -67,10 +67,19 @@ class CRLModel(nn.Module):
         for sensor in self.sensors:
             mod_cfg = config.modality_cfg(sensor)
 
-            frontend = MultiScale1DFrontend(
-                in_channels=mod_cfg.n_channels,
-                out_channels=config.d_model,
-            )
+            if self.cfg.frontend_type == "multiscale":
+                frontend = MultiScale1DFrontend(
+                    in_channels=mod_cfg.n_channels,
+                    out_channels=config.d_model,
+                )
+            elif self.cfg.frontend_type == "morlet":
+                frontend = LearnableMorlet1D(
+                    in_channels=mod_cfg.n_channels,
+                    out_channels=config.d_model,
+                    kernel_size=config.morlet_kernel_size,
+                )
+            else:
+                raise ValueError(f"Unknown frontend_type: {self.cfg.frontend_type}")
             self.frontends[sensor] = frontend
 
             # Infer frontend output shape with a dummy pass
@@ -215,16 +224,25 @@ class Trainer:
             x_t  = batch[f"x_{sensor}_t"][avail].to(self.device)
             x_tn = batch[f"x_{sensor}_tn"][avail].to(self.device)
 
-            feat_t,  z_t,  mu_t,  lv_t  = self.model.encode(sensor, x_t)
+            feat_t, z_t, mu_t, lv_t = self.model.encode(sensor, x_t)
+            assert mu_t.isfinite().all(), f"mu_t became non-finite for sensor {sensor}"
+            assert lv_t.isfinite().all(), f"lv_t became non-finite for sensor {sensor}"
+
             feat_tn, z_tn, mu_tn, lv_tn = self.model.encode(sensor, x_tn)
+            assert mu_tn.isfinite().all(), f"mu_tn became non-finite for sensor {sensor}"
+            assert lv_tn.isfinite().all(), f"lv_tn became non-finite for sensor {sensor}"
 
             x_hat_t  = self.model.decode(sensor, z_t)
             x_hat_tn = self.model.decode(sensor, z_tn)
 
             recon = (reconstruction_loss(x_hat_t, feat_t) +
                      reconstruction_loss(x_hat_tn, feat_tn)) / 2
-            kl    = (kl_divergence(mu_t, lv_t, beta=beta) +
-                     kl_divergence(mu_tn, lv_tn, beta=beta)) / 2
+
+            kl_t = kl_divergence(mu_t, lv_t, beta=beta)
+            assert kl_t.isfinite(), f"kl_t became non-finite for sensor {sensor}"
+            kl_tn = kl_divergence(mu_tn, lv_tn, beta=beta)
+            assert kl_tn.isfinite(), f"kl_tn became non-finite for sensor {sensor}"
+            kl = (kl_t + kl_tn) / 2
 
             # Intervention matching
             interv_idx_t  = batch["interv_idx_t"][avail].to(self.device)
@@ -259,6 +277,12 @@ class Trainer:
         accum: dict[str, float] = {}
         n = 0
         for batch in loader:
+            # Sanity check for NaNs in the input data
+            for sensor in self.model.sensors:
+                if batch[f"{sensor}_avail"].any():
+                    assert batch[f"x_{sensor}_t"].isfinite().all(), f"NaNs detected in input x_{sensor}_t"
+                    assert batch[f"x_{sensor}_tn"].isfinite().all(), f"NaNs detected in input x_{sensor}_tn"
+
             self.optimizer.zero_grad()
             with torch.amp.autocast("cuda", enabled=(self.device.type == "cuda")):
                 loss, metrics = self._forward_pair(batch, beta)

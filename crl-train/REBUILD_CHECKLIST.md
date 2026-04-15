@@ -23,34 +23,34 @@ This document tracks the ground-up rebuild of the Causal Representation Learning
   * [x] `forward(x)`: Applies the kernels and computes the power envelope.
 
 ### 2. Core Causal Latent Structure (`models/latent.py`)
-* [ ] `CausalLatentSpace` 
-  * [ ] `__init__()`: Defines the index slices for presence (1), type (4), proximity (1), and noise (4).
-  * [ ] `split(z)`: Applies specific activations (sigmoid, softmax) to the relevant slices and returns the blocks.
+* [x] `CausalLatentSpace` 
+  * [x] `__init__()`: Defines the index slices for presence (1), type (4), proximity (1), and noise (4).
+  * [x] `split(z)`: Applies specific activations (sigmoid for presence, softmax for type, softplus for proximity) to the relevant slices and returns the blocks.
 
 ### 3. VAE Backbone (`models/encoder_decoder.py`)
-* [ ] `TemporalEncoder`
-  * [ ] `__init__()`: Defines the sequence model (e.g., Transformer/SSM) and the projection to `mu` and `log_var`.
-  * [ ] `forward(features)`: Contextualizes the features over time and samples the latent vector `z`.
-* [ ] `FeatureDecoder`
-  * [ ] `__init__()`: Defines the layers to expand `z` back to the sequence length.
-  * [ ] `forward(z)`: Reconstructs the power envelope (for the ELBO reconstruction loss).
+* [x] `TemporalEncoder`
+  * [x] `__init__()`: Defines the sequence model (e.g., Transformer/SSM) and the projection to `mu` and `log_var`.
+  * [x] `forward(features)`: Contextualizes the features over time and samples the latent vector `z`.
+* [x] `FeatureDecoder`
+  * [x] `__init__()`: Defines the layers to expand `z` back to the sequence length.
+  * [x] `forward(z)`: Reconstructs the power envelope (for the ELBO reconstruction loss).
 
 ### 4. Causal Intervention Matching (`models/intervention.py`)
-* [ ] `UnknownInterventionClassifier`
-  * [ ] `__init__(d_z)`: Defines the MLP that predicts which latent block changed.
-  * [ ] `forward(z_t, z_t1)`: Concatenates adjacent time steps and outputs logits for the intervention targets.
+* [x] `UnknownInterventionClassifier`
+  * [x] `__init__(d_z)`: Defines the MLP that predicts which latent block changed.
+  * [x] `forward(z_t, z_tn)`: Concatenates adjacent time steps and outputs logits for the intervention targets.
 
 ### 5. Downstream Linear Heads (`models/heads.py`)
-* [ ] `LinearPresenceHead`
-  * [ ] `forward(z_presence)`: Outputs the binary detection logit.
-* [ ] `LinearTypeHead`
-  * [ ] `forward(z_type)`: Outputs the multi-class vehicle category logits.
+* [x] `LinearPresenceHead`
+  * [x] `forward(z_pres)`: Outputs the binary detection logit.
+* [x] `LinearTypeHead`
+  * [x] `forward(z_type)`: Outputs the multi-class vehicle category logits.
 
 ### 6. Losses (`losses/crl_loss.py`)
-* [ ] `reconstruction_loss(x_hat, x)`
-* [ ] `kl_divergence(mu, log_var)`
-* [ ] `intervention_matching_loss(interv_logits, interv_targets)`
+* [x] `reconstruction_loss(x_hat, x)`
+* [x] `kl_divergence(mu, log_var)`
+* [x] `intervention_matching_loss(interv_logits, interv_targets)`
 
 ### 7. Data Pipeline Updates (`data/dataset.py`)
-* [ ] `ConsecutivePairDataset`
-  * [ ] Update `_build_index()` to strictly group by `(dataset, vehicle, sensor, scene_id, run_id)` to prevent temporal leakage between disjointed runs.
+* [x] `ConsecutivePairDataset`
+  * [x] Update `_build_index()` to strictly group by `(dataset, vehicle, rs_node)` with `seg_key = (scene_id, run_id)` to prevent temporal leakage between disjointed runs.

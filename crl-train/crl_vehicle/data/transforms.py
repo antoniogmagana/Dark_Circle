@@ -22,7 +22,6 @@ apply_intervention handles scaling and channel broadcasting.
 
 import math
 import torch
-import torch.nn.functional as F
 
 
 # ---------------------------------------------------------------------------
@@ -43,33 +42,6 @@ def rms_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     x = x - x.mean(dim=-1, keepdim=True)
     rms = x.pow(2).mean(dim=-1, keepdim=True).sqrt()   # (C, 1)
     return x / (rms + eps)
-
-
-# ---------------------------------------------------------------------------
-# Optional training augmentations
-# ---------------------------------------------------------------------------
-
-def add_awgn(x: torch.Tensor, snr_db_range: tuple = (10, 30)) -> torch.Tensor:
-    """
-    Additive white Gaussian noise at a uniformly-sampled SNR in [snr_db_range].
-    x: (C, W). Keeps the model robust to ambient noise floor variation.
-    """
-    snr_db = torch.empty(1).uniform_(snr_db_range[0], snr_db_range[1]).item()
-    snr_linear = 10 ** (snr_db / 10.0)
-    signal_power = x.pow(2).mean()
-    noise_power = signal_power / (snr_linear + 1e-8)
-    return x + torch.randn_like(x) * noise_power.sqrt()
-
-
-def random_time_shift(x: torch.Tensor, max_shift_frac: float = 0.1) -> torch.Tensor:
-    """
-    Circular shift along the time axis by a random fraction of the window width.
-    x: (C, W). Encourages temporal invariance in the encoder.
-    """
-    W = x.shape[-1]
-    max_shift = max(1, int(W * max_shift_frac))
-    shift = torch.randint(-max_shift, max_shift + 1, (1,)).item()
-    return torch.roll(x, shifts=shift, dims=-1)
 
 
 # ---------------------------------------------------------------------------
@@ -249,22 +221,6 @@ def apply_intervention(
 # Number of distinct intervention types (excluding 0=no-op)
 N_INTERVENTIONS = 7
 
-
-def apply_all_interventions(x: torch.Tensor, sample_rate: int) -> torch.Tensor:
-    """
-    Return N_INTERVENTIONS+1 versions of x: [x_clean, x_interv1, ..., x_interv7].
-    Each version is RMS-normalised independently.
-
-    x: (C, W)
-    Returns: (N_INTERVENTIONS+1, C, W)
-
-    Single-sample version kept for backwards compatibility.
-    Prefer apply_interventions_batch_gpu for training loops.
-    """
-    return torch.stack([
-        rms_normalize(apply_intervention(x, k, sample_rate))
-        for k in range(N_INTERVENTIONS + 1)
-    ])
 
 
 # ---------------------------------------------------------------------------

@@ -27,9 +27,6 @@ import torch.nn as nn
 
 # Block target indices
 BLOCK_NO_CHANGE  = 0
-BLOCK_PRESENCE   = 1
-BLOCK_TYPE       = 2
-BLOCK_PROXIMITY  = 3
 BLOCK_NOISE      = 4
 
 N_BLOCK_TARGETS  = 5

@@ -1,12 +1,14 @@
-# CRL-Train: Function Reference, Training Summary, and Validation Plan
+# CRL-Train: Architecture, Training, and Validation
 
 ---
 
 ## 1. System Overview
 
-CRL-Train is a Causal Representation Learning (CRL) pipeline for multi-modal vehicle detection. It learns structured, disentangled latent representations from paired audio and seismic sensor windows using a Structured VAE constrained by a learnable Structural Causal Model (SCM). The latent space is semantically partitioned into vehicle *presence*, *type*, *proximity*, and *noise* dimensions.
+CRL-Train is a Causal Representation Learning (CRL) pipeline for multi-modal vehicle detection. It learns a structured, disentangled latent space using a Variational Autoencoder (VAE) backbone. Causality is enforced via CITRIS-style temporal intervention matching, where the model learns to identify which latent factor has changed between consecutive time steps `t` and `t+n`.
 
-**Signal flow (per modality):**
+The latent space is semantically partitioned into vehicle *presence* (1D), *type* (4D), *proximity* (1D), and *unstructured noise* (4D).
+
+**Signal flow (per modality, per time step):**
 ```
 (B, C, W) raw window
   → LearnableFilterbank  → (B, K*C, T')  log-power envelope
@@ -407,27 +409,15 @@ L_total = L_ELBO(audio) + L_ELBO(seismic)
         + lambda_task      * L_task        [detection + classification]
 ```
 
-Where each modality ELBO is:
-
-```
-L_ELBO = L_recon + beta * L_KL + lambda_causal * L_SCM + lambda_disent * L_TC
-```
-
-**Beta annealing** (0 → 4 over 20 epochs) prevents posterior collapse. The encoder is free to encode all information initially; the KL pressure builds gradually as structure emerges.
-
-**Curriculum (epochs 10–20)**: Unknown-intervention (consecutive pair) batches are gradually mixed in, training the `UnknownInterventionClassifier` to identify which latent changed. This enforces that intervention effects are localized to specific latent dimensions.
+**Beta annealing** (0 → 1 over the first half of training) prevents posterior collapse. The KL divergence term is gradually weighted in, allowing the VAE to first learn a good reconstruction before being forced to match the prior.
 
 **Checkpointing** uses a fixed `beta = beta_end` regardless of training epoch, making the checkpoint metric stationary and comparable across epochs.
 
-**LR schedule**: Linear warmup followed by cosine annealing.
-
-**Gradient clipping** (`max_norm=1.0`) stabilizes training with the NOTEARS acyclicity loss, which can produce large gradients.
+**Gradient clipping** (`max_norm=1.0`) is used for numerical stability.
 
 ### Phase 2: Downstream Fine-tuning
 
-The CRL backbone is frozen. Only `PresenceHead` and `TypeHead` are trained using the structured latent:
-- `z_presence` → vehicle detection (BCE, class-weighted)
-- `z_type` → vehicle classification (CrossEntropy)
+The CRL backbone is frozen (`requires_grad=False`). Only the simple linear heads (`LinearPresenceHead`, `LinearTypeHead`) are trained on the frozen latent representations.
 
 This two-phase approach validates that the latent representations are independently useful for downstream tasks without task signal contaminating the causal structure.
 
@@ -435,28 +425,21 @@ This two-phase approach validates that the latent representations are independen
 
 ## 8. Validation Plan
 
-### 8.1 Unit-Level Checks (already partially implemented in `smoke_test.py`)
+### 8.1 Unit-Level Checks
 
 | Check | What it validates |
 |---|---|
 | Shape trace through each module | No silent dimension mismatches |
 | Loss is finite after forward pass | No NaN/Inf in gradients or outputs |
 | Gradient flows to all parameter groups | No dead sub-networks |
-| `acyclicity_loss` decreases during training | SCM is learning a DAG, not a dense graph |
-| `center_frequencies()` stays within `[f_min, f_max]` | Filterbank does not collapse to degenerate frequencies |
 
 ### 8.2 Representation Quality
 
-**Mutual Information Gap (MIG)** — already in `eval.py`
+**Mutual Information Gap (MIG)**
 
-- Target: MIG > 0.2 for `vehicle_type` and `detection` factors against `z_type` and `z_presence` blocks.
-- A high MIG on `z_noise` against `interv_type` confirms that interventions are correctly localized.
-- Compare MIG of semantic blocks vs. full `z` to check that structure is not redundantly encoded.
 
-**Linear Probe Accuracy** — already in `eval.py`
+**Linear Probe Accuracy**
 
-- `z_type` probe accuracy should be substantially better than random (25% for 4 classes).
-- `z_presence` AUC should exceed a majority-class baseline.
 - `z_proximity` should correlate with any range/distance ground truth if available.
 
 **Cross-block interference test**
@@ -467,19 +450,13 @@ This two-phase approach validates that the latent representations are independen
 
 ### 8.3 Causal Structure Validity
 
-**SCM adjacency inspection**
-
-- After training, visualize `SCM.adjacency()`. The learned DAG should reflect the expected causal order: `presence → proximity → type → noise` (noise is not caused by type, but presence causes proximity, etc.).
-- Check that `acyclicity_loss` is near zero at convergence.
-
 **Intervention localization test**
 
-- For each known intervention type `k`, apply it to a batch, run `forward_known`, and inspect `interv_mask`. The mask should activate exactly the noise dimensions, not presence or type.
-- Compare `z_noise` distributions between intervened and non-intervened windows. They should differ; `z_type` should not.
+- Check the accuracy of the `UnknownInterventionClassifier`. High accuracy indicates that changes in the input are being correctly isolated to specific latent dimensions.
 
 **Counterfactual consistency**
 
-- For a fixed window, manually set `z_type` to each of the 4 vehicle classes, pass through the decoder, and inspect the reconstructed filterbank. Each class should produce qualitatively different spectral envelopes (different engine harmonics/road noise profiles).
+- For a fixed window, manually set `z_type` to each of the 4 vehicle classes, pass through the decoder, and inspect the reconstructed features. Each class should produce qualitatively different feature maps.
 
 ### 8.4 Downstream Task Performance
 
@@ -489,24 +466,18 @@ This two-phase approach validates that the latent representations are independen
 | Vehicle classification accuracy | 25% (random, 4 classes) | Use `z_type` head |
 | Weighted F1 (detection) | Class-frequency weighted F1 = 0 | Especially for the minority class |
 
-Run these on the held-out validation split using `run_full_eval`. Compare Phase 2 (fine-tuned head) against Phase 1 (linear probe on frozen `z`) to confirm that fine-tuning adds value beyond what is already linearly decodable.
-
 ### 8.5 Ablations (for scientific validity)
 
 | Ablation | What it isolates |
 |---|---|
-| Remove SCM (set `lambda_causal=0`, `lambda_acyclic=0`) | Contribution of causal structure vs. plain structured VAE |
-| Remove disentanglement loss (`lambda_disent=0`) | Role of TC penalty in block separation |
-| Remove curriculum (train unknown-interv from epoch 0) | Whether curriculum ordering matters |
+| Remove intervention loss (`lambda_interv=0`) | Contribution of causal matching vs. a plain VAE |
 | Single modality (audio-only or seismic-only) | Modality-specific contribution; robustness to sensor dropout |
-| Fixed (non-learnable) filterbank | Value of end-to-end spectral learning |
+| Use `LearnableMorlet1D` vs `MultiScale1DFrontend` | Impact of frontend choice on disentanglement |
 
 ### 8.6 Sanity Tests for Scientific Integrity
 
 Per the project directives:
 
 1. **Checkpoint metric stationarity**: Plot val loss using annealing beta and fixed beta over epochs. The annealing-beta curve should trend down-then-up (non-stationary); the fixed-beta curve should be monotonically improving for a well-trained model. If they diverge dramatically, investigate beta schedule.
-
 2. **Log both raw and fixed-reference loss**: `crl_metrics.csv` should contain both. Verify post-hoc that the best checkpoint (by fixed-beta metric) also has the best downstream task performance.
-
 3. **Epoch-invariant comparison**: When comparing two runs (e.g., different `lambda_causal`), ensure both are evaluated at the same `beta=beta_end` to make the comparison fair.

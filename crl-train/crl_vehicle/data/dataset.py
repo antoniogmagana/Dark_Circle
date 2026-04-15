@@ -22,6 +22,7 @@ SensorDataset.__getitem__ returns:
       'segment_id':      int    — unique int per continuous recording segment
     }
 
+
 Windows overlap: stride = cfg.horizon_stride_sec seconds (default 0.7 s).
 Raw waveforms are cached once so there is no additional memory cost.
 
@@ -31,7 +32,7 @@ ConsecutivePairDataset wraps SensorDataset for CITRIS CRL training:
       'x_seismic_t', 'x_seismic_tn',
       'audio_avail', 'seismic_avail',
       'interv_idx_t', 'interv_idx_tn',
-      'horizon_n',   — always 1
+      'horizon_n',      — always 1
       'vehicle_type', 'detection_label', 'segment_id'
     }
 """
@@ -52,9 +53,6 @@ from crl_vehicle.config import (
     CATEGORY_TO_IDX,
     LABEL_BACKGROUND,
     LABEL_MULTI,
-    INSTANCE_TO_IDX,
-    LABEL_INSTANCE_BACKGROUND,
-    LABEL_INSTANCE_MULTI,
     MODALITIES,
 )
 from crl_vehicle.data.transforms import (
@@ -99,7 +97,7 @@ def _parse_stem(stem: str, sensor: str):
 
 
 def _vehicle_to_labels(dataset: str, vehicle: str):
-    """Map (dataset, vehicle) → (vehicle_type_int, instance_type_int, is_valid)."""
+    """Map (dataset, vehicle) → (vehicle_type_int, is_valid)."""
     ds_map = DATASET_VEHICLE_MAP.get(dataset, {})
     entry = ds_map.get(vehicle)
     if entry is None:
@@ -108,15 +106,13 @@ def _vehicle_to_labels(dataset: str, vehicle: str):
                 entry = ds_map[key]
                 break
     if entry is None:
-        return None, None, False
-    type_str, instance_str = entry[0], entry[1]
+        return None, False
+    type_str = entry[0]
     if type_str == "multi":
-        return LABEL_MULTI, LABEL_INSTANCE_MULTI, True
+        return LABEL_MULTI, True
     if type_str == "background":
-        return LABEL_BACKGROUND, LABEL_INSTANCE_BACKGROUND, True
-    vehicle_type_int = CATEGORY_TO_IDX[type_str]
-    instance_type_int = INSTANCE_TO_IDX.get(instance_str, LABEL_INSTANCE_BACKGROUND)
-    return vehicle_type_int, instance_type_int, True
+        return LABEL_BACKGROUND, True
+    return CATEGORY_TO_IDX[type_str], True
 
 
 # ---------------------------------------------------------------------------
@@ -152,15 +148,15 @@ class SensorDataset(Dataset):
         self._groups: dict = {}
 
         # Final flat index:
-        # (gkey, w, vehicle_type, instance_type, det_label, audio_seg_id, seismic_seg_id)
+        # (gkey, w, vehicle_type, det_label, audio_seg_id, seismic_seg_id)
         self._index: list = []
 
         self._build_index()
         print(
             f"  SensorDataset [{self.parquet_dir.name}]: "
             f"{len(self._index)} windows, "
-            f"{sum(1 for e in self._index if e[5] >= 0)} with audio, "
-            f"{sum(1 for e in self._index if e[6] >= 0)} with seismic"
+            f"{sum(1 for e in self._index if e[4] >= 0)} with audio, "
+            f"{sum(1 for e in self._index if e[5] >= 0)} with seismic"
         )
 
     # ------------------------------------------------------------------
@@ -185,7 +181,7 @@ class SensorDataset(Dataset):
 
         # Pass 2: load, resolve labels, build window index
         for (dataset, vehicle, rs_node), sensor_paths in raw_groups.items():
-            vehicle_type, instance_type, valid = _vehicle_to_labels(dataset, vehicle)
+            vehicle_type, valid = _vehicle_to_labels(dataset, vehicle)
             if not valid:
                 continue
 
@@ -254,7 +250,7 @@ class SensorDataset(Dataset):
                 for w in range(max_windows):
                     row_idx = w * stride_native
                     det_label = int(present_arr[row_idx]) if row_idx < len(present_arr) else 1
-                    self._index.append((gkey, w, vehicle_type, instance_type, det_label, audio_seg_id, seismic_seg_id))
+                    self._index.append((gkey, w, vehicle_type, det_label, audio_seg_id, seismic_seg_id))
 
     def _get_segment_id(self, sensor: str, stem: str, seg_key) -> int:
         key = (sensor, stem, seg_key)
@@ -389,7 +385,7 @@ class SensorDataset(Dataset):
         return len(self._index)
 
     def __getitem__(self, idx: int) -> dict:
-        gkey, w, vehicle_type, instance_type, det_label, audio_seg_id, seismic_seg_id = self._index[idx]
+        gkey, w, vehicle_type, det_label, audio_seg_id, seismic_seg_id = self._index[idx]
         group = self._groups[gkey]
 
         # Same intervention applied to both modalities — same environmental cause,
@@ -424,7 +420,6 @@ class SensorDataset(Dataset):
             "seismic_avail":   seismic_avail,
             "interv_idx":      interv_idx,
             "vehicle_type":    vehicle_type,
-            "instance_type":   instance_type,
             "detection_label": det_label,
             "segment_id":      segment_id,
         }
@@ -466,7 +461,7 @@ class ConsecutivePairDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict:
         i_t = self._anchors[idx]
-        gkey, w_t, vehicle_type, instance_type, det_label, audio_seg_id, seismic_seg_id = self.ds._index[i_t]
+        gkey, w_t, vehicle_type, det_label, audio_seg_id, seismic_seg_id = self.ds._index[i_t]
         group = self.ds._groups[gkey]
         w_tn = w_t + 1
 
@@ -501,7 +496,6 @@ class ConsecutivePairDataset(Dataset):
             "interv_idx_tn":   interv_tn,
             "horizon_n":       1,
             "vehicle_type":    vehicle_type,
-            "instance_type":   instance_type,
             "detection_label": det_label,
             "segment_id":      seismic_seg_id if seismic_avail else audio_seg_id,
         }
@@ -519,7 +513,6 @@ def collate_single(batch: list) -> dict:
         "seismic_avail":   torch.tensor([b["seismic_avail"] for b in batch], dtype=torch.bool),
         "interv_idx":      torch.tensor([b["interv_idx"]      for b in batch], dtype=torch.long),
         "vehicle_type":    torch.tensor([b["vehicle_type"]     for b in batch], dtype=torch.long),
-        "instance_type":   torch.tensor([b["instance_type"]    for b in batch], dtype=torch.long),
         "detection_label": torch.tensor([b["detection_label"]  for b in batch], dtype=torch.long),
         "segment_id":      torch.tensor([b["segment_id"]       for b in batch], dtype=torch.long),
     }
@@ -537,7 +530,6 @@ def collate_pairs(batch: list) -> dict:
         "interv_idx_tn":   torch.tensor([b["interv_idx_tn"]   for b in batch], dtype=torch.long),
         "horizon_n":       torch.tensor([b["horizon_n"]        for b in batch], dtype=torch.long),
         "vehicle_type":    torch.tensor([b["vehicle_type"]     for b in batch], dtype=torch.long),
-        "instance_type":   torch.tensor([b["instance_type"]    for b in batch], dtype=torch.long),
         "detection_label": torch.tensor([b["detection_label"]  for b in batch], dtype=torch.long),
         "segment_id":      torch.tensor([b["segment_id"]       for b in batch], dtype=torch.long),
     }
