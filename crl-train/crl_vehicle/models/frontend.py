@@ -95,10 +95,29 @@ class LearnableMorlet1D(nn.Module):
         t = torch.arange(-(kernel_size // 2), kernel_size // 2, dtype=torch.float32) / sample_rate
         self.register_buffer('t', t)
         
-        # These are the learnable scale parameters `s` for each of the `out_channels` wavelets.
-        # We initialize them to be log-spaced, which provides a good initial coverage
-        # of a wide range of frequencies. `.exp()` converts from log-space back to scales.
-        s_init = torch.linspace(math.log(0.01), math.log(1.0), out_channels).exp()
+        # These are the learnable scale parameters `s` for each of the `out_channels` wavelets. We
+        # initialize them to cover a sensible frequency range for the given sample rate.
+        # The scale `s` (in seconds) is related to frequency `f` (in Hz) by: s = w0 / (2*pi*f)
+
+        # Define frequency ranges of interest based on sensor type
+        if self.sample_rate > 1000:  # Heuristic for audio
+            f_min, f_max = 20.0, 8000.0  # 20 Hz to 8 kHz (Nyquist for 16k SR)
+        else:  # Heuristic for seismic
+            f_min, f_max = 2.0, 100.0   # 2 Hz to 100 Hz (Nyquist for 200 SR)
+
+        # Convert frequencies to scales
+        s_max = self.w0 / (2 * math.pi * f_min)  # Low frequency -> high scale
+        s_min = self.w0 / (2 * math.pi * f_max)  # High frequency -> low scale
+
+        # We initialize the learnable parameters in the inverse-softplus space
+        # so that after `softplus`, they fall into our desired [s_min, s_max] range.
+        # inv_softplus(y) = log(exp(y) - 1), which is `torch.log(torch.expm1(y))`.
+        # This is numerically stable for small y.
+        init_min = torch.log(torch.expm1(torch.tensor(s_min)))
+        init_max = torch.log(torch.expm1(torch.tensor(s_max)))
+
+        # Initialize from high freq (low scale) to low freq (high scale)
+        s_init = torch.linspace(init_min, init_max, self.out_channels)
         self.scales = nn.Parameter(s_init)
 
     def _build_wavelet_kernels(self):
