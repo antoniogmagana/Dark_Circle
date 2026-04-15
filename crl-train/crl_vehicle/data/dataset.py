@@ -1,8 +1,8 @@
 """
-SensorDataset and MultiHorizonPairDataset
+SensorDataset and ConsecutivePairDataset
 
 Reads seismic AND audio parquet files, returning them independently so that
-each modality can be processed through its own Filterbank → SSM → Encoder
+each modality can be processed through its own frontend → TemporalEncoder
 chain with no early signal mixing (no entanglement before the latent space).
 
 Parquet filename convention:
@@ -22,17 +22,16 @@ SensorDataset.__getitem__ returns:
       'segment_id':      int    — unique int per continuous recording segment
     }
 
-Windows overlap: stride = cfg.horizon_stride_sec seconds (default 0.1 s).
-This is ~10× more windows per recording than non-overlapping; raw waveforms
-are cached once so there is no additional memory cost.
+Windows overlap: stride = cfg.horizon_stride_sec seconds (default 0.7 s).
+Raw waveforms are cached once so there is no additional memory cost.
 
-MultiHorizonPairDataset wraps SensorDataset for causal multi-horizon training:
+ConsecutivePairDataset wraps SensorDataset for CITRIS CRL training:
     {
       'x_audio_t',   'x_audio_tn',
       'x_seismic_t', 'x_seismic_tn',
       'audio_avail', 'seismic_avail',
       'interv_idx_t', 'interv_idx_tn',
-      'horizon_n',   — int in {1..n_horizons}
+      'horizon_n',   — always 1
       'vehicle_type', 'detection_label', 'segment_id'
     }
 """
@@ -436,32 +435,30 @@ class SensorDataset(Dataset):
 
 
 # ---------------------------------------------------------------------------
-# MultiHorizonPairDataset
+# ConsecutivePairDataset
 # ---------------------------------------------------------------------------
 
-class MultiHorizonPairDataset(Dataset):
+class ConsecutivePairDataset(Dataset):
     """
-    Wraps SensorDataset to yield (x_t, x_tn) pairs where n ∈ {1..n_horizons}
-    is sampled uniformly at each call.  Both windows come from the same segment.
+    Yields strictly consecutive (w, w+1) window pairs from SensorDataset.
 
-    Windows are spaced by horizon_stride_sec (from cfg), so x_t and x_tn are
-    n * horizon_stride_sec seconds apart in the original recording.
-
-    Interventions at t and t+n are assigned independently — the causal model
-    must infer which latent variables changed without knowing the noise type
-    at the target time step.
+    horizon_n is always 1. Pairs are only valid within the same
+    (dataset, vehicle, rs_node, seg_key) group, which encodes
+    (scene_id, run_id). This prevents temporal leakage across disjoint
+    runs in the same recording file.
     """
 
-    def __init__(self, sensor_dataset: SensorDataset, n_horizons: int | None = None):
+    def __init__(self, sensor_dataset: SensorDataset):
         self.ds = sensor_dataset
-        self.n_horizons = n_horizons if n_horizons is not None else sensor_dataset.cfg.n_horizons
         self._anchors: list[int] = []   # flat index positions valid as anchors
+
         index = sensor_dataset._index
+        # Build a set of (gkey, w) for O(1) lookup
+        valid = {(entry[0], entry[1]) for entry in index}
 
         for i, (gkey, w, *_) in enumerate(index):
-            group = sensor_dataset._groups[gkey]
-            max_w = max(group["audio_nw"], group["seismic_nw"]) - 1
-            if w + self.n_horizons <= max_w:
+            # w+1 must exist in the same group (same run boundary)
+            if (gkey, w + 1) in valid:
                 self._anchors.append(i)
 
     def __len__(self) -> int:
@@ -471,13 +468,9 @@ class MultiHorizonPairDataset(Dataset):
         i_t = self._anchors[idx]
         gkey, w_t, vehicle_type, instance_type, det_label, audio_seg_id, seismic_seg_id = self.ds._index[i_t]
         group = self.ds._groups[gkey]
+        w_tn = w_t + 1
 
-        n = torch.randint(1, self.n_horizons + 1, (1,)).item()
-        w_tn = w_t + n
-
-        # Independent interventions at t and t+n.
-        # Intentional: the causal classifier must detect changes without
-        # knowing the intervention type at the target step.
+        # Independent interventions at t and t+1
         if self.ds.is_train and torch.rand(1).item() < 0.60:
             interv_t = torch.randint(1, N_INTERVENTIONS + 1, (1,)).item()
         else:
@@ -506,7 +499,7 @@ class MultiHorizonPairDataset(Dataset):
             "seismic_avail":   seismic_avail,
             "interv_idx_t":    interv_t,
             "interv_idx_tn":   interv_tn,
-            "horizon_n":       n,
+            "horizon_n":       1,
             "vehicle_type":    vehicle_type,
             "instance_type":   instance_type,
             "detection_label": det_label,

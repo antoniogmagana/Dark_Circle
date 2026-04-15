@@ -178,8 +178,6 @@ class CRLConfig:
     """
     Full pipeline configuration.
     Modality-specific signal processing lives in audio_cfg / seismic_cfg.
-    Audio produces T'=101, seismic T'=26. share_encoder=False (default)
-    gives each modality independent SSM/encoder weights.
     """
 
     # Per-modality signal processing configs
@@ -189,54 +187,31 @@ class CRLConfig:
     # Data
     sample_seconds:  float = 1.0    # window duration in seconds
 
-    # SSM (shared across modalities)
-    d_model:         int   = 64     # feature dimension in/out of SSM
-    ssm_nhead:       int   = 4      # Transformer attention heads
-    ssm_layers:      int   = 2      # Transformer encoder layers
-    ssm_dropout:     float = 0.1
-
-    # Task-specific embedding dimensions (separate branch per task)
-    # Larger dims give the encoder more capacity per task without cross-task
-    # gradient competition through a shared projection.
-    d_pres: int = 16    # presence embedding (binary: vehicle present/absent)
-    d_type: int = 32    # type embedding (4 classes: pedestrian/light/sport/utility)
-
-    # Whether the SSM + encoder weights are shared across modalities.
-    share_encoder:   bool  = False
-
-    # Downstream fusion strategy for inference:
-    #   "vote"    — separate heads per modality, average probabilities
-    #   "any"     — use whichever modality is available
-    fusion:          str   = "vote"
+    # Encoder / decoder
+    d_model:         int   = 64     # internal feature dimension
+    n_heads:         int   = 4      # Transformer attention heads
+    n_layers:        int   = 2      # Transformer encoder layers
 
     # Training
     batch_size:           int   = 512
     lr:                   float = 8e-3
     lr_min:               float = 1e-4
     wd:                   float = 1e-4
-    warmup_epochs:        int   = 5
     n_epochs:             int   = 100
     num_workers:          int   = 12
     early_stop_patience:  int   = 25
 
     # Loss weights
-    lambda_type:      float = 2.0    # weight on vehicle type CE loss
-    lambda_tc:        float = 0.0    # weight on intra-z_veh TC penalty (disabled: infeasible with shared attn pool)
+    lambda_interv:    float = 1.0    # weight on intervention matching loss
 
     # Data windowing (controls sliding-window stride in SensorDataset)
     horizon_stride_sec: float = 0.7   # seconds between successive anchor windows
-    n_horizons:         int   = 10    # max horizon n for MultiHorizonPairDataset (unused in training)
 
     # Training throughput
-    steps_per_epoch: int | None = None  # cap training batches per epoch (None = full epoch); never applied to validation
+    steps_per_epoch: int | None = None  # cap training batches per epoch (None = full epoch)
 
     # Paths
     save_dir:        str   = "saved_crl"
-
-    @property
-    def d_embed(self) -> int:
-        """Total concatenated embedding dimension."""
-        return self.d_pres + self.d_type
 
     def modality_cfg(self, modality: str) -> ModalityConfig:
         if modality == "audio":

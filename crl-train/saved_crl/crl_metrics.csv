@@ -1,5 +1,0 @@
-epoch,train_total,train_pres,train_type,train_tc,val_total,val_pres,val_type,val_tc,probe_pres_acc,probe_pres_f1,probe_type_acc,probe_type_f1,detection_auc
-0,nan,nan,nan,nan,nan,nan,nan,nan,0.656875,0.6407976499642584,0.3520009835864019,0.2942951669427253,0.6160899150688173
-1,nan,nan,nan,nan,nan,nan,nan,nan,,,,,
-2,nan,nan,nan,nan,nan,nan,nan,nan,,,,,
-3,nan,nan,nan,nan,nan,nan,nan,nan,,,,,
