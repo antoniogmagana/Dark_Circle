@@ -77,6 +77,7 @@ class CRLModel(nn.Module):
                     in_channels=mod_cfg.n_channels,
                     out_channels=config.d_model,
                     kernel_size=config.morlet_kernel_size,
+                    sample_rate=mod_cfg.sample_rate,
                 )
             else:
                 raise ValueError(f"Unknown frontend_type: {self.cfg.frontend_type}")

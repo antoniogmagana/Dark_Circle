@@ -141,6 +141,10 @@ class CRLConfig:
     # Paths
     save_dir:        str   = "saved_crl"
 
+    # Frontend architecture
+    frontend_type:      str = "multiscale"
+    morlet_kernel_size: int = 257
+
     def modality_cfg(self, modality: str) -> ModalityConfig:
         if modality == "audio":
             return self.audio_cfg
