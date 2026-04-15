@@ -208,7 +208,7 @@ class Trainer:
         recon_total = kl_total = interv_total = n_mod = 0.0
 
         for sensor in self.model.sensors:
-            avail = batch[f"{sensor}_avail"].to(self.device)
+            avail = batch[f"{sensor}_avail"]
             if not avail.any():
                 continue
 
