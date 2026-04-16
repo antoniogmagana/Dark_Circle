@@ -68,9 +68,13 @@ class CRLModel(nn.Module):
             mod_cfg = config.modality_cfg(sensor)
 
             if self.cfg.frontend_type == "multiscale":
-                frontend = MultiScale1DFrontend(
-                    in_channels=mod_cfg.n_channels,
-                    out_channels=config.d_model,
+                pool_stride = config.multiscale_pool_stride
+                frontend = nn.Sequential(
+                    MultiScale1DFrontend(
+                        in_channels=mod_cfg.n_channels,
+                        out_channels=config.d_model,
+                    ),
+                    nn.AvgPool1d(kernel_size=pool_stride, stride=pool_stride),
                 )
             elif self.cfg.frontend_type == "morlet":
                 pool_stride = config.morlet_pool_stride
