@@ -125,33 +125,42 @@ class LearnableMorlet1D(nn.Module):
         Dynamically builds the real and imaginary wavelet kernels from the current `scales`.
         This function is called in every forward pass, so the kernels update as the
         `scales` parameter is optimized.
+
+        Kernel construction is forced to float32 regardless of AMP context. Audio scales
+        can be as small as ~1e-4 s, giving t_scaled values of ~67+, which overflows float16
+        to Inf. cos/sin(Inf) = NaN under IEEE 754, and 0 * NaN = NaN, so the overflow
+        propagates through the entire encoder. float32 has sufficient range.
         """
-        # Ensure scales are always positive using softplus. A scale of 0 or less is invalid.
-        scales = torch.nn.functional.softplus(self.scales)
-        # Reshape for broadcasting: (out_channels, 1)
-        scales = scales.view(-1, 1)
+        with torch.amp.autocast("cuda", enabled=False):
+            # Ensure scales are always positive using softplus. A scale of 0 or less is invalid.
+            # Cast to float32 explicitly to avoid float16 overflow for small (high-freq) scales.
+            scales = torch.nn.functional.softplus(self.scales.float())
+            # Reshape for broadcasting: (out_channels, 1)
+            scales = scales.view(-1, 1)
 
-        # Scaled time `t/s` for each wavelet.
-        # `t` is (kernel_size,), `scales` is (out_channels, 1).
-        # Broadcasting results in a (out_channels, kernel_size) tensor.
-        t_scaled = self.t.view(1, -1) / scales
+            # Scaled time `t/s` for each wavelet.
+            # `t` is (kernel_size,), `scales` is (out_channels, 1).
+            # Broadcasting results in a (out_channels, kernel_size) tensor.
+            t_scaled = self.t.float().view(1, -1) / scales
 
-        # Gaussian envelope: exp(-0.5 * (t/s)^2)
-        # The `1 / sqrt(s)` term normalizes the energy of the wavelet across scales.
-        envelope = torch.exp(-0.5 * (t_scaled ** 2)) / torch.sqrt(scales)
+            # Clamp t_scaled to prevent trig NaN from extreme scale drift during training.
+            # At |t_scaled| = 25, exp(-0.5 * 625) < 1e-135 — effectively zero in any
+            # float precision, so this clamp is a no-op for any physically valid wavelet.
+            t_scaled = t_scaled.clamp(-25.0, 25.0)
 
-        # Real (cosine) and Imaginary (sine) parts of the wavelet.
-        osc_re = torch.cos(self.w0 * t_scaled)
-        osc_im = torch.sin(self.w0 * t_scaled)
+            # Gaussian envelope: exp(-0.5 * (t/s)^2)
+            # The `1 / sqrt(s)` term normalizes the energy of the wavelet across scales.
+            envelope = torch.exp(-0.5 * (t_scaled ** 2)) / torch.sqrt(scales)
 
-        # Multiply the oscillations by the envelope to get the final Morlet wavelets.
-        kernel_re = envelope * osc_re
-        kernel_im = envelope * osc_im
+            # Real (cosine) and Imaginary (sine) parts of the wavelet.
+            osc_re = torch.cos(self.w0 * t_scaled)
+            osc_im = torch.sin(self.w0 * t_scaled)
 
-        # Reshape for PyTorch's conv1d, which expects (out_channels, in_channels, kernel_size).
-        # We apply the same filter to all input channels (depthwise-style).
-        kernel_re = kernel_re.unsqueeze(1).expand(-1, self.in_channels, -1)
-        kernel_im = kernel_im.unsqueeze(1).expand(-1, self.in_channels, -1)
+            # Multiply the oscillations by the envelope to get the final Morlet wavelets.
+            # Reshape for PyTorch's conv1d, which expects (out_channels, in_channels, kernel_size).
+            # We apply the same filter to all input channels (depthwise-style).
+            kernel_re = (envelope * osc_re).unsqueeze(1).expand(-1, self.in_channels, -1)
+            kernel_im = (envelope * osc_im).unsqueeze(1).expand(-1, self.in_channels, -1)
 
         return kernel_re, kernel_im
 
