@@ -142,8 +142,9 @@ class CRLConfig:
     save_dir:        str   = "saved_crl"
 
     # Frontend architecture
-    frontend_type:      str = "multiscale"
-    morlet_kernel_size: int = 257
+    frontend_type:       str = "multiscale"
+    morlet_kernel_size:  int = 257
+    morlet_pool_stride:  int = 64   # AvgPool1d stride after Morlet frontend (16000 → 250 frames for audio)
 
     def modality_cfg(self, modality: str) -> ModalityConfig:
         if modality == "audio":

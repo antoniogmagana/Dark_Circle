@@ -73,11 +73,15 @@ class CRLModel(nn.Module):
                     out_channels=config.d_model,
                 )
             elif self.cfg.frontend_type == "morlet":
-                frontend = LearnableMorlet1D(
-                    in_channels=mod_cfg.n_channels,
-                    out_channels=config.d_model,
-                    kernel_size=config.morlet_kernel_size,
-                    sample_rate=mod_cfg.sample_rate,
+                pool_stride = config.morlet_pool_stride
+                frontend = nn.Sequential(
+                    LearnableMorlet1D(
+                        in_channels=mod_cfg.n_channels,
+                        out_channels=config.d_model,
+                        kernel_size=config.morlet_kernel_size,
+                        sample_rate=mod_cfg.sample_rate,
+                    ),
+                    nn.AvgPool1d(kernel_size=pool_stride, stride=pool_stride),
                 )
             else:
                 raise ValueError(f"Unknown frontend_type: {self.cfg.frontend_type}")
@@ -226,18 +230,10 @@ class Trainer:
             x_tn = batch[f"x_{sensor}_tn"][avail].to(self.device)
 
             feat_t, z_t, mu_t, lv_t = self.model.encode(sensor, x_t)
-            if not feat_t.isfinite().all():
-                print(f"[DEBUG] feat_t NaN for {sensor}: min={feat_t.min().item():.3f} max={feat_t.max().item():.3f} nan={feat_t.isnan().sum().item()}")
-            if not mu_t.isfinite().all():
-                print(f"[DEBUG] mu_t NaN for {sensor}: feat_t_finite={feat_t.isfinite().all().item()}")
             assert mu_t.isfinite().all(), f"mu_t became non-finite for sensor {sensor}"
             assert lv_t.isfinite().all(), f"lv_t became non-finite for sensor {sensor}"
 
             feat_tn, z_tn, mu_tn, lv_tn = self.model.encode(sensor, x_tn)
-            if not feat_tn.isfinite().all():
-                print(f"[DEBUG] feat_tn NaN for {sensor}: min={feat_tn.min().item():.3f} max={feat_tn.max().item():.3f} nan={feat_tn.isnan().sum().item()}")
-            if not mu_tn.isfinite().all():
-                print(f"[DEBUG] mu_tn NaN for {sensor}: feat_tn_finite={feat_tn.isfinite().all().item()}")
             assert mu_tn.isfinite().all(), f"mu_tn became non-finite for sensor {sensor}"
             assert lv_tn.isfinite().all(), f"lv_tn became non-finite for sensor {sensor}"
 
