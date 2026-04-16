@@ -122,7 +122,7 @@ class CRLConfig:
 
     # Training
     batch_size:           int   = 512
-    lr:                   float = 8e-3
+    lr:                   float = 3e-4
     lr_min:               float = 1e-4
     wd:                   float = 1e-4
     n_epochs:             int   = 100

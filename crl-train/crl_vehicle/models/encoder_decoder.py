@@ -22,13 +22,17 @@ class TemporalEncoder(nn.Module):
 
     def forward(self, x):
         # x: (B, C, T) from frontend
-        x = x.permute(0, 2, 1)          # (B, T, C)
-        x = self.input_proj(x)           # (B, T, d_model)
-        x = self.transformer(x)          # (B, T, d_model)
-        x = x.mean(dim=1)               # (B, d_model)
+        # Run entirely in fp32: attention softmax on long sequences (audio ~16k frames)
+        # overflows fp16, producing NaN in mu even when the frontend output is finite.
+        with torch.amp.autocast("cuda", enabled=False):
+            x = x.float()
+            x = x.permute(0, 2, 1)          # (B, T, C)
+            x = self.input_proj(x)           # (B, T, d_model)
+            x = self.transformer(x)          # (B, T, d_model)
+            x = x.mean(dim=1)               # (B, d_model)
 
-        mu = self.fc_mu(x)
-        logvar = self.fc_logvar(x).clamp(-4, 4)
+            mu = self.fc_mu(x)
+            logvar = self.fc_logvar(x).clamp(-4, 4)
 
         if self.training:
             z = mu + torch.randn_like(mu) * torch.exp(0.5 * logvar)
