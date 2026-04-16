@@ -139,6 +139,10 @@ def main():
         cfg.n_epochs = args.crl_epochs
     if args.steps_per_epoch:
         cfg.steps_per_epoch = args.steps_per_epoch
+    # Append frontend name to save_dir so morlet and multiscale runs don't overwrite each other.
+    # Explicit --save-dir overrides this (the user knows what they're doing).
+    if args.save_dir == "./saved_crl":
+        save_dir = save_dir / args.frontend
     cfg.save_dir = str(save_dir)
     cfg.frontend_type = args.frontend
 
