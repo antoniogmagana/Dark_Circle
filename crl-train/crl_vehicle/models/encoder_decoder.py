@@ -7,6 +7,7 @@ class TemporalEncoder(nn.Module):
         super().__init__()
 
         self.input_proj = nn.Linear(in_channels, d_model)
+        self.input_norm = nn.LayerNorm(d_model)
         self.transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
                 d_model=d_model,
@@ -14,6 +15,7 @@ class TemporalEncoder(nn.Module):
                 dim_feedforward=d_model * 4,
                 dropout=0.1,
                 batch_first=True,
+                norm_first=True,
             ),
             num_layers=n_layers,
         )
@@ -27,8 +29,8 @@ class TemporalEncoder(nn.Module):
         with torch.amp.autocast("cuda", enabled=False):
             x = x.float()
             x = x.permute(0, 2, 1)          # (B, T, C)
-            x = self.input_proj(x)           # (B, T, d_model)
-            x = self.transformer(x)          # (B, T, d_model)
+            x = self.input_norm(self.input_proj(x))  # (B, T, d_model)
+            x = self.transformer(x)                  # (B, T, d_model)
             x = x.mean(dim=1)               # (B, d_model)
 
             mu = self.fc_mu(x).clamp(-10, 10)
