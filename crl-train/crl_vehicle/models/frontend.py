@@ -177,13 +177,13 @@ class LearnableMorlet1D(nn.Module):
         # Build the real and imaginary kernels on the fly using current `scales`.
         kernel_re, kernel_im = self._build_wavelet_kernels()
 
-        # Apply the convolutions. We use functional conv1d to use our dynamic weights.
-        # Padding is set to 'same' to maintain the sequence length.
-        conv_re = nn.functional.conv1d(x, kernel_re, padding='same')
-        conv_im = nn.functional.conv1d(x, kernel_im, padding='same')
-
-        # Compute the power (magnitude) of the complex-valued result.
-        # This is sqrt(real^2 + imag^2), which gives the energy at each frequency band
-        # regardless of the signal's phase.
-        power = torch.sqrt(conv_re.pow(2) + conv_im.pow(2) + 1e-8)
+        # Apply the convolutions in fp32 regardless of AMP context. functional.conv1d
+        # with dynamically-built weight tensors is cast by input dtype, not the AMP
+        # allowlist. For audio, scales as small as ~1e-4 s produce t_scaled values up
+        # to ~526 — fine in fp32 but overflowing fp16 (max ~65504), which makes
+        # cos/sin return NaN and poisons mu_t through the encoder.
+        with torch.amp.autocast("cuda", enabled=False):
+            conv_re = nn.functional.conv1d(x.float(), kernel_re, padding='same')
+            conv_im = nn.functional.conv1d(x.float(), kernel_im, padding='same')
+            power = torch.sqrt(conv_re.pow(2) + conv_im.pow(2) + 1e-8)
         return power
