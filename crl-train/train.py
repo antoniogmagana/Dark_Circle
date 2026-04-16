@@ -16,8 +16,10 @@ Key flags:
 
 import argparse
 import json
+import random
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -111,8 +113,18 @@ def parse_args():
     return p.parse_args()
 
 
+def seed_everything(seed: int = 42) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 def main():
     args    = parse_args()
+    seed_everything(42)
     device  = get_device()
     save_dir = Path(args.save_dir)
 

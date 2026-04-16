@@ -31,7 +31,7 @@ class TemporalEncoder(nn.Module):
             x = self.transformer(x)          # (B, T, d_model)
             x = x.mean(dim=1)               # (B, d_model)
 
-            mu = self.fc_mu(x)
+            mu = self.fc_mu(x).clamp(-10, 10)
             logvar = self.fc_logvar(x).clamp(-4, 4)
 
         if self.training:
