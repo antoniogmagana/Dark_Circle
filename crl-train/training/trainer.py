@@ -226,6 +226,10 @@ class Trainer:
             x_tn = batch[f"x_{sensor}_tn"][avail].to(self.device)
 
             feat_t, z_t, mu_t, lv_t = self.model.encode(sensor, x_t)
+            if not feat_t.isfinite().all():
+                print(f"[DEBUG] feat_t NaN for {sensor}: min={feat_t.min().item():.3f} max={feat_t.max().item():.3f} nan={feat_t.isnan().sum().item()}")
+            if not mu_t.isfinite().all():
+                print(f"[DEBUG] mu_t NaN for {sensor}: feat_t_finite={feat_t.isfinite().all().item()}")
             assert mu_t.isfinite().all(), f"mu_t became non-finite for sensor {sensor}"
             assert lv_t.isfinite().all(), f"lv_t became non-finite for sensor {sensor}"
 
