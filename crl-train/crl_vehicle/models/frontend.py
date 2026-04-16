@@ -161,4 +161,4 @@ class LearnableMorlet1D(nn.Module):
             conv_re = nn.functional.conv1d(x.float(), self.kernel_re, padding='same')
             conv_im = nn.functional.conv1d(x.float(), self.kernel_im, padding='same')
             power = torch.sqrt(conv_re.pow(2) + conv_im.pow(2) + 1e-8)
-        return power
+        return torch.log1p(power)
