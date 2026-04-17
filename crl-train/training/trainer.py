@@ -168,9 +168,13 @@ class Trainer:
             T_max=config.n_epochs,
             eta_min=config.lr_min,
         )
-        self.best_ref_elbo = float("inf")
-        self.patience_ctr  = 0
-        self.scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
+        self.best_ref_elbo  = float("inf")
+        self.patience_ctr   = 0
+        self.scaler         = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
+
+        # Adaptive beta state (Options 1 + 3)
+        self.beta           = 0.0
+        self.prev_val_recon = float("inf")
 
     # ------------------------------------------------------------------
     # CRL pre-training
@@ -181,6 +185,7 @@ class Trainer:
             "epoch", "beta",
             "train_recon", "train_kl", "train_interv", "train_total",
             "val_recon",   "val_kl",   "val_interv",   "val_total",
+            "val_raw_kl",     # unscaled KL (beta=1), used for adaptive beta gating
             "val_ref_elbo",   # fixed-reference ELBO (beta=1), used for checkpointing
         ]
         metrics_path = self.save_dir / "crl_metrics.csv"
@@ -189,19 +194,33 @@ class Trainer:
 
         print("\n=== CRL Pre-training ===")
         for epoch in range(epochs):
-            # Linear beta warmup from 0 → 1 over first half of training
-            beta = min(1.0, 2.0 * epoch / max(epochs, 1))
-
-            train_m = self._train_epoch(train_loader, beta)
-            val_m   = self._eval_epoch(val_loader, beta)
+            train_m = self._train_epoch(train_loader, self.beta)
+            val_m   = self._eval_epoch(val_loader, self.beta)
             self.scheduler.step()
 
-            row = {"epoch": epoch, "beta": round(beta, 4), **train_m, **val_m}
+            # Adaptive beta update (Options 1 + 3):
+            # - Decay if raw KL is near zero (collapse guard)
+            # - Raise if recon is improving OR KL is already high (loss-gated)
+            raw_kl          = val_m["val_raw_kl"]
+            recon_improving = val_m["val_recon"] < self.prev_val_recon - self.cfg.recon_min_delta
+            self.prev_val_recon = val_m["val_recon"]
+
+            if raw_kl < self.cfg.kl_floor:
+                self.beta = max(0.0, self.beta - self.cfg.beta_step)
+                beta_event = "↓collapse"
+            elif recon_improving or raw_kl > self.cfg.kl_target:
+                self.beta = min(1.0, self.beta + self.cfg.beta_step)
+                beta_event = "↑"
+            else:
+                beta_event = "→hold"
+
+            row = {"epoch": epoch, "beta": round(self.beta, 4), **train_m, **val_m}
             with open(metrics_path, "a", newline="") as f:
                 csv.DictWriter(f, fieldnames=fieldnames).writerow(row)
 
             print(
-                f"Epoch {epoch:3d} | beta={beta:.2f} | "
+                f"Epoch {epoch:3d} | beta={self.beta:.2f} ({beta_event}) | "
+                f"kl={raw_kl:.4f} | "
                 f"tr={train_m['train_total']:.4f} "
                 f"val={val_m['val_total']:.4f} "
                 f"ref_elbo={val_m['val_ref_elbo']:.4f}"
@@ -222,8 +241,10 @@ class Trainer:
         torch.save(self.model.state_dict(), self.save_dir / "crl_final.pth")
 
     def _forward_pair(self, batch: dict, beta: float) -> tuple[torch.Tensor, dict]:
-        """Shared forward pass for train and eval. Returns (loss, metrics_dict)."""
-        recon_total = kl_total = interv_total = n_mod = 0.0
+        """Shared forward pass for train and eval. Returns (loss, metrics_dict).
+        metrics_dict always includes 'raw_kl' (unscaled, beta=1) for adaptive beta gating.
+        """
+        recon_total = kl_total = raw_kl_total = interv_total = n_mod = 0.0
 
         for sensor in self.model.sensors:
             avail = batch[f"{sensor}_avail"]
@@ -233,16 +254,20 @@ class Trainer:
             x_t  = batch[f"x_{sensor}_t"][avail].to(self.device)
             x_tn = batch[f"x_{sensor}_tn"][avail].to(self.device)
 
-            feat_t, z_t, mu_t, lv_t = self.model.encode(sensor, x_t)
-            assert mu_t.isfinite().all(), f"mu_t became non-finite for sensor {sensor}"
-            assert lv_t.isfinite().all(), f"lv_t became non-finite for sensor {sensor}"
+            # Batch x_t and x_tn through encode/decode together — halves forward passes.
+            x_both = torch.cat([x_t, x_tn], dim=0)
+            feat_both, z_both, mu_both, lv_both = self.model.encode(sensor, x_both)
+            B = x_t.shape[0]
+            feat_t,  feat_tn  = feat_both[:B],  feat_both[B:]
+            z_t,     z_tn     = z_both[:B],     z_both[B:]
+            mu_t,    mu_tn    = mu_both[:B],     mu_both[B:]
+            lv_t,    lv_tn    = lv_both[:B],     lv_both[B:]
 
-            feat_tn, z_tn, mu_tn, lv_tn = self.model.encode(sensor, x_tn)
-            assert mu_tn.isfinite().all(), f"mu_tn became non-finite for sensor {sensor}"
-            assert lv_tn.isfinite().all(), f"lv_tn became non-finite for sensor {sensor}"
+            assert mu_both.isfinite().all(), f"mu became non-finite for sensor {sensor}"
+            assert lv_both.isfinite().all(), f"lv became non-finite for sensor {sensor}"
 
-            x_hat_t  = self.model.decode(sensor, z_t)
-            x_hat_tn = self.model.decode(sensor, z_tn)
+            x_hat_both = self.model.decode(sensor, z_both)
+            x_hat_t, x_hat_tn = x_hat_both[:B], x_hat_both[B:]
 
             recon = (reconstruction_loss(x_hat_t, feat_t) +
                      reconstruction_loss(x_hat_tn, feat_tn)) / 2
@@ -252,6 +277,11 @@ class Trainer:
             kl_tn = kl_divergence(mu_tn, lv_tn, beta=beta)
             assert kl_tn.isfinite(), f"kl_tn became non-finite for sensor {sensor}"
             kl = (kl_t + kl_tn) / 2
+
+            # Raw KL (beta=1) for adaptive gating — no extra forward pass needed.
+            raw_kl = (kl_divergence(mu_t, lv_t, beta=1.0) +
+                      kl_divergence(mu_tn, lv_tn, beta=1.0)) / 2
+            raw_kl_total += raw_kl.item()
 
             # Intervention matching
             interv_idx_t  = batch["interv_idx_t"][avail].to(self.device)
@@ -267,16 +297,18 @@ class Trainer:
 
         if n_mod == 0:
             zero = torch.tensor(0.0, device=self.device, requires_grad=True)
-            return zero, {"recon": 0.0, "kl": 0.0, "interv": 0.0, "total": 0.0}
+            return zero, {"recon": 0.0, "kl": 0.0, "raw_kl": 0.0, "interv": 0.0, "total": 0.0}
 
-        recon_total  /= n_mod
-        kl_total     /= n_mod
-        interv_total /= n_mod
+        recon_total    /= n_mod
+        kl_total       /= n_mod
+        raw_kl_total   /= n_mod
+        interv_total   /= n_mod
         total = recon_total + kl_total + self.cfg.lambda_interv * interv_total
 
         return total, {
             "recon":  recon_total.item(),
             "kl":     kl_total.item(),
+            "raw_kl": raw_kl_total,
             "interv": interv_total.item(),
             "total":  total.item(),
         }
@@ -305,25 +337,26 @@ class Trainer:
             n += 1
             if self.cfg.steps_per_epoch and n >= self.cfg.steps_per_epoch:
                 break
-        return {f"train_{k}": v / max(n, 1) for k, v in accum.items()}
+        return {f"train_{k}": v / max(n, 1) for k, v in accum.items() if k != "raw_kl"}
 
     @torch.no_grad()
     def _eval_epoch(self, loader: DataLoader, beta: float) -> dict:
         self.model.eval()
         accum: dict[str, float] = {}
-        ref_accum: dict[str, float] = {}
         n = 0
         for batch in loader:
             with torch.amp.autocast("cuda", enabled=(self.device.type == "cuda")):
-                _, metrics      = self._forward_pair(batch, beta)
-                _, ref_metrics  = self._forward_pair(batch, beta=1.0)
+                _, metrics = self._forward_pair(batch, beta)
             for k, v in metrics.items():
                 accum[k] = accum.get(k, 0.0) + v
-            ref_accum["total"] = ref_accum.get("total", 0.0) + ref_metrics["total"]
             n += 1
         self.model.train()
         out = {f"val_{k}": v / max(n, 1) for k, v in accum.items()}
-        out["val_ref_elbo"] = ref_accum.get("total", 0.0) / max(n, 1)
+        # ref_elbo = recon + raw_kl + lambda * interv (beta=1, one pass)
+        out["val_ref_elbo"] = (
+            out["val_recon"] + out["val_raw_kl"] +
+            self.cfg.lambda_interv * out["val_interv"]
+        )
         return out
 
     # ------------------------------------------------------------------

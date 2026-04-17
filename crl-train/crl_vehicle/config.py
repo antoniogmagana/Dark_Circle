@@ -132,6 +132,12 @@ class CRLConfig:
     # Loss weights
     lambda_interv:    float = 1.0    # weight on intervention matching loss
 
+    # Adaptive beta schedule (Options 1 + 3)
+    beta_step:        float = 0.02   # amount to increment/decrement beta each epoch
+    kl_floor:         float = 0.01   # raw KL below this → decay beta (collapse guard)
+    kl_target:        float = 0.5    # raw KL above this → raise beta unconditionally
+    recon_min_delta:  float = 0.005  # min improvement in val_recon to count as "improving"
+
     # Data windowing (controls sliding-window stride in SensorDataset)
     horizon_stride_sec: float = 0.7   # seconds between successive anchor windows
 
