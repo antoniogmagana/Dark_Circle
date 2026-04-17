@@ -1,0 +1,26 @@
+Run Directory: 20260413_171050
+Mode: instance | Model: DetectionCNN
+----------------------------------------
+Accuracy: 0.2771
+MCC: 0.1933
+ROC-AUC: 0.8116
+Precision: 0.2915
+Recall: 0.2771
+F1-Score: 0.2608
+Latency: 0.0721 ms/sample
+
+Per-Class Accuracy:
+  bicycle (0): 0.0982
+  polaris (1): 0.1651
+  pickup (2): 0.4164
+  gle350 (3): 0.4978
+  scooter (4): 0.4256
+  cx30 (5): 0.3261
+  ev (6): 0.1351
+  motorcycle (7): 0.0978
+  mustang (8): 0.0917
+  forester (9): 0.2524
+  background (10): 1.0000
+  walk (11): 0.1410
+  miata (12): 0.1826
+  warhog (13): 0.6338

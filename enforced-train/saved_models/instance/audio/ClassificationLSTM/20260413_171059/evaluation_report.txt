@@ -1,0 +1,26 @@
+Run Directory: 20260413_171059
+Mode: instance | Model: ClassificationLSTM
+----------------------------------------
+Accuracy: 0.4335
+MCC: 0.3614
+ROC-AUC: 0.8615
+Precision: 0.4928
+Recall: 0.4335
+F1-Score: 0.4416
+Latency: 0.1259 ms/sample
+
+Per-Class Accuracy:
+  bicycle (0): 0.2536
+  polaris (1): 0.0710
+  pickup (2): 0.1632
+  gle350 (3): 0.6135
+  scooter (4): 0.4037
+  cx30 (5): 0.5892
+  ev (6): 0.1622
+  motorcycle (7): 0.6285
+  mustang (8): 0.3595
+  forester (9): 0.1731
+  background (10): 0.5903
+  walk (11): 0.5159
+  miata (12): 0.4653
+  warhog (13): 0.0376
