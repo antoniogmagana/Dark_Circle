@@ -107,7 +107,7 @@ CHANNEL_ADC_SCALES = [
 
 # Semantic category names (used for category-level classification)
 # if background used, always set to 0: "background"
-CLASS_MAP = {0: "pedestrian", 1: "light", 2: "medium", 3: "heavy"}
+CLASS_MAP = {0: "pedestrian", 1: "light", 2: "sport", 3: "utility"}
 
 # Instance → category mapping (authoritative)
 DATASET_VEHICLE_MAP = {
@@ -118,8 +118,8 @@ DATASET_VEHICLE_MAP = {
         "warhog1135am": ["light", "warhog", "train"],
         "warhog1149am": ["light", "warhog", "val"],
         "warhog_nolineofsight": ["light", "warhog", "test"],
-        "silverado0255pm": ["heavy", "pickup", "train"],
-        "silverado0315pm": ["heavy", "pickup", "split"],
+        "silverado0255pm": ["utility", "pickup", "train"],
+        "silverado0315pm": ["utility", "pickup", "split"],
     },
     "focal": {
         "walk": ["pedestrian", "walk", "train"],
@@ -130,25 +130,25 @@ DATASET_VEHICLE_MAP = {
         "motor2": ["light", "motorcycle", "split"],
         "scooter": ["light", "scooter", "train"],
         "scooter2": ["light", "scooter", "split"],
-        "forester": ["medium", "forester", "train"],
-        "forester2": ["medium", "forester", "split"],
-        "mustang": ["medium", "mustang", "train"],
-        "mustang0528": ["medium", "mustang", "val"],
-        "mustang2": ["medium", "mustang", "test"],
-        "pickup": ["heavy", "pickup", "train"],
-        "pickup2": ["heavy", "pickup", "split"],
-        "tesla": ["heavy", "ev", "train"],
-        "tesla2": ["heavy", "ev", "split"],
+        "forester": ["utility", "forester", "train"],
+        "forester2": ["utility", "forester", "split"],
+        "mustang": ["sport", "mustang", "train"],
+        "mustang0528": ["sport", "mustang", "val"],
+        "mustang2": ["sport", "mustang", "test"],
+        "pickup": ["utility", "pickup", "train"],
+        "pickup2": ["utility", "pickup", "split"],
+        "tesla": ["sport", "ev", "train"],
+        "tesla2": ["sport", "ev", "split"],
     },
     "m3nvc": {
         "background": ["background", "background", "run"],
-        "cx30": ["medium", "cx30", "run"],
-        "miata": ["medium", "miata", "run"],
-        "mustang": ["medium", "mustang", "run"],
+        "cx30": ["utility", "cx30", "run"],
+        "miata": ["sport", "miata", "run"],
+        "mustang": ["sport", "mustang", "run"],
         # "cx30_miata": 4,
         # "cx30_mustang": 4,
         # "miata_mustang": "sport",
-        "gle350": ["heavy", "gle350", "run"],
+        "gle350": ["utility", "gle350", "run"],
     },
 }
 

@@ -1,0 +1,15 @@
+Run Directory: 20260418_055649
+Mode: detection | Model: InceptionTime
+----------------------------------------
+Accuracy: 0.7807
+MCC: 0.5540
+ROC-AUC: 0.8773
+Precision: 0.7822
+Recall: 0.7807
+F1-Score: 0.7812
+Latency: 0.0600 ms/sample
+False Alarm Rate: 20.564%
+
+Per-Class Accuracy:
+  Background (0): 0.7944
+  Target (1): 0.7622

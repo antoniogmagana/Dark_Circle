@@ -1,0 +1,16 @@
+Run Directory: 20260418_072804
+Mode: category | Model: WaveformClassificationCNN
+----------------------------------------
+Accuracy: 0.5226
+MCC: 0.3692
+ROC-AUC: 0.8277
+Precision: 0.6348
+Recall: 0.5226
+F1-Score: 0.5141
+Latency: 0.0250 ms/sample
+
+Per-Class Accuracy:
+  pedestrian (0): 0.8074
+  light (1): 0.6352
+  sport (2): 0.2993
+  utility (3): 0.6976

@@ -121,7 +121,7 @@ CHANNEL_ADC_SCALES = [
 
 # Semantic category names (used for category-level classification)
 # if background used, always set to 0: "background"
-CLASS_MAP = {0: "pedestrian", 1: "light", 2: "medium", 3: "heavy"}
+CLASS_MAP = {0: "pedestrian", 1: "light", 2: "sport", 3: "utility"}
 
 # Instance → category mapping (authoritative)
 DATASET_VEHICLE_MAP = {
@@ -132,8 +132,8 @@ DATASET_VEHICLE_MAP = {
         "warhog1135am": ["light", "warhog"],
         "warhog1149am": ["light", "warhog"],
         "warhog_nolineofsight": ["light", "warhog"],
-        "silverado0255pm": ["heavy", "pickup"],
-        "silverado0315pm": ["heavy", "pickup"],
+        "silverado0255pm": ["utility", "pickup"],
+        "silverado0315pm": ["utility", "pickup"],
     },
     "focal": {
         "walk": ["pedestrian", "walk"],
@@ -144,22 +144,22 @@ DATASET_VEHICLE_MAP = {
         "motor2": ["light", "motorcycle"],
         "scooter": ["light", "scooter"],
         "scooter2": ["light", "scooter"],
-        "forester": ["medium", "forester"],
-        "forester2": ["medium", "forester"],
-        "mustang": ["medium", "mustang"],
-        "mustang0528": ["medium", "mustang"],
-        "mustang2": ["medium", "mustang"],
-        "pickup": ["heavy", "pickup"],
-        "pickup2": ["heavy", "pickup"],
-        "tesla": ["heavy", "ev"],
-        "tesla2": ["heavy", "ev"],
+        "forester": ["utility", "forester"],
+        "forester2": ["utility", "forester"],
+        "mustang": ["sport", "mustang"],
+        "mustang0528": ["sport", "mustang"],
+        "mustang2": ["sport", "mustang"],
+        "pickup": ["utility", "pickup"],
+        "pickup2": ["utility", "pickup"],
+        "tesla": ["sport", "ev"],
+        "tesla2": ["sport", "ev"],
     },
     "m3nvc": {
         "background": ["background", "background"],
-        "cx30": ["medium", "cx30"],
-        "miata": ["medium", "miata"],
-        "mustang": ["medium", "mustang"],
-        "gle350": ["heavy", "gle350"],
+        "cx30": ["utility", "cx30"],
+        "miata": ["sport", "miata"],
+        "mustang": ["sport", "mustang"],
+        "gle350": ["utility", "gle350"],
     },
 }
 

@@ -1,0 +1,29 @@
+Run Directory: best_ensemble
+Mode: instance | Model: InceptionTime + DetectionCNN [best_ensemble]
+Seismic: InceptionTime (run: 20260413_171054, val_f1=0.4339)
+Audio:   DetectionCNN (run: 20260413_171056, val_f1=0.4215)
+Ensemble weights: seismic=0.5073, audio=0.4927
+----------------------------------------
+Accuracy: 0.5392
+MCC: 0.4789
+ROC-AUC: 0.9314
+Precision: 0.5682
+Recall: 0.5392
+F1-Score: 0.5385
+Latency: 0.1441 ms/sample
+
+Per-Class Accuracy:
+  bicycle (0): 0.2941
+  polaris (1): 0.3490
+  pickup (2): 0.4380
+  gle350 (3): 0.6406
+  scooter (4): 0.3497
+  cx30 (5): 0.6585
+  ev (6): 0.3565
+  motorcycle (7): 0.6067
+  mustang (8): 0.3585
+  forester (9): 0.3621
+  background (10): 0.9610
+  walk (11): 0.9859
+  miata (12): 0.4987
+  warhog (13): 0.5211

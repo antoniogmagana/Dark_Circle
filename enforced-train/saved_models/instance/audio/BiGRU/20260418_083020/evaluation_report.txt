@@ -1,0 +1,26 @@
+Run Directory: 20260418_083020
+Mode: instance | Model: BiGRU
+----------------------------------------
+Accuracy: 0.3346
+MCC: 0.2708
+ROC-AUC: 0.7928
+Precision: 0.4527
+Recall: 0.3346
+F1-Score: 0.3454
+Latency: 0.1160 ms/sample
+
+Per-Class Accuracy:
+  bicycle (0): 0.0518
+  polaris (1): 0.3359
+  pickup (2): 0.3514
+  gle350 (3): 0.4783
+  scooter (4): 0.1670
+  cx30 (5): 0.4389
+  ev (6): 0.3058
+  motorcycle (7): 0.6274
+  mustang (8): 0.1933
+  forester (9): 0.2535
+  background (10): 0.7238
+  walk (11): 0.4600
+  miata (12): 0.2396
+  warhog (13): 0.0000
