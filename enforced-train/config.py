@@ -15,9 +15,9 @@ import numpy as np
 # ============================================================
 
 # Core training loop settings
-BATCH_SIZE = 128
-EPOCHS = 50
-NUM_WORKERS = 32
+BATCH_SIZE = 1024
+EPOCHS = 100
+NUM_WORKERS = 96
 LOG_INTERVAL = 10
 
 # Checkpoint + evaluation output directories
@@ -208,11 +208,11 @@ IMG_SAVE_PATH = os.path.join(RUN_DIR, "conf_matrix.png")
 JSON_LOG_PATH = os.path.join(RUN_DIR, "hyperparameters.json")
 METRICS_LOG_PATH = os.path.join(RUN_DIR, "metrics.csv")
 
-TRAIN_STEPS_PER_EPOCH = 50
-VAL_STEPS_PER_EPOCH = 16
+TRAIN_STEPS_PER_EPOCH = 400
+VAL_STEPS_PER_EPOCH = 128
 
 # Time-scale knobs
-SAMPLE_SECONDS = 1
+SAMPLE_SECONDS = 2
 WINDOW_STEP = 0.1  # sliding window stride in seconds
 
 # Mel spectrogram parameters
@@ -230,7 +230,33 @@ BATCH_MODE = True
 AUGMENT_SNR = True
 
 # The minimum and maximum SNR (in decibels) to apply when augmenting
-AUGMENT_SNR_RANGE = (10, 30)
+# Sensor-specific SNR ranges
+AUGMENT_SNR_RANGE_AUDIO    = (10, 30)   # appropriate for 16kHz high-energy signal
+AUGMENT_SNR_RANGE_SEISMIC  = (20, 40)   # less aggressive for low-SNR 200Hz signal
+AUGMENT_SNR_RANGE = AUGMENT_SNR_RANGE_AUDIO if TRAIN_SENSOR == "audio" else AUGMENT_SNR_RANGE_SEISMIC
+
+# =====================================================================
+# 7b. CLASS BALANCE
+# =====================================================================
+CLASS_WEIGHT_CAP          = 10.0   # inverse-frequency weight ceiling (tunable)
+USE_WEIGHTED_SAMPLER      = True   # WeightedRandomSampler for train DataLoader
+WEIGHTED_SAMPLER_STRENGTH = 1.0    # 1.0=fully balanced, 0.0=uniform
+
+# =====================================================================
+# 7c. TRAINING PROCEDURE
+# =====================================================================
+EARLY_STOP_PATIENCE = 15           # was hardcoded 8 in train.py
+CHECKPOINT_METRIC   = "mcc"        # "mcc" | "val_f1" | "val_loss" | "val_acc"
+
+# =====================================================================
+# 7d. HARDWARE & PRECISION
+# =====================================================================
+PREFETCH_FACTOR    = 16
+PIN_MEMORY         = True
+PERSISTENT_WORKERS = True
+TORCH_COMPILE      = True
+AMP_ENABLED        = True
+AMP_DTYPE          = "bfloat16"    # H100 native — no loss scaling needed
 
 # =====================================================================
 # 8. MODEL HYPERPARAMETERS & CONTROL FLOW
@@ -243,13 +269,11 @@ BASE_DROPOUT = 0.3
 # remain valid regardless of which sensor or sample rate is selected.
 SEQ_LEN = int(REF_SAMPLE_RATE * SAMPLE_SECONDS)
 
-# FFT window size — largest power of 2 ≤ SEQ_LEN, capped at 1024 for audio.
-# Guarantees n_fft // 2 < SEQ_LEN (STFT padding constraint).
-# Seismic (SEQ_LEN=200): N_FFT=128. Audio (SEQ_LEN=16000): N_FFT=1024.
-N_FFT = min(1024, 1 << (SEQ_LEN.bit_length() - 1))
-
-# Hop length between STFT frames (~25% of N_FFT, standard convention)
-HOP_LENGTH = N_FFT // 4
+# Explicit mel parameters — global for both sensors.
+# Tuned for seismic (200Hz × 2s = 400 samples → ~25 mel frames).
+# Audio (16kHz × 2s = 32000 samples) produces ~2000 frames — no ceiling concern.
+N_FFT = 64
+HOP_LENGTH = 16
 
 # --- Detection CNN ---
 if MODEL_NAME == "DetectionCNN":
