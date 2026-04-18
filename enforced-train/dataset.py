@@ -1,3 +1,4 @@
+import fcntl
 import os
 import hashlib
 import json
@@ -338,72 +339,88 @@ class VehicleDataset(Dataset):
         """Bulk-load all required parquet segments into memory tensors.
 
         Caches to disk so subsequent runs skip the parquet load entirely.
+        Uses fcntl.flock + atomic rename to prevent race corruption when
+        multiple model jobs share the same cache path (same sensor, different
+        MODEL_NAME).
         """
         cache_path = self._get_cache_path()
+        lock_path = cache_path + ".lock"
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
-        if os.path.exists(cache_path):
-            print(
-                f"[{self.split}] Loading table cache from disk: {cache_path}",
-                flush=True,
-            )
-            self.table_cache = torch.load(cache_path, weights_only=False)
-            print(
-                f"[{self.split}] Cache loaded ({len(self.table_cache)} segments).",
-                flush=True,
-            )
-            return
+        with open(lock_path, "w") as lock_fh:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX)
 
-        self.table_cache = {}
-
-        needed = set()
-        for dataset, instance, sensor_node, run_id, _, _ in self.samples:
-            for signal in self.config.TRAIN_SENSORS:
-                table = f"{dataset}_{signal}_{instance}_{sensor_node}"
-                key = (table, run_id)
-                if key in self.table_run_min_time:
-                    needed.add(key)
-
-        total = len(needed)
-        print(f"[{self.split}] Pre-loading {total} table segments into memory...")
-
-        for i, (table, run_id) in enumerate(sorted(needed)):
-            path = self._parquet_paths.get(table)
-            if path is None:
-                continue
-
-            min_t = self.table_run_min_time[(table, run_id)]
-
-            if "_accel_" in table:
-                data_cols = ["accel_x_ew", "accel_y_ns", "accel_z_ud"]
-            else:
-                data_cols = ["amplitude"]
-
-            read_cols = ["time_stamp"] + data_cols
-            if run_id is not None:
-                read_cols.append("run_id")
-
-            df = pd.read_parquet(path, columns=read_cols)
-            df = df[df["time_stamp"] >= min_t]
-
-            if run_id is not None:
-                df = df[df["run_id"] == run_id]
-
-            df = df.sort_values("time_stamp")
-
-            if not df.empty:
-                data = torch.tensor(
-                    df[data_cols].to_numpy(), dtype=torch.float32
-                ).T
-                self.table_cache[(table, run_id)] = data
-
-            if (i + 1) % 20 == 0 or (i + 1) == total:
+            if os.path.exists(cache_path):
                 print(
-                    f"  [{self.split}] Loaded {i + 1}/{total} segments...",
+                    f"[{self.split}] Loading table cache from disk: {cache_path}",
                     flush=True,
                 )
+                try:
+                    self.table_cache = torch.load(cache_path, weights_only=False)
+                    print(
+                        f"[{self.split}] Cache loaded ({len(self.table_cache)} segments).",
+                        flush=True,
+                    )
+                    return
+                except Exception as e:
+                    print(
+                        f"[{self.split}] Cache file corrupt ({e}), regenerating...",
+                        flush=True,
+                    )
+                    os.remove(cache_path)
 
-        print(f"[{self.split}] Pre-loading complete.", flush=True)
+            self.table_cache = {}
 
-        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        torch.save(self.table_cache, cache_path)
-        print(f"[{self.split}] Cache saved to {cache_path}", flush=True)
+            needed = set()
+            for dataset, instance, sensor_node, run_id, _, _ in self.samples:
+                for signal in self.config.TRAIN_SENSORS:
+                    table = f"{dataset}_{signal}_{instance}_{sensor_node}"
+                    key = (table, run_id)
+                    if key in self.table_run_min_time:
+                        needed.add(key)
+
+            total = len(needed)
+            print(f"[{self.split}] Pre-loading {total} table segments into memory...")
+
+            for i, (table, run_id) in enumerate(sorted(needed)):
+                path = self._parquet_paths.get(table)
+                if path is None:
+                    continue
+
+                min_t = self.table_run_min_time[(table, run_id)]
+
+                if "_accel_" in table:
+                    data_cols = ["accel_x_ew", "accel_y_ns", "accel_z_ud"]
+                else:
+                    data_cols = ["amplitude"]
+
+                read_cols = ["time_stamp"] + data_cols
+                if run_id is not None:
+                    read_cols.append("run_id")
+
+                df = pd.read_parquet(path, columns=read_cols)
+                df = df[df["time_stamp"] >= min_t]
+
+                if run_id is not None:
+                    df = df[df["run_id"] == run_id]
+
+                df = df.sort_values("time_stamp")
+
+                if not df.empty:
+                    data = torch.tensor(
+                        df[data_cols].to_numpy(), dtype=torch.float32
+                    ).T
+                    self.table_cache[(table, run_id)] = data
+
+                if (i + 1) % 20 == 0 or (i + 1) == total:
+                    print(
+                        f"  [{self.split}] Loaded {i + 1}/{total} segments...",
+                        flush=True,
+                    )
+
+            print(f"[{self.split}] Pre-loading complete.", flush=True)
+
+            tmp_path = cache_path + ".tmp"
+            torch.save(self.table_cache, tmp_path)
+            os.replace(tmp_path, cache_path)
+            print(f"[{self.split}] Cache saved to {cache_path}", flush=True)
