@@ -62,8 +62,9 @@ INSTANCE_SEED = 0
 # =====================================================================
 # MODEL SELECTION CRITERIA
 # =====================================================================
-# Options: "val_acc", "val_loss", "val_f1", "val_precision", "val_recall"
-BEST_MODEL_METRIC = "val_f1"
+# Checkpoint and early-stopping metric is controlled by CHECKPOINT_METRIC (section 7c).
+# Options: "mcc" | "val_f1" | "val_loss" | "val_acc" | "val_precision" | "val_recall"
+# Note: val_f1 is always logged to meta.pt for evaluate_best_ensemble() model selection.
 
 # =====================================================================
 # 4. DATASET, SENSOR & CLASS CONSTANTS
