@@ -34,7 +34,7 @@ from crl_vehicle.models.encoder_decoder import TemporalEncoder, FeatureDecoder
 from crl_vehicle.models.latent import CausalLatentSpace
 from crl_vehicle.models.intervention import UnknownInterventionClassifier, label_change_target
 from crl_vehicle.models.heads import LinearPresenceHead, LinearTypeHead, LinearProximityHead
-from crl_vehicle.losses.crl_loss import reconstruction_loss, kl_divergence, intervention_matching_loss
+from crl_vehicle.losses.crl_loss import reconstruction_loss, kl_divergence
 
 
 # ---------------------------------------------------------------------------
@@ -497,8 +497,10 @@ class Trainer:
         pres_head = self.model.pres_heads[sensor]
         type_head = self.model.type_heads[sensor]
 
+        prox_head = self.model.prox_heads[sensor]
         opt = torch.optim.AdamW(
-            list(pres_head.parameters()) + list(type_head.parameters()),
+            list(pres_head.parameters()) + list(type_head.parameters()) +
+            list(prox_head.parameters()),
             lr=self.cfg.lr,
         )
         sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=5)
