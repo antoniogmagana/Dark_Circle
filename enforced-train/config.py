@@ -273,8 +273,9 @@ SEQ_LEN = int(REF_SAMPLE_RATE * SAMPLE_SECONDS)
 # Explicit mel parameters — global for both sensors.
 # Tuned for seismic (200Hz × 2s = 400 samples → ~18 mel frames at HOP=16).
 # Audio (16kHz × 2s = 32000 samples) produces ~1875 frames — no ceiling concern.
-# N_FFT=128 gives 65 frequency bins, satisfying MEL_BINS=64 without degenerate filterbank.
-N_FFT = 128
+# N_FFT=256 gives 129 frequency bins, giving the 64 mel filters enough room to avoid
+# degenerate (all-zero) filterbanks that occur when n_freqs is too close to n_mels.
+N_FFT = 256
 HOP_LENGTH = 16
 
 # --- Detection CNN ---
