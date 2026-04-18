@@ -112,7 +112,12 @@ CHANNEL_ADC_SCALES = [
 
 # Semantic category names (used for category-level classification)
 # if background used, always set to 0: "background"
-CLASS_MAP = {0: "pedestrian", 1: "light", 2: "sport", 3: "utility"}
+CLASS_MAP = {
+    0: "micro",   # < 400 lbs (Pedestrians, bikes, scooters)
+    1: "light",   # 500 - 1,500 lbs (Warhog, Motorcycles, Polaris)
+    2: "medium",  # 2,000 - 3,900 lbs (Miata, CX-30, Forester, Mustang)
+    3: "heavy"    # 4,000+ lbs (Tesla, GLE 350, Silverado/Pickups)
+}
 
 # Instance → category mapping (authoritative)
 DATASET_VEHICLE_MAP = {
@@ -123,37 +128,34 @@ DATASET_VEHICLE_MAP = {
         "warhog1135am": ["light", "warhog"],
         "warhog1149am": ["light", "warhog"],
         "warhog_nolineofsight": ["light", "warhog"],
-        "silverado0255pm": ["utility", "pickup"],
-        "silverado0315pm": ["utility", "pickup"],
+        "silverado0255pm": ["heavy", "pickup"],
+        "silverado0315pm": ["heavy", "pickup"],
     },
     "focal": {
-        "walk": ["pedestrian", "walk"],
-        "walk2": ["pedestrian", "walk"],
-        "bicycle": ["pedestrian", "bicycle"],
-        "bicycle2": ["pedestrian", "bicycle"],
+        "walk": ["micro", "walk"],
+        "walk2": ["micro", "walk"],
+        "bicycle": ["micro", "bicycle"],
+        "bicycle2": ["micro", "bicycle"],
         "motor": ["light", "motorcycle"],
         "motor2": ["light", "motorcycle"],
-        "scooter": ["light", "scooter"],
-        "scooter2": ["light", "scooter"],
-        "forester": ["utility", "forester"],
-        "forester2": ["utility", "forester"],
-        "mustang": ["sport", "mustang"],
-        "mustang0528": ["sport", "mustang"],
-        "mustang2": ["sport", "mustang"],
-        "pickup": ["utility", "pickup"],
-        "pickup2": ["utility", "pickup"],
-        "tesla": ["sport", "ev"],
-        "tesla2": ["sport", "ev"],
+        "scooter": ["micro", "scooter"],
+        "scooter2": ["micro", "scooter"],
+        "forester": ["medium", "forester"],
+        "forester2": ["medium", "forester"],
+        "mustang": ["medium", "mustang"],
+        "mustang0528": ["medium", "mustang"],
+        "mustang2": ["medium", "mustang"],
+        "pickup": ["heavy", "pickup"],
+        "pickup2": ["heavy", "pickup"],
+        "tesla": ["heavy", "ev"],
+        "tesla2": ["heavy", "ev"],
     },
     "m3nvc": {
         "background": ["background", "background"],
-        "cx30": ["utility", "cx30"],
-        "miata": ["sport", "miata"],
-        "mustang": ["sport", "mustang"],
-        # "cx30_miata": 4,
-        # "cx30_mustang": 4,
-        # "miata_mustang": "sport",
-        "gle350": ["utility", "gle350"],
+        "cx30": ["medium", "cx30"],
+        "miata": ["medium", "miata"],
+        "mustang": ["medium", "mustang"],
+        "gle350": ["heavy", "gle350"],
     },
 }
 

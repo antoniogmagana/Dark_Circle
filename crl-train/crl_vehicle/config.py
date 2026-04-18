@@ -40,8 +40,8 @@ DATASET_VEHICLE_MAP = {
         "warhog1135am":               ["light",   "warhog"],
         "warhog1149am":               ["light",   "warhog"],
         "warhog_nolineofsight":       ["light",   "warhog"],
-        "silverado0255pm":            ["utility", "pickup"],
-        "silverado0315pm":            ["utility", "pickup"],
+        "silverado0255pm":            ["heavy", "pickup"],
+        "silverado0315pm":            ["heavy", "pickup"],
     },
     "focal": {
         "walk":        ["pedestrian", "walk"],
@@ -52,22 +52,22 @@ DATASET_VEHICLE_MAP = {
         "motor2":      ["light",      "motorcycle"],
         "scooter":     ["light",      "scooter"],
         "scooter2":    ["light",      "scooter"],
-        "forester":    ["utility",    "forester"],
-        "forester2":   ["utility",    "forester"],
-        "mustang":     ["sport",      "mustang"],
-        "mustang0528": ["sport",      "mustang"],
-        "mustang2":    ["sport",      "mustang"],
-        "pickup":      ["utility",    "pickup"],
-        "pickup2":     ["utility",    "pickup"],
-        "tesla":       ["sport",      "ev"],
-        "tesla2":      ["sport",      "ev"],
+        "forester":    ["medium",    "forester"],
+        "forester2":   ["medium",    "forester"],
+        "mustang":     ["medium",      "mustang"],
+        "mustang0528": ["medium",      "mustang"],
+        "mustang2":    ["medium",      "mustang"],
+        "pickup":      ["heavy",    "pickup"],
+        "pickup2":     ["heavy",    "pickup"],
+        "tesla":       ["heavy",      "ev"],
+        "tesla2":      ["heavy",      "ev"],
     },
     "m3nvc": {
         "background":    ["background", "background"],
-        "cx30":          ["utility",    "cx30"],
-        "miata":         ["sport",      "miata"],
-        "mustang":       ["sport",      "mustang"],
-        "gle350":        ["utility",    "gle350"],
+        "cx30":          ["medium",    "cx30"],
+        "miata":         ["medium",      "miata"],
+        "mustang":       ["medium",      "mustang"],
+        "gle350":        ["heavy",    "gle350"],
         "cx30_miata":    ["multi",      "multi"],
         "cx30_mustang":  ["multi",      "multi"],
         "miata_mustang": ["multi",      "multi"],
@@ -146,6 +146,7 @@ class CRLConfig:
 
     # Paths
     save_dir:        str   = "saved_crl"
+    cache_dir:       str   = "saved_crl/cache"
 
     # Frontend architecture
     frontend_type:          str = "multiscale"

@@ -35,6 +35,7 @@ their CRLConfig defaults so results are directly comparable across experiments.
 """
 
 import argparse
+import csv
 import json
 import sys
 import time

@@ -37,6 +37,9 @@ ConsecutivePairDataset wraps SensorDataset for CITRIS CRL training:
     }
 """
 
+import fcntl
+import hashlib
+import json
 import re
 import numpy as np
 import pandas as pd
@@ -151,13 +154,68 @@ class SensorDataset(Dataset):
         # (gkey, w, vehicle_type, det_label, audio_seg_id, seismic_seg_id)
         self._index: list = []
 
-        self._build_index()
+        cache_path = self._get_cache_path()
+        lock_path = str(cache_path) + ".lock"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(lock_path, "w") as lock_fh:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX)
+            if cache_path.exists():
+                print(f"  SensorDataset: loading cache from {cache_path}", flush=True)
+                try:
+                    cached = torch.load(cache_path, weights_only=False)
+                    self._cache = cached["cache"]
+                    self._index = cached["index"]
+                    self._groups = cached["groups"]
+                    self._segment_id_map = cached["segment_id_map"]
+                    self._seg_counter = cached["seg_counter"]
+                    self._resamplers = {}
+                except Exception as e:
+                    print(f"  SensorDataset: cache corrupt ({e}), regenerating...", flush=True)
+                    cache_path.unlink(missing_ok=True)
+                    self._build_index()
+                    self._save_cache(cache_path)
+            else:
+                self._build_index()
+                self._save_cache(cache_path)
+
         print(
             f"  SensorDataset [{self.parquet_dir.name}]: "
             f"{len(self._index)} windows, "
             f"{sum(1 for e in self._index if e[4] >= 0)} with audio, "
             f"{sum(1 for e in self._index if e[5] >= 0)} with seismic"
         )
+
+    # ------------------------------------------------------------------
+    # Cache helpers
+    # ------------------------------------------------------------------
+
+    def _get_cache_path(self) -> Path:
+        key_data = {
+            "parquet_dir": str(self.parquet_dir.resolve()),
+            "sample_seconds": self.cfg.sample_seconds,
+            "horizon_stride_sec": self.cfg.horizon_stride_sec,
+            "is_train": self.is_train,
+        }
+        key_hash = hashlib.md5(
+            json.dumps(key_data, sort_keys=True).encode()
+        ).hexdigest()[:12]
+        split = "train" if self.is_train else "val"
+        cache_dir = Path(getattr(self.cfg, "cache_dir", "saved_crl/cache"))
+        return cache_dir / f"sensor_cache_{split}_{key_hash}.pt"
+
+    def _save_cache(self, cache_path: Path):
+        payload = {
+            "cache": self._cache,
+            "index": self._index,
+            "groups": self._groups,
+            "segment_id_map": self._segment_id_map,
+            "seg_counter": self._seg_counter,
+        }
+        tmp = Path(str(cache_path) + ".tmp")
+        torch.save(payload, tmp)
+        tmp.rename(cache_path)
+        print(f"  SensorDataset: cache saved to {cache_path}", flush=True)
 
     # ------------------------------------------------------------------
     # Index construction
