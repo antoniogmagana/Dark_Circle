@@ -72,7 +72,6 @@ class CRLModel(nn.Module):
         # Auxiliary heads for pre-training supervision (discarded after CRL phase)
         self.aux_pres_heads = nn.ModuleDict()
         self.aux_type_heads = nn.ModuleDict()
-        self.aux_prox_heads = nn.ModuleDict()
 
         self.latent = CausalLatentSpace(d_z=d_z)
         self.interv_classifier = UnknownInterventionClassifier(
@@ -133,7 +132,6 @@ class CRLModel(nn.Module):
             # Auxiliary heads (pre-training only)
             self.aux_pres_heads[sensor] = nn.Linear(CausalLatentSpace.D_PRES, 1)
             self.aux_type_heads[sensor] = nn.Linear(CausalLatentSpace.D_TYPE, n_classes)
-            self.aux_prox_heads[sensor] = nn.Linear(CausalLatentSpace.D_PROX, 1)
 
     def encode(self, sensor: str, x: torch.Tensor):
         """
@@ -155,8 +153,7 @@ class CRLModel(nn.Module):
             list(self.type_heads.parameters()) +
             list(self.prox_heads.parameters()) +
             list(self.aux_pres_heads.parameters()) +
-            list(self.aux_type_heads.parameters()) +
-            list(self.aux_prox_heads.parameters())
+            list(self.aux_type_heads.parameters())
         )
         return [p for p in self.parameters() if p not in exclude]
 
@@ -221,7 +218,7 @@ class Trainer:
         ]
         metrics_path = self.save_dir / "crl_metrics.csv"
         with open(metrics_path, "w", newline="") as f:
-            csv.DictWriter(f, fieldnames=fieldnames).writeheader()
+            csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore').writeheader()
 
         print("\n=== CRL Pre-training ===")
         for epoch in range(epochs):
@@ -248,9 +245,11 @@ class Trainer:
                 "epoch": epoch, "beta": round(self.beta, 4), "beta_event": beta_event,
                 "lr": round(current_lr, 6), "grad_norm": round(grad_norm, 4),
                 **train_m, **val_m,
+                "pres_changed_frac": val_m.get("val_pres_changed_frac", 0.0),
+                "type_changed_frac": val_m.get("val_type_changed_frac", 0.0),
             }
             with open(metrics_path, "a", newline="") as f:
-                csv.DictWriter(f, fieldnames=fieldnames).writerow(row)
+                csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore').writerow(row)
 
             print(
                 f"Epoch {epoch:3d} | β={self.beta:.2f}({beta_event}) lr={current_lr:.2e} | "
@@ -282,8 +281,13 @@ class Trainer:
         Shared forward pass for train and eval.
         Returns (loss, metrics_dict).
         """
-        recon_total = kl_total = raw_kl_total = interv_total = 0.0
-        aux_pres_total = aux_type_total = aux_prox_total = 0.0
+        recon_total    = torch.tensor(0.0, device=self.device)
+        kl_total       = torch.tensor(0.0, device=self.device)
+        interv_total   = torch.tensor(0.0, device=self.device)
+        aux_pres_total = torch.tensor(0.0, device=self.device)
+        aux_type_total = torch.tensor(0.0, device=self.device)
+        aux_prox_total = torch.tensor(0.0, device=self.device)
+        raw_kl_total = 0.0
         pres_changed_total = type_changed_total = 0.0
         n_mod = 0
 
@@ -364,15 +368,15 @@ class Trainer:
                 for x_raw, z_prox_x in [(x_t, z_prox_t), (x_tn, z_prox_tn)]:
                     rms = x_raw.pow(2).mean(dim=-1).sqrt().mean(dim=-1)
                     rms_norm = (rms - rms.min()) / (rms.max() - rms.min() + 1e-8)
-                    prox_pred = self.model.aux_prox_heads[sensor](z_prox_x).squeeze(-1)
+                    prox_pred = z_prox_x.mean(dim=-1)
                     aux_prox = aux_prox + F.mse_loss(prox_pred, rms_norm) / 2
 
-            recon_total  += recon
-            kl_total     += kl
-            interv_total += interv
-            aux_pres_total += aux_pres.item() if isinstance(aux_pres, torch.Tensor) else aux_pres
-            aux_type_total += aux_type.item() if isinstance(aux_type, torch.Tensor) else aux_type
-            aux_prox_total += aux_prox.item() if isinstance(aux_prox, torch.Tensor) else aux_prox
+            recon_total    += recon
+            kl_total       += kl
+            interv_total   += interv
+            aux_pres_total += aux_pres
+            aux_type_total += aux_type
+            aux_prox_total += aux_prox
             n_mod += 1
 
         if n_mod == 0:
@@ -383,33 +387,29 @@ class Trainer:
                 "pres_changed_frac": 0.0, "type_changed_frac": 0.0,
             }
 
-        recon_total  /= n_mod
-        kl_total     /= n_mod
-        raw_kl_total /= n_mod
-        interv_total /= n_mod
-        aux_pres_val  = aux_pres_total / n_mod
-        aux_type_val  = aux_type_total / n_mod
-        aux_prox_val  = aux_prox_total / n_mod
-
-        aux_pres_t = torch.tensor(aux_pres_total / n_mod, device=self.device)
-        aux_type_t = torch.tensor(aux_type_total / n_mod, device=self.device)
-        aux_prox_t = torch.tensor(aux_prox_total / n_mod, device=self.device)
+        recon_total    = recon_total    / n_mod
+        kl_total       = kl_total       / n_mod
+        raw_kl_total   = raw_kl_total   / n_mod
+        interv_total   = interv_total   / n_mod
+        aux_pres_total = aux_pres_total / n_mod
+        aux_type_total = aux_type_total / n_mod
+        aux_prox_total = aux_prox_total / n_mod
 
         total = (recon_total + kl_total
-                 + self.cfg.lambda_interv * interv_total
-                 + self.cfg.lambda_aux_pres * aux_pres_t
-                 + self.cfg.lambda_aux_type * aux_type_t
-                 + self.cfg.lambda_aux_prox * aux_prox_t)
+                 + self.cfg.lambda_interv  * interv_total
+                 + self.cfg.lambda_aux_pres * aux_pres_total
+                 + self.cfg.lambda_aux_type * aux_type_total
+                 + self.cfg.lambda_aux_prox * aux_prox_total)
 
         return total, {
             "recon":  recon_total.item(),
             "kl":     kl_total.item(),
             "raw_kl": raw_kl_total,
-            "interv": interv_total.item() if isinstance(interv_total, torch.Tensor) else float(interv_total),
+            "interv": interv_total.item(),
             "total":  total.item(),
-            "aux_pres": aux_pres_val,
-            "aux_type": aux_type_val,
-            "aux_prox": aux_prox_val,
+            "aux_pres": aux_pres_total.item(),
+            "aux_type": aux_type_total.item(),
+            "aux_prox": aux_prox_total.item(),
             "pres_changed_frac": pres_changed_total / n_mod,
             "type_changed_frac": type_changed_total / n_mod,
         }
