@@ -196,11 +196,9 @@ def main():
     print(f"Total training samples: {len(train_ds)}")
 
     if getattr(config, "USE_WEIGHTED_SAMPLER", False):
-        train_sampler = _build_weighted_sampler(
-            train_ds, config, device,
-            strength=getattr(config, "WEIGHTED_SAMPLER_STRENGTH", 1.0),
-        )
-        print(f"Using WeightedRandomSampler (strength={config.WEIGHTED_SAMPLER_STRENGTH})")
+        strength = getattr(config, "WEIGHTED_SAMPLER_STRENGTH", 1.0)
+        train_sampler = _build_weighted_sampler(train_ds, config, device, strength=strength)
+        print(f"Using WeightedRandomSampler (strength={strength})")
     else:
         train_sampler = EpochShuffleSampler(
             train_ds, base_seed=config.INSTANCE_SEED, num_epochs=config.EPOCHS
@@ -324,6 +322,9 @@ def main():
 
     for epoch in range(1, config.EPOCHS + 1):
         print(f"\nEpoch {epoch}/{config.EPOCHS}")
+
+        if isinstance(train_sampler, EpochShuffleSampler):
+            train_sampler.set_epoch(epoch - 1)
 
         train_loss, train_acc = train_one_epoch(
             model, train_loader, optimizer, criterion, device, config, epoch
