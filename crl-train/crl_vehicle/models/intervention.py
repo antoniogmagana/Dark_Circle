@@ -14,7 +14,6 @@ the intervention target — they are decoupled from causal structure.
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 D_ENV = 6   # must match CausalLatentSpace.D_ENV
 
