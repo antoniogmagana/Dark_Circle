@@ -456,6 +456,13 @@ class ConsecutivePairDataset(Dataset):
             if (gkey, w + 1) in valid:
                 self._anchors.append(i)
 
+        # Map anchor flat-index → tn flat-index for O(1) label lookup
+        pos_map = {(entry[0], entry[1]): i for i, entry in enumerate(sensor_dataset._index)}
+        self._tn_map: dict[int, int] = {}
+        for i_anchor in self._anchors:
+            gkey, w_t = sensor_dataset._index[i_anchor][0], sensor_dataset._index[i_anchor][1]
+            self._tn_map[i_anchor] = pos_map[(gkey, w_t + 1)]
+
     def __len__(self) -> int:
         return len(self._anchors)
 
@@ -465,7 +472,10 @@ class ConsecutivePairDataset(Dataset):
         group = self.ds._groups[gkey]
         w_tn = w_t + 1
 
-        # Independent interventions at t and t+1
+        # Look up tn labels via pre-built map
+        tn_entry = self.ds._index[self._tn_map[i_t]]
+        _, _, vehicle_type_tn, det_label_tn, _, _ = tn_entry
+
         if self.ds.is_train and torch.rand(1).item() < 0.60:
             interv_t = torch.randint(1, N_INTERVENTIONS + 1, (1,)).item()
         else:
@@ -486,18 +496,22 @@ class ConsecutivePairDataset(Dataset):
             return self.ds._zero_window(sensor)
 
         return {
-            "x_audio_t":       get("audio",   w_t,  interv_t),
-            "x_audio_tn":      get("audio",   w_tn, interv_tn),
-            "x_seismic_t":     get("seismic", w_t,  interv_t),
-            "x_seismic_tn":    get("seismic", w_tn, interv_tn),
-            "audio_avail":     audio_avail,
-            "seismic_avail":   seismic_avail,
-            "interv_idx_t":    interv_t,
-            "interv_idx_tn":   interv_tn,
-            "horizon_n":       1,
-            "vehicle_type":    vehicle_type,
-            "detection_label": det_label,
-            "segment_id":      seismic_seg_id if seismic_avail else audio_seg_id,
+            "x_audio_t":          get("audio",   w_t,  interv_t),
+            "x_audio_tn":         get("audio",   w_tn, interv_tn),
+            "x_seismic_t":        get("seismic", w_t,  interv_t),
+            "x_seismic_tn":       get("seismic", w_tn, interv_tn),
+            "audio_avail":        audio_avail,
+            "seismic_avail":      seismic_avail,
+            "interv_idx_t":       interv_t,
+            "interv_idx_tn":      interv_tn,
+            "horizon_n":          1,
+            "vehicle_type":       vehicle_type,
+            "detection_label":    det_label,
+            "vehicle_type_t":     vehicle_type,
+            "vehicle_type_tn":    vehicle_type_tn,
+            "detection_label_t":  det_label,
+            "detection_label_tn": det_label_tn,
+            "segment_id":         seismic_seg_id if seismic_avail else audio_seg_id,
         }
 
 
@@ -520,16 +534,20 @@ def collate_single(batch: list) -> dict:
 
 def collate_pairs(batch: list) -> dict:
     return {
-        "x_audio_t":       torch.stack([b["x_audio_t"]     for b in batch]),
-        "x_audio_tn":      torch.stack([b["x_audio_tn"]    for b in batch]),
-        "x_seismic_t":     torch.stack([b["x_seismic_t"]   for b in batch]),
-        "x_seismic_tn":    torch.stack([b["x_seismic_tn"]  for b in batch]),
-        "audio_avail":     torch.tensor([b["audio_avail"]   for b in batch], dtype=torch.bool),
-        "seismic_avail":   torch.tensor([b["seismic_avail"] for b in batch], dtype=torch.bool),
-        "interv_idx_t":    torch.tensor([b["interv_idx_t"]    for b in batch], dtype=torch.long),
-        "interv_idx_tn":   torch.tensor([b["interv_idx_tn"]   for b in batch], dtype=torch.long),
-        "horizon_n":       torch.tensor([b["horizon_n"]        for b in batch], dtype=torch.long),
-        "vehicle_type":    torch.tensor([b["vehicle_type"]     for b in batch], dtype=torch.long),
-        "detection_label": torch.tensor([b["detection_label"]  for b in batch], dtype=torch.long),
-        "segment_id":      torch.tensor([b["segment_id"]       for b in batch], dtype=torch.long),
+        "x_audio_t":          torch.stack([b["x_audio_t"]     for b in batch]),
+        "x_audio_tn":         torch.stack([b["x_audio_tn"]    for b in batch]),
+        "x_seismic_t":        torch.stack([b["x_seismic_t"]   for b in batch]),
+        "x_seismic_tn":       torch.stack([b["x_seismic_tn"]  for b in batch]),
+        "audio_avail":        torch.tensor([b["audio_avail"]   for b in batch], dtype=torch.bool),
+        "seismic_avail":      torch.tensor([b["seismic_avail"] for b in batch], dtype=torch.bool),
+        "interv_idx_t":       torch.tensor([b["interv_idx_t"]    for b in batch], dtype=torch.long),
+        "interv_idx_tn":      torch.tensor([b["interv_idx_tn"]   for b in batch], dtype=torch.long),
+        "horizon_n":          torch.tensor([b["horizon_n"]        for b in batch], dtype=torch.long),
+        "vehicle_type":       torch.tensor([b["vehicle_type"]     for b in batch], dtype=torch.long),
+        "detection_label":    torch.tensor([b["detection_label"]  for b in batch], dtype=torch.long),
+        "vehicle_type_t":     torch.tensor([b["vehicle_type_t"]   for b in batch], dtype=torch.long),
+        "vehicle_type_tn":    torch.tensor([b["vehicle_type_tn"]  for b in batch], dtype=torch.long),
+        "detection_label_t":  torch.tensor([b["detection_label_t"]  for b in batch], dtype=torch.long),
+        "detection_label_tn": torch.tensor([b["detection_label_tn"] for b in batch], dtype=torch.long),
+        "segment_id":         torch.tensor([b["segment_id"]       for b in batch], dtype=torch.long),
     }
