@@ -103,22 +103,20 @@ def default_seismic_config() -> ModalityConfig:
 
 @dataclass
 class CRLConfig:
-    """
-    Full pipeline configuration.
-    Modality-specific signal processing lives in audio_cfg / seismic_cfg.
-    """
-
     # Per-modality signal processing configs
     audio_cfg:   ModalityConfig = field(default_factory=default_audio_config)
     seismic_cfg: ModalityConfig = field(default_factory=default_seismic_config)
 
     # Data
-    sample_seconds:  float = 1.0    # window duration in seconds
+    sample_seconds:  float = 1.0
+
+    # Latent space
+    d_z:             int   = 24   # total latent dims (pres=4, type=6, prox=3, env=6, free=5)
 
     # Encoder / decoder
-    d_model:         int   = 64     # internal feature dimension
-    n_heads:         int   = 4      # Transformer attention heads
-    n_layers:        int   = 2      # Transformer encoder layers
+    d_model:         int   = 64
+    n_heads:         int   = 4
+    n_layers:        int   = 2
 
     # Training
     batch_size:           int   = 512
@@ -129,20 +127,31 @@ class CRLConfig:
     num_workers:          int   = 12
     early_stop_patience:  int   = 25
 
-    # Loss weights
-    lambda_interv:    float = 1.0    # weight on intervention matching loss
+    # Loss weights — core
+    lambda_interv:    float = 1.0
 
-    # Adaptive beta schedule (Options 1 + 3)
-    beta_step:        float = 0.02   # amount to increment/decrement beta each epoch
-    kl_floor:         float = 0.01   # raw KL below this → decay beta (collapse guard)
-    kl_target:        float = 0.5    # raw KL above this → raise beta unconditionally
-    recon_min_delta:  float = 0.005  # min improvement in val_recon to count as "improving"
+    # Loss weights — auxiliary supervision
+    lambda_aux_pres:  float = 0.3
+    lambda_aux_type:  float = 0.3
+    lambda_aux_prox:  float = 0.1
 
-    # Data windowing (controls sliding-window stride in SensorDataset)
-    horizon_stride_sec: float = 0.7   # seconds between successive anchor windows
+    # Auxiliary supervision toggle (False = exp1_baseline behaviour)
+    use_aux_supervision: bool = True
+
+    # Intervention signal mode: "label_change" (redesigned) or "noise_type" (legacy)
+    intervention_mode: str = "label_change"
+
+    # Adaptive beta schedule
+    beta_step:        float = 0.02
+    kl_floor:         float = 0.01
+    kl_target:        float = 0.5
+    recon_min_delta:  float = 0.005
+
+    # Data windowing
+    horizon_stride_sec: float = 0.7
 
     # Training throughput
-    steps_per_epoch: int | None = None  # cap training batches per epoch (None = full epoch)
+    steps_per_epoch: int | None = None
 
     # Paths
     save_dir:        str   = "saved_crl"
@@ -150,8 +159,11 @@ class CRLConfig:
     # Frontend architecture
     frontend_type:          str = "multiscale"
     morlet_kernel_size:     int = 257
-    morlet_pool_stride:     int = 64   # AvgPool1d stride after Morlet frontend (16000 → 250 frames for audio)
-    multiscale_pool_stride: int = 16   # AvgPool1d stride after MultiScale frontend (4000 → 250 frames for audio)
+    morlet_pool_stride:     int = 64
+    multiscale_pool_stride: int = 16
+
+    # Hardware profile (set by hardware_profile() in run_experiments.py)
+    hardware_profile_name: str = "auto"
 
     def modality_cfg(self, modality: str) -> ModalityConfig:
         if modality == "audio":
