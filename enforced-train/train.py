@@ -3,7 +3,7 @@ import random
 import torch
 import torch.nn as nn
 import numpy as np
-from torch.utils.data import DataLoader, Sampler
+from torch.utils.data import DataLoader, Sampler, WeightedRandomSampler
 from sklearn.metrics import (
     precision_score,
     recall_score,
@@ -146,6 +146,39 @@ def _compute_class_weights(
     return weights.to(device)
 
 
+def _build_weighted_sampler(train_ds, config, device, strength: float = 1.0):
+    """Build a WeightedRandomSampler from per-class inverse-frequency weights.
+
+    strength=1.0 → fully class-balanced sampling.
+    strength=0.0 → uniform sampling (equivalent to no sampler).
+    Intermediate values interpolate between the two.
+    """
+    reverse_class_map = {v: k for k, v in config.CLASS_MAP.items()}
+    class_weights = _compute_class_weights(train_ds, config, device, weight_cap=config.CLASS_WEIGHT_CAP)
+
+    sample_weights = []
+    for dataset, instance, _sensor_node, _run_id, _step_idx, label_str in train_ds.samples:
+        if config.TRAINING_MODE == "detection":
+            label_int = 0 if label_str == "background" else 1
+        elif config.TRAINING_MODE == "category":
+            label_int = reverse_class_map.get(label_str, 0)
+        elif config.TRAINING_MODE == "instance":
+            vehicle_type = config.DATASET_VEHICLE_MAP[dataset][instance][1]
+            label_int = config.INSTANCE_TO_CLASS[vehicle_type]
+        else:
+            raise ValueError(f"Unknown TRAINING_MODE: {config.TRAINING_MODE}")
+
+        w = class_weights[label_int].item()
+        # Interpolate between uniform (1.0) and class-balanced (w) by strength
+        sample_weights.append(1.0 + strength * (w - 1.0))
+
+    return WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(sample_weights),
+        replacement=True,
+    )
+
+
 def main():
     device = config.DEVICE
     print("Using device:", device)
@@ -159,20 +192,29 @@ def main():
     # ------------------------------------------------------------
     train_ds = VehicleDataset(split="train", config=config)
     val_ds = VehicleDataset(split="val", config=config)
-    epoch_sampler = EpochShuffleSampler(
-        train_ds, base_seed=config.INSTANCE_SEED, num_epochs=config.EPOCHS
-    )
 
     print(f"Total training samples: {len(train_ds)}")
+
+    if getattr(config, "USE_WEIGHTED_SAMPLER", False):
+        train_sampler = _build_weighted_sampler(
+            train_ds, config, device,
+            strength=getattr(config, "WEIGHTED_SAMPLER_STRENGTH", 1.0),
+        )
+        print(f"Using WeightedRandomSampler (strength={config.WEIGHTED_SAMPLER_STRENGTH})")
+    else:
+        train_sampler = EpochShuffleSampler(
+            train_ds, base_seed=config.INSTANCE_SEED, num_epochs=config.EPOCHS
+        )
+        print("Using EpochShuffleSampler")
 
     train_loader = DataLoader(
         train_ds,
         batch_size=config.BATCH_SIZE,
-        sampler=epoch_sampler,
+        sampler=train_sampler,
         num_workers=config.NUM_WORKERS,
-        pin_memory=True,
-        prefetch_factor=2,
-        persistent_workers=True,
+        pin_memory=getattr(config, "PIN_MEMORY", True),
+        prefetch_factor=getattr(config, "PREFETCH_FACTOR", 2),
+        persistent_workers=getattr(config, "PERSISTENT_WORKERS", True),
     )
 
     val_loader = DataLoader(
@@ -180,9 +222,9 @@ def main():
         batch_size=config.BATCH_SIZE,
         shuffle=False,
         num_workers=config.NUM_WORKERS,
-        pin_memory=True,
-        prefetch_factor=2,
-        persistent_workers=True,
+        pin_memory=getattr(config, "PIN_MEMORY", True),
+        prefetch_factor=getattr(config, "PREFETCH_FACTOR", 2),
+        persistent_workers=getattr(config, "PERSISTENT_WORKERS", True),
     )
 
     # ------------------------------------------------------------
@@ -282,7 +324,6 @@ def main():
 
     for epoch in range(1, config.EPOCHS + 1):
         print(f"\nEpoch {epoch}/{config.EPOCHS}")
-        epoch_sampler.set_epoch(epoch - 1)
 
         train_loss, train_acc = train_one_epoch(
             model, train_loader, optimizer, criterion, device, config, epoch
