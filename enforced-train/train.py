@@ -9,6 +9,7 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
     confusion_matrix,
+    matthews_corrcoef,
 )
 from data_generator import augment_batch
 from dataset import VehicleDataset
@@ -39,29 +40,34 @@ class EpochShuffleSampler(Sampler):
         return len(self.dataset)
 
 
-def train_one_epoch(model, loader, optimizer, criterion, device, config, epoch):
+def train_one_epoch(model, loader, optimizer, criterion, device, config, epoch,
+                    steps_per_epoch=None):
     model.train()
     total_loss = 0
     total_correct = 0
     total_samples = 0
 
+    amp_enabled = getattr(config, "AMP_ENABLED", False) and device.type == "cuda"
+    amp_dtype = getattr(torch, getattr(config, "AMP_DTYPE", "bfloat16"))
+
     for batch_idx, (x, y, dataset_names) in enumerate(loader):
+        if steps_per_epoch is not None and batch_idx >= steps_per_epoch:
+            break
+
         x, y = x.to(device), y.to(device)
 
-        # -----------------------------------------------------------------
-        # DYNAMIC SYNTHESIS: SNR Augmentation (Controlled via config)
-        # -----------------------------------------------------------------
         if getattr(config, "AUGMENT_SNR", False):
             current_snr_range = getattr(config, "AUGMENT_SNR_RANGE", (10, 30))
             x = augment_batch(x, snr_range=current_snr_range)
-        # -----------------------------------------------------------------
 
-        # Preprocessing on the GPU
         x = preprocess_for_training(x, config=config)
 
         optimizer.zero_grad()
-        logits = model(x)
-        loss = criterion(logits, y)
+
+        with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
+            logits = model(x)
+            loss = criterion(logits, y)
+
         loss.backward()
         optimizer.step()
 
@@ -72,21 +78,27 @@ def train_one_epoch(model, loader, optimizer, criterion, device, config, epoch):
     return total_loss / total_samples, total_correct / total_samples
 
 
-def evaluate(model, loader, criterion, device, config):
+def evaluate(model, loader, criterion, device, config, steps_per_epoch=None):
     model.eval()
     total_loss = 0
     all_preds = []
     all_labels = []
 
+    amp_enabled = getattr(config, "AMP_ENABLED", False) and device.type == "cuda"
+    amp_dtype = getattr(torch, getattr(config, "AMP_DTYPE", "bfloat16"))
+
     with torch.inference_mode():
-        for x, y, dataset_names in loader:
+        for batch_idx, (x, y, dataset_names) in enumerate(loader):
+            if steps_per_epoch is not None and batch_idx >= steps_per_epoch:
+                break
+
             x, y = x.to(device), y.to(device)
 
-            # Preprocessing on the GPU
             x = preprocess_for_training(x, config=config)
 
-            logits = model(x)
-            loss = criterion(logits, y)
+            with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
+                logits = model(x)
+                loss = criterion(logits, y)
 
             total_loss += loss.item() * x.size(0)
             preds = logits.argmax(dim=1)
@@ -99,7 +111,6 @@ def evaluate(model, loader, criterion, device, config):
     total_samples = len(all_labels)
     avg_loss = total_loss / total_samples
 
-    # Calculate global metrics
     precision = precision_score(
         all_labels, all_preds, average="weighted", zero_division=0
     )
@@ -107,7 +118,6 @@ def evaluate(model, loader, criterion, device, config):
     f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
     accuracy = (np.array(all_preds) == np.array(all_labels)).mean()
 
-    # Calculate per-class accuracy safely using the confusion matrix
     target_labels = list(range(config.NUM_CLASSES))
     cm = confusion_matrix(all_labels, all_preds, labels=target_labels)
 
@@ -115,7 +125,9 @@ def evaluate(model, loader, criterion, device, config):
         per_class_acc = np.true_divide(cm.diagonal(), cm.sum(axis=1))
         per_class_acc[np.isnan(per_class_acc)] = 0.0
 
-    return avg_loss, accuracy, precision, recall, f1, per_class_acc
+    mcc = matthews_corrcoef(all_labels, all_preds)
+
+    return avg_loss, accuracy, precision, recall, f1, mcc, per_class_acc
 
 
 def _compute_class_weights(
@@ -247,6 +259,10 @@ def main():
         config=config,
     ).to(device)
 
+    if getattr(config, "TORCH_COMPILE", False):
+        print("Compiling model with torch.compile()...")
+        model = torch.compile(model)
+
     print("Performing dummy pass to initialize Lazy modules...")
     model.eval()
     with torch.no_grad():
@@ -260,18 +276,23 @@ def main():
         weights = torch.tensor(config.CLASS_WEIGHTS, dtype=torch.float32, device=device)
         print(f"Using class weights from config: {weights.tolist()}")
     else:
-        weights = _compute_class_weights(train_ds, config, device)
+        weights = _compute_class_weights(
+            train_ds, config, device,
+            weight_cap=getattr(config, "CLASS_WEIGHT_CAP", 10.0),
+        )
         print(f"Computed class weights from dataset: {weights.tolist()}")
     criterion = nn.CrossEntropyLoss(weight=weights)
 
     optimizer = model.get_optimizer()
+
+    target_metric_name = getattr(config, "CHECKPOINT_METRIC", "val_f1")
+    # Map "mcc" shorthand to the dict key
+    if target_metric_name == "mcc":
+        target_metric_name = "val_mcc"
+
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
-        mode=(
-            "min"
-            if getattr(config, "BEST_MODEL_METRIC", "val_acc") == "val_loss"
-            else "max"
-        ),
+        mode="min" if target_metric_name == "val_loss" else "max",
         factor=0.5,
         patience=3,
     )
@@ -300,6 +321,7 @@ def main():
         "Val_Precision",
         "Val_Recall",
         "Val_F1",
+        "Val_MCC",
     ] + class_names
 
     with open(config.METRICS_LOG_PATH, mode="w", newline="") as f:
@@ -309,8 +331,6 @@ def main():
     # ------------------------------------------------------------
     # Training loop with Dynamic "Best Model" criteria
     # ------------------------------------------------------------
-    target_metric_name = getattr(config, "BEST_MODEL_METRIC", "val_acc")
-
     if target_metric_name == "val_loss":
         best_metric_value = float("inf")
     else:
@@ -318,7 +338,7 @@ def main():
     best_val_f1 = 0.0
 
     epochs_no_improve = 0
-    EARLY_STOP_PATIENCE = 8
+    EARLY_STOP_PATIENCE = getattr(config, "EARLY_STOP_PATIENCE", 8)
 
     for epoch in range(1, config.EPOCHS + 1):
         print(f"\nEpoch {epoch}/{config.EPOCHS}")
@@ -327,11 +347,13 @@ def main():
             train_sampler.set_epoch(epoch - 1)
 
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, optimizer, criterion, device, config, epoch
+            model, train_loader, optimizer, criterion, device, config, epoch,
+            steps_per_epoch=getattr(config, "TRAIN_STEPS_PER_EPOCH", None),
         )
 
-        val_loss, val_acc, val_prec, val_rec, val_f1, per_class_acc = evaluate(
-            model, val_loader, criterion, device, config
+        val_loss, val_acc, val_prec, val_rec, val_f1, val_mcc, per_class_acc = evaluate(
+            model, val_loader, criterion, device, config,
+            steps_per_epoch=getattr(config, "VAL_STEPS_PER_EPOCH", None),
         )
 
         print(
@@ -354,6 +376,7 @@ def main():
                 f"{val_prec:.4f}",
                 f"{val_rec:.4f}",
                 f"{val_f1:.4f}",
+                f"{val_mcc:.4f}",
             ] + class_values
             writer.writerow(row_data)
 
@@ -363,6 +386,7 @@ def main():
             "val_f1": val_f1,
             "val_precision": val_prec,
             "val_recall": val_rec,
+            "val_mcc": val_mcc,
         }
 
         current_metric_value = metrics_dict.get(target_metric_name, val_acc)
