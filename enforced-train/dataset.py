@@ -165,21 +165,25 @@ class VehicleDataset(Dataset):
 
         keys_to_delete = []
 
+        # Both sensors are always required for paired audio+seismic alignment.
+        # This guarantees every sample has a counterpart in both sensors,
+        # regardless of which TRAIN_SENSORS this run uses.
+        REQUIRED_SENSORS = {"audio", "seismic"}
+
         for group_key, table_runs in groups.items():
             present_signals = [tr[0].split("_")[1] for tr in table_runs]
             has_all_signals = all(
-                signal in present_signals for signal in self.config.TRAIN_SENSORS
+                signal in present_signals for signal in REQUIRED_SENSORS
             )
 
             if not has_all_signals:
                 for tr in table_runs:
                     keys_to_delete.append(tr)
             else:
-                if "seismic" in self.config.TRAIN_SENSORS:
-                    seismic_trs = [tr for tr in table_runs if tr[0].split("_")[1] == "seismic"]
-                    ref_trs = seismic_trs if seismic_trs else table_runs
-                else:
-                    ref_trs = table_runs
+                # Always anchor time bounds to seismic (lower sample rate = binding
+                # constraint). Seismic presence is guaranteed by has_all_signals.
+                seismic_trs = [tr for tr in table_runs if tr[0].split("_")[1] == "seismic"]
+                ref_trs = seismic_trs
                 group_min_t = max(self.table_run_min_time[tr] for tr in ref_trs)
                 group_max_t = min(self.table_run_max_time[tr] for tr in table_runs)
 
@@ -222,7 +226,10 @@ class VehicleDataset(Dataset):
             ):
                 continue
 
-            ref_signal = self.config.TRAIN_SENSORS[0]
+            # Always use seismic present_map as the reference. Seismic is
+            # guaranteed present by _align_max_time's REQUIRED_SENSORS check,
+            # so both audio and seismic configs see identical present flags.
+            ref_signal = "seismic"
             ref_table = f"{dataset}_{ref_signal}_{instance}_{sensor_node}"
             present_map = self.present_maps.get((ref_table, run_id), {})
             is_m3nvc_bg = (dataset == "m3nvc" and instance == "background")
