@@ -1,82 +1,72 @@
 """
-UnknownInterventionClassifier
+UnknownInterventionClassifier (redesigned)
 
-Given two consecutive latent vectors (z_t, z_tn), predicts which causal block
-changed between the two time steps.
+Given z_env slices from two consecutive timesteps, predicts a 2-bit
+label-change vector: [pres_changed, type_changed].
 
-Target classes (5 total):
-    0 = no change          — neither window was intervened on
-    1 = presence changed
-    2 = type changed
-    3 = proximity changed
-    4 = noise changed      — any of the 7 synthetic noise interventions (interv_idx 1-7)
+This is structurally valid CITRIS pressure: the classifier learns which
+causal variable changed between t and t+1, pushing presence signal into
+z_pres and type signal into z_type.
 
-All 7 intervention types in transforms.py are environmental noise injections,
-so they all map to class 4 (noise block). Presence, type, and proximity are
-never directly intervened on by the data pipeline — those targets are reserved
-for future use and will not appear during training with the current dataset.
+Noise augmentations are retained as data augmentation but are NOT part of
+the intervention target — they are decoupled from causal structure.
 """
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+D_ENV = 6   # must match CausalLatentSpace.D_ENV
 
 
-# ---------------------------------------------------------------------------
-# Target mapping
-# ---------------------------------------------------------------------------
-
-# Block target indices
-BLOCK_NO_CHANGE  = 0
-BLOCK_NOISE      = 4
-
-N_BLOCK_TARGETS  = 5
-
-
-def interv_idx_to_block_target(interv_idx_t: torch.Tensor, interv_idx_tn: torch.Tensor) -> torch.Tensor:
+def label_change_target(
+    det_t: torch.Tensor,
+    det_tn: torch.Tensor,
+    type_t: torch.Tensor,
+    type_tn: torch.Tensor,
+) -> torch.Tensor:
     """
-    Map per-sample intervention indices at t and t+n to a block-level target.
+    Compute 2-bit change vector from consecutive ground-truth labels.
 
-    Rules:
-        - If neither step was intervened on → BLOCK_NO_CHANGE (0)
-        - If either step was intervened on (interv_idx > 0) → BLOCK_NOISE (4)
-          (all 7 synthetic interventions are noise injections)
+    det_t, det_tn  : (B,) long — detection_label {0, 1}
+    type_t, type_tn: (B,) long — vehicle_type {-2, -1, 0..3}
 
-    interv_idx_t, interv_idx_tn : (B,) long tensors, values in {0..7}
-    Returns                      : (B,) long tensor of block targets
+    Returns: (B, 2) float tensor
+        col 0 = pres_changed  (detection_label differs)
+        col 1 = type_changed  (vehicle_type differs, ignoring background/multi)
     """
-    either_intervened = (interv_idx_t > 0) | (interv_idx_tn > 0)
-    targets = torch.where(either_intervened,
-                          torch.full_like(interv_idx_t, BLOCK_NOISE),
-                          torch.full_like(interv_idx_t, BLOCK_NO_CHANGE))
-    return targets
+    pres_changed = (det_t != det_tn).float()
 
+    # Only meaningful when at least one window has a valid vehicle type
+    valid = (type_t >= 0) | (type_tn >= 0)
+    type_changed = ((type_t != type_tn) & valid).float()
 
-# ---------------------------------------------------------------------------
-# Classifier
-# ---------------------------------------------------------------------------
+    return torch.stack([pres_changed, type_changed], dim=-1)   # (B, 2)
+
 
 class UnknownInterventionClassifier(nn.Module):
     """
-    CITRIS-style MLP: given (z_t, z_tn), predict which latent block changed.
+    MLP: given (z_env_t, z_env_tn), predict [pres_changed, type_changed].
 
-    Input : concatenation [z_t, z_tn]  →  (B, 2 * d_z)
-    Output: logits over N_BLOCK_TARGETS classes  →  (B, N_BLOCK_TARGETS)
+    Input : cat([z_env_t, z_env_tn])  →  (B, 2 * D_ENV) = (B, 12)
+    Output: 2 logits                  →  (B, 2)
+    Loss  : BCE per bit (not softmax)
     """
 
-    def __init__(self, d_z: int = 10, hidden_dim: int = 64):
+    def __init__(self, d_env: int = D_ENV, hidden_dim: int = 64):
         super().__init__()
         self.classifier = nn.Sequential(
-            nn.Linear(2 * d_z, hidden_dim),
+            nn.Linear(2 * d_env, hidden_dim),
             nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, N_BLOCK_TARGETS),
+            nn.Linear(hidden_dim, 2),
         )
 
-    def forward(self, z_t: torch.Tensor, z_tn: torch.Tensor) -> torch.Tensor:
+    def forward(self, z_env_t: torch.Tensor, z_env_tn: torch.Tensor) -> torch.Tensor:
         """
-        z_t, z_tn : (B, d_z)
-        Returns   : (B, N_BLOCK_TARGETS) logits
+        z_env_t, z_env_tn : (B, D_ENV)
+        Returns            : (B, 2) logits
         """
-        x = torch.cat([z_t, z_tn], dim=-1)   # (B, 2 * d_z)
+        x = torch.cat([z_env_t, z_env_tn], dim=-1)
         return self.classifier(x)
