@@ -105,6 +105,14 @@ echo ""
 echo "Sensors to train: ${selected_sensors[*]}"
 
 # --- 5. Unified Model Training Pipeline (parallel by sensor within each mode) ---
+
+# Compute per-job worker budget (36 workers total, divided equally across concurrent jobs)
+_n_jobs=$(( ${#selected_models[@]} * ${#selected_sensors[@]} ))
+_workers_per_job=$(( 36 / _n_jobs ))
+if (( _workers_per_job < 1 )); then _workers_per_job=1; fi
+echo ""
+echo "Worker budget: 36 total / $_n_jobs jobs = $_workers_per_job workers/job"
+
 echo ""
 for mode in "${selected_modes[@]}"; do
     echo "============================================================"
@@ -117,6 +125,7 @@ for mode in "${selected_modes[@]}"; do
             CURRENT_RUN_ID=$(date +%Y%m%d_%H%M%S)
             echo "  [BG] seismic | $model | $CURRENT_RUN_ID"
             RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode TRAIN_SENSOR=seismic MODEL_NAME=$model \
+                NUM_WORKERS=$_workers_per_job \
                 poetry run python train.py &
             sleep 1
         done
@@ -128,6 +137,7 @@ for mode in "${selected_modes[@]}"; do
             CURRENT_RUN_ID=$(date +%Y%m%d_%H%M%S)
             echo "  [BG] audio   | $model | $CURRENT_RUN_ID"
             RUN_ID=$CURRENT_RUN_ID TRAINING_MODE=$mode TRAIN_SENSOR=audio MODEL_NAME=$model \
+                NUM_WORKERS=$_workers_per_job \
                 poetry run python train.py &
             sleep 1
         done

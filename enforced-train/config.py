@@ -17,7 +17,7 @@ import numpy as np
 # Core training loop settings
 BATCH_SIZE = 1024
 EPOCHS = 100
-NUM_WORKERS = 96
+NUM_WORKERS = int(os.environ.get("NUM_WORKERS", 4))
 LOG_INTERVAL = 10
 
 # Checkpoint + evaluation output directories
