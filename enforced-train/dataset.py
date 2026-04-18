@@ -311,6 +311,8 @@ class VehicleDataset(Dataset):
         self.samples = sorted(list(unique_samples))
 
     def _get_cache_path(self):
+        # Cache stores raw waveforms only. Mel params (N_FFT, HOP_LENGTH) are
+        # applied GPU-side in preprocess_for_training() and do not affect this key.
         key_data = {
             "datasets": sorted(self.config.TRAIN_DATASETS),
             "sensors": sorted(self.config.TRAIN_SENSORS),
