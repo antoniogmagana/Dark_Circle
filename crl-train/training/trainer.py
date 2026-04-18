@@ -8,6 +8,7 @@ CRL pre-training (ConsecutivePairDataset):
 
     Loss = reconstruction_loss + beta * kl_divergence
          + lambda_interv * intervention_matching_loss
+         + lambda_aux_* * aux_supervision_losses
 
     Checkpointing uses fixed-reference ELBO (beta=1) so the metric is
     epoch-invariant even when beta is annealed during training.
@@ -15,9 +16,11 @@ CRL pre-training (ConsecutivePairDataset):
 Downstream training (SensorDataset, frozen backbone):
     LinearPresenceHead on z_pres
     LinearTypeHead on z_type
+    LinearProximityHead on z_prox
 """
 
 import csv
+import json
 from pathlib import Path
 
 import torch
@@ -29,8 +32,8 @@ from crl_vehicle.config import CRLConfig, MODALITIES, CLASS_MAP
 from crl_vehicle.models.frontend import MultiScale1DFrontend, LearnableMorlet1D
 from crl_vehicle.models.encoder_decoder import TemporalEncoder, FeatureDecoder
 from crl_vehicle.models.latent import CausalLatentSpace
-from crl_vehicle.models.intervention import UnknownInterventionClassifier, interv_idx_to_block_target
-from crl_vehicle.models.heads import LinearPresenceHead, LinearTypeHead
+from crl_vehicle.models.intervention import UnknownInterventionClassifier, label_change_target
+from crl_vehicle.models.heads import LinearPresenceHead, LinearTypeHead, LinearProximityHead
 from crl_vehicle.losses.crl_loss import reconstruction_loss, kl_divergence, intervention_matching_loss
 
 
@@ -47,22 +50,34 @@ class CRLModel(nn.Module):
         UnknownInterventionClassifier
 
     Downstream heads (separately trained, frozen backbone):
-        LinearPresenceHead, LinearTypeHead per modality
+        LinearPresenceHead, LinearTypeHead, LinearProximityHead per modality
+
+    Auxiliary heads (used only in pre-training for subspace supervision):
+        aux_pres_heads, aux_type_heads, aux_prox_heads
     """
 
     def __init__(self, config: CRLConfig, sensors: list | None = None):
         super().__init__()
         self.cfg = config
         self.sensors = sensors or MODALITIES
+        d_z = config.d_z   # 24
 
         self.frontends   = nn.ModuleDict()
         self.encoders    = nn.ModuleDict()
         self.decoders    = nn.ModuleDict()
         self.pres_heads  = nn.ModuleDict()
         self.type_heads  = nn.ModuleDict()
+        self.prox_heads  = nn.ModuleDict()
 
-        self.latent = CausalLatentSpace(d_z=10)
-        self.interv_classifier = UnknownInterventionClassifier(d_z=10)
+        # Auxiliary heads for pre-training supervision (discarded after CRL phase)
+        self.aux_pres_heads = nn.ModuleDict()
+        self.aux_type_heads = nn.ModuleDict()
+        self.aux_prox_heads = nn.ModuleDict()
+
+        self.latent = CausalLatentSpace(d_z=d_z)
+        self.interv_classifier = UnknownInterventionClassifier(
+            d_env=CausalLatentSpace.D_ENV
+        )
 
         for sensor in self.sensors:
             mod_cfg = config.modality_cfg(sensor)
@@ -91,15 +106,14 @@ class CRLModel(nn.Module):
                 raise ValueError(f"Unknown frontend_type: {self.cfg.frontend_type}")
             self.frontends[sensor] = frontend
 
-            # Infer frontend output shape with a dummy pass
             with torch.no_grad():
                 dummy = torch.zeros(1, mod_cfg.n_channels, mod_cfg.window_size)
-                feat_shape = frontend(dummy).shape   # (1, C_out, T')
+                feat_shape = frontend(dummy).shape
             c_out, t_prime = feat_shape[1], feat_shape[2]
 
             self.encoders[sensor] = TemporalEncoder(
                 in_channels=c_out,
-                d_z=10,
+                d_z=d_z,
                 d_model=config.d_model,
                 n_heads=config.n_heads,
                 n_layers=config.n_layers,
@@ -107,12 +121,19 @@ class CRLModel(nn.Module):
             self.decoders[sensor] = FeatureDecoder(
                 out_channels=c_out,
                 seq_len=t_prime,
-                d_z=10,
+                d_z=d_z,
                 d_model=config.d_model,
             )
 
-            self.pres_heads[sensor] = LinearPresenceHead(d_in=1)
-            self.type_heads[sensor] = LinearTypeHead(d_in=4, n_classes=len(CLASS_MAP))
+            n_classes = len(CLASS_MAP)
+            self.pres_heads[sensor] = LinearPresenceHead(d_in=CausalLatentSpace.D_PRES)
+            self.type_heads[sensor] = LinearTypeHead(d_in=CausalLatentSpace.D_TYPE, n_classes=n_classes)
+            self.prox_heads[sensor] = LinearProximityHead(d_in=CausalLatentSpace.D_PROX)
+
+            # Auxiliary heads (pre-training only)
+            self.aux_pres_heads[sensor] = nn.Linear(CausalLatentSpace.D_PRES, 1)
+            self.aux_type_heads[sensor] = nn.Linear(CausalLatentSpace.D_TYPE, n_classes)
+            self.aux_prox_heads[sensor] = nn.Linear(CausalLatentSpace.D_PROX, 1)
 
     def encode(self, sensor: str, x: torch.Tensor):
         """
@@ -128,15 +149,23 @@ class CRLModel(nn.Module):
         return self.decoders[sensor](z)               # (B, C, T')
 
     def backbone_parameters(self):
-        """All parameters except downstream heads."""
-        head_params = set(
+        """All parameters except downstream heads and aux heads."""
+        exclude = set(
             list(self.pres_heads.parameters()) +
-            list(self.type_heads.parameters())
+            list(self.type_heads.parameters()) +
+            list(self.prox_heads.parameters()) +
+            list(self.aux_pres_heads.parameters()) +
+            list(self.aux_type_heads.parameters()) +
+            list(self.aux_prox_heads.parameters())
         )
-        return [p for p in self.parameters() if p not in head_params]
+        return [p for p in self.parameters() if p not in exclude]
 
     def head_parameters(self):
-        return list(self.pres_heads.parameters()) + list(self.type_heads.parameters())
+        return (
+            list(self.pres_heads.parameters()) +
+            list(self.type_heads.parameters()) +
+            list(self.prox_heads.parameters())
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -182,11 +211,13 @@ class Trainer:
 
     def train_crl(self, train_loader: DataLoader, val_loader: DataLoader, epochs: int):
         fieldnames = [
-            "epoch", "beta",
+            "epoch", "beta", "beta_event", "lr", "grad_norm",
             "train_recon", "train_kl", "train_interv", "train_total",
+            "train_aux_pres", "train_aux_type", "train_aux_prox",
             "val_recon",   "val_kl",   "val_interv",   "val_total",
-            "val_raw_kl",     # unscaled KL (beta=1), used for adaptive beta gating
-            "val_ref_elbo",   # fixed-reference ELBO (beta=1), used for checkpointing
+            "val_aux_pres", "val_aux_type", "val_aux_prox",
+            "val_raw_kl", "val_ref_elbo",
+            "pres_changed_frac", "type_changed_frac",
         ]
         metrics_path = self.save_dir / "crl_metrics.csv"
         with open(metrics_path, "w", newline="") as f:
@@ -194,13 +225,12 @@ class Trainer:
 
         print("\n=== CRL Pre-training ===")
         for epoch in range(epochs):
-            train_m = self._train_epoch(train_loader, self.beta)
+            train_m, grad_norm = self._train_epoch(train_loader, self.beta)
             val_m   = self._eval_epoch(val_loader, self.beta)
             self.scheduler.step()
 
-            # Adaptive beta update (Options 1 + 3):
-            # - Decay if raw KL is near zero (collapse guard)
-            # - Raise if recon is improving OR KL is already high (loss-gated)
+            current_lr = self.scheduler.get_last_lr()[0]
+
             raw_kl          = val_m["val_raw_kl"]
             recon_improving = val_m["val_recon"] < self.prev_val_recon - self.cfg.recon_min_delta
             self.prev_val_recon = val_m["val_recon"]
@@ -214,16 +244,23 @@ class Trainer:
             else:
                 beta_event = "→hold"
 
-            row = {"epoch": epoch, "beta": round(self.beta, 4), **train_m, **val_m}
+            row = {
+                "epoch": epoch, "beta": round(self.beta, 4), "beta_event": beta_event,
+                "lr": round(current_lr, 6), "grad_norm": round(grad_norm, 4),
+                **train_m, **val_m,
+            }
             with open(metrics_path, "a", newline="") as f:
                 csv.DictWriter(f, fieldnames=fieldnames).writerow(row)
 
             print(
-                f"Epoch {epoch:3d} | beta={self.beta:.2f} ({beta_event}) | "
-                f"kl={raw_kl:.4f} | "
-                f"tr={train_m['train_total']:.4f} "
-                f"val={val_m['val_total']:.4f} "
-                f"ref_elbo={val_m['val_ref_elbo']:.4f}"
+                f"Epoch {epoch:3d} | β={self.beta:.2f}({beta_event}) lr={current_lr:.2e} | "
+                f"recon={val_m['val_recon']:.3f} kl={val_m['val_raw_kl']:.3f} "
+                f"interv={val_m['val_interv']:.3f} | "
+                f"aux_p={val_m['val_aux_pres']:.3f} aux_t={val_m['val_aux_type']:.3f} "
+                f"aux_px={val_m['val_aux_prox']:.3f} | "
+                f"ref_elbo={val_m['val_ref_elbo']:.3f} | "
+                f"‖g‖={grad_norm:.2f} | "
+                f"Δpres={val_m['val_pres_changed_frac']:.2f} Δtype={val_m['val_type_changed_frac']:.2f}"
             )
 
             ref_elbo = val_m["val_ref_elbo"]
@@ -241,10 +278,17 @@ class Trainer:
         torch.save(self.model.state_dict(), self.save_dir / "crl_final.pth")
 
     def _forward_pair(self, batch: dict, beta: float) -> tuple[torch.Tensor, dict]:
-        """Shared forward pass for train and eval. Returns (loss, metrics_dict).
-        metrics_dict always includes 'raw_kl' (unscaled, beta=1) for adaptive beta gating.
         """
-        recon_total = kl_total = raw_kl_total = interv_total = n_mod = 0.0
+        Shared forward pass for train and eval.
+        Returns (loss, metrics_dict).
+        """
+        recon_total = kl_total = raw_kl_total = interv_total = 0.0
+        aux_pres_total = aux_type_total = aux_prox_total = 0.0
+        pres_changed_total = type_changed_total = 0.0
+        n_mod = 0
+
+        use_aux = self.cfg.use_aux_supervision
+        use_label_change = (self.cfg.intervention_mode == "label_change")
 
         for sensor in self.model.sensors:
             avail = batch[f"{sensor}_avail"]
@@ -254,17 +298,16 @@ class Trainer:
             x_t  = batch[f"x_{sensor}_t"][avail].to(self.device)
             x_tn = batch[f"x_{sensor}_tn"][avail].to(self.device)
 
-            # Batch x_t and x_tn through encode/decode together — halves forward passes.
             x_both = torch.cat([x_t, x_tn], dim=0)
             feat_both, z_both, mu_both, lv_both = self.model.encode(sensor, x_both)
             B = x_t.shape[0]
-            feat_t,  feat_tn  = feat_both[:B],  feat_both[B:]
-            z_t,     z_tn     = z_both[:B],     z_both[B:]
-            mu_t,    mu_tn    = mu_both[:B],     mu_both[B:]
-            lv_t,    lv_tn    = lv_both[:B],     lv_both[B:]
+            feat_t, feat_tn = feat_both[:B], feat_both[B:]
+            z_t,   z_tn    = z_both[:B],    z_both[B:]
+            mu_t,  mu_tn   = mu_both[:B],   mu_both[B:]
+            lv_t,  lv_tn   = lv_both[:B],   lv_both[B:]
 
-            assert mu_both.isfinite().all(), f"mu became non-finite for sensor {sensor}"
-            assert lv_both.isfinite().all(), f"lv became non-finite for sensor {sensor}"
+            assert mu_both.isfinite().all(), f"mu non-finite for {sensor}"
+            assert lv_both.isfinite().all(), f"lv non-finite for {sensor}"
 
             x_hat_both = self.model.decode(sensor, z_both)
             x_hat_t, x_hat_tn = x_hat_both[:B], x_hat_both[B:]
@@ -272,64 +315,123 @@ class Trainer:
             recon = (reconstruction_loss(x_hat_t, feat_t) +
                      reconstruction_loss(x_hat_tn, feat_tn)) / 2
 
-            kl_t = kl_divergence(mu_t, lv_t, beta=beta)
-            assert kl_t.isfinite(), f"kl_t became non-finite for sensor {sensor}"
+            kl_t  = kl_divergence(mu_t,  lv_t,  beta=beta)
             kl_tn = kl_divergence(mu_tn, lv_tn, beta=beta)
-            assert kl_tn.isfinite(), f"kl_tn became non-finite for sensor {sensor}"
-            kl = (kl_t + kl_tn) / 2
+            kl    = (kl_t + kl_tn) / 2
 
-            # Raw KL (beta=1) for adaptive gating — no extra forward pass needed.
-            raw_kl = (kl_divergence(mu_t, lv_t, beta=1.0) +
+            raw_kl = (kl_divergence(mu_t,  lv_t,  beta=1.0) +
                       kl_divergence(mu_tn, lv_tn, beta=1.0)) / 2
             raw_kl_total += raw_kl.item()
 
-            # Intervention matching
-            interv_idx_t  = batch["interv_idx_t"][avail].to(self.device)
-            interv_idx_tn = batch["interv_idx_tn"][avail].to(self.device)
-            targets = interv_idx_to_block_target(interv_idx_t, interv_idx_tn)
-            logits  = self.model.interv_classifier(z_t, z_tn)
-            interv  = intervention_matching_loss(logits, targets)
+            # Split latent into named subspaces
+            z_pres_t, z_type_t, z_prox_t, z_env_t, _ = self.model.latent.split(z_t)
+            z_pres_tn, z_type_tn, z_prox_tn, z_env_tn, _ = self.model.latent.split(z_tn)
+
+            # Intervention loss
+            if use_label_change:
+                det_t_lbl  = batch["detection_label_t"][avail].to(self.device)
+                det_tn_lbl = batch["detection_label_tn"][avail].to(self.device)
+                typ_t_lbl  = batch["vehicle_type_t"][avail].to(self.device)
+                typ_tn_lbl = batch["vehicle_type_tn"][avail].to(self.device)
+                targets = label_change_target(det_t_lbl, det_tn_lbl, typ_t_lbl, typ_tn_lbl)
+                logits  = self.model.interv_classifier(z_env_t, z_env_tn)
+                interv  = F.binary_cross_entropy_with_logits(logits, targets)
+                pres_changed_total += targets[:, 0].mean().item()
+                type_changed_total += targets[:, 1].mean().item()
+            else:
+                interv = torch.tensor(0.0, device=self.device)
+
+            # Auxiliary supervision losses
+            aux_pres = aux_type = aux_prox = torch.tensor(0.0, device=self.device)
+            if use_aux:
+                det_lbl = batch["detection_label"][avail].to(self.device)
+                typ_lbl = batch["vehicle_type"][avail].to(self.device)
+
+                for z_pres_x in [z_pres_t, z_pres_tn]:
+                    logit = self.model.aux_pres_heads[sensor](z_pres_x).squeeze(-1)
+                    aux_pres = aux_pres + F.binary_cross_entropy_with_logits(
+                        logit, det_lbl.float()
+                    ) / 2
+
+                mask = (det_lbl == 1) & (typ_lbl >= 0)
+                if mask.any():
+                    for z_type_x in [z_type_t, z_type_tn]:
+                        logits_type = self.model.aux_type_heads[sensor](z_type_x[mask])
+                        aux_type = aux_type + F.cross_entropy(
+                            logits_type, typ_lbl[mask]
+                        ) / 2
+
+                for x_raw, z_prox_x in [(x_t, z_prox_t), (x_tn, z_prox_tn)]:
+                    rms = x_raw.pow(2).mean(dim=-1).sqrt().mean(dim=-1)
+                    rms_norm = (rms - rms.min()) / (rms.max() - rms.min() + 1e-8)
+                    prox_pred = self.model.aux_prox_heads[sensor](z_prox_x).squeeze(-1)
+                    aux_prox = aux_prox + F.mse_loss(prox_pred, rms_norm) / 2
 
             recon_total  += recon
             kl_total     += kl
             interv_total += interv
-            n_mod        += 1
+            aux_pres_total += aux_pres.item() if isinstance(aux_pres, torch.Tensor) else aux_pres
+            aux_type_total += aux_type.item() if isinstance(aux_type, torch.Tensor) else aux_type
+            aux_prox_total += aux_prox.item() if isinstance(aux_prox, torch.Tensor) else aux_prox
+            n_mod += 1
 
         if n_mod == 0:
             zero = torch.tensor(0.0, device=self.device, requires_grad=True)
-            return zero, {"recon": 0.0, "kl": 0.0, "raw_kl": 0.0, "interv": 0.0, "total": 0.0}
+            return zero, {
+                "recon": 0.0, "kl": 0.0, "raw_kl": 0.0, "interv": 0.0, "total": 0.0,
+                "aux_pres": 0.0, "aux_type": 0.0, "aux_prox": 0.0,
+                "pres_changed_frac": 0.0, "type_changed_frac": 0.0,
+            }
 
-        recon_total    /= n_mod
-        kl_total       /= n_mod
-        raw_kl_total   /= n_mod
-        interv_total   /= n_mod
-        total = recon_total + kl_total + self.cfg.lambda_interv * interv_total
+        recon_total  /= n_mod
+        kl_total     /= n_mod
+        raw_kl_total /= n_mod
+        interv_total /= n_mod
+        aux_pres_val  = aux_pres_total / n_mod
+        aux_type_val  = aux_type_total / n_mod
+        aux_prox_val  = aux_prox_total / n_mod
+
+        aux_pres_t = torch.tensor(aux_pres_total / n_mod, device=self.device)
+        aux_type_t = torch.tensor(aux_type_total / n_mod, device=self.device)
+        aux_prox_t = torch.tensor(aux_prox_total / n_mod, device=self.device)
+
+        total = (recon_total + kl_total
+                 + self.cfg.lambda_interv * interv_total
+                 + self.cfg.lambda_aux_pres * aux_pres_t
+                 + self.cfg.lambda_aux_type * aux_type_t
+                 + self.cfg.lambda_aux_prox * aux_prox_t)
 
         return total, {
             "recon":  recon_total.item(),
             "kl":     kl_total.item(),
             "raw_kl": raw_kl_total,
-            "interv": interv_total.item(),
+            "interv": interv_total.item() if isinstance(interv_total, torch.Tensor) else float(interv_total),
             "total":  total.item(),
+            "aux_pres": aux_pres_val,
+            "aux_type": aux_type_val,
+            "aux_prox": aux_prox_val,
+            "pres_changed_frac": pres_changed_total / n_mod,
+            "type_changed_frac": type_changed_total / n_mod,
         }
 
-    def _train_epoch(self, loader: DataLoader, beta: float) -> dict:
+    def _train_epoch(self, loader: DataLoader, beta: float) -> tuple[dict, float]:
         self.model.train()
         accum: dict[str, float] = {}
         n = 0
+        total_grad_norm = 0.0
         for batch in loader:
-            # Sanity check for NaNs in the input data
             for sensor in self.model.sensors:
                 if batch[f"{sensor}_avail"].any():
-                    assert batch[f"x_{sensor}_t"].isfinite().all(), f"NaNs detected in input x_{sensor}_t"
-                    assert batch[f"x_{sensor}_tn"].isfinite().all(), f"NaNs detected in input x_{sensor}_tn"
+                    assert batch[f"x_{sensor}_t"].isfinite().all()
+                    assert batch[f"x_{sensor}_tn"].isfinite().all()
 
             self.optimizer.zero_grad()
             with torch.amp.autocast("cuda", enabled=(self.device.type == "cuda")):
                 loss, metrics = self._forward_pair(batch, beta)
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0).item()
+            total_grad_norm += grad_norm
             self.scaler.step(self.optimizer)
             self.scaler.update()
             for k, v in metrics.items():
@@ -337,7 +439,13 @@ class Trainer:
             n += 1
             if self.cfg.steps_per_epoch and n >= self.cfg.steps_per_epoch:
                 break
-        return {f"train_{k}": v / max(n, 1) for k, v in accum.items() if k != "raw_kl"}
+        avg_grad_norm = total_grad_norm / max(n, 1)
+        result = {
+            f"train_{k}": v / max(n, 1)
+            for k, v in accum.items()
+            if k not in ("raw_kl", "pres_changed_frac", "type_changed_frac")
+        }
+        return result, avg_grad_norm
 
     @torch.no_grad()
     def _eval_epoch(self, loader: DataLoader, beta: float) -> dict:
@@ -352,7 +460,6 @@ class Trainer:
             n += 1
         self.model.train()
         out = {f"val_{k}": v / max(n, 1) for k, v in accum.items()}
-        # ref_elbo = recon + raw_kl + lambda * interv (beta=1, one pass)
         out["val_ref_elbo"] = (
             out["val_recon"] + out["val_raw_kl"] +
             self.cfg.lambda_interv * out["val_interv"]
@@ -398,7 +505,8 @@ class Trainer:
 
         metrics_path = self.save_dir / f"downstream_metrics_{sensor}.csv"
         fieldnames = ["epoch", "train_pres_loss", "train_type_loss",
-                      "val_pres_acc", "val_pres_f1", "val_type_acc", "val_type_f1"]
+                      "val_pres_acc", "val_pres_f1", "val_type_acc", "val_type_f1",
+                      "val_prox_loss", "class_breakdown"]
         with open(metrics_path, "w", newline="") as f:
             csv.DictWriter(f, fieldnames=fieldnames).writeheader()
 
@@ -428,7 +536,7 @@ class Trainer:
 
                 with torch.no_grad():
                     _, z, _, _ = self.model.encode(sensor, x)
-                z_pres, z_type, _, _ = self.model.latent.split(z)
+                z_pres, z_type, _, _, _ = self.model.latent.split(z)
 
                 opt.zero_grad()
                 loss = torch.tensor(0.0, device=self.device)
@@ -501,13 +609,16 @@ class Trainer:
     @torch.no_grad()
     def _eval_downstream(self, loader: DataLoader, sensor: str) -> dict:
         from sklearn.metrics import accuracy_score, f1_score
+        import json as _json
 
         self.model.eval()
         pres_head = self.model.pres_heads[sensor]
         type_head = self.model.type_heads[sensor]
+        prox_head = self.model.prox_heads[sensor]
 
         det_true, det_pred = [], []
         cls_true, cls_pred = [], []
+        prox_losses = []
 
         for batch in loader:
             avail = batch[f"{sensor}_avail"]
@@ -518,10 +629,15 @@ class Trainer:
             vtype = batch["vehicle_type"][avail]
 
             _, z, _, _ = self.model.encode(sensor, x)
-            z_pres, z_type, _, _ = self.model.latent.split(z)
+            z_pres, z_type, z_prox, _, _ = self.model.latent.split(z)
 
             pres_logit  = pres_head(z_pres).squeeze(-1)
             type_logits = type_head(z_type)
+            prox_pred   = prox_head(z_prox).squeeze(-1)
+
+            rms = x.pow(2).mean(dim=-1).sqrt().mean(dim=-1)
+            rms_norm = (rms - rms.min()) / (rms.max() - rms.min() + 1e-8)
+            prox_losses.append(F.mse_loss(prox_pred, rms_norm).item())
 
             det_pred.extend((pres_logit > 0).cpu().long().tolist())
             det_true.extend(det.tolist())
@@ -541,10 +657,22 @@ class Trainer:
 
         pres_acc, pres_f1 = _f1(det_true, det_pred)
         type_acc, type_f1 = _f1(cls_true, cls_pred)
+        val_prox_loss = sum(prox_losses) / max(len(prox_losses), 1)
+
+        if cls_true:
+            per_class = f1_score(cls_true, cls_pred, average=None, zero_division=0)
+            from crl_vehicle.config import CLASS_MAP
+            class_breakdown = _json.dumps({CLASS_MAP.get(i, str(i)): round(float(v), 4)
+                                           for i, v in enumerate(per_class)})
+        else:
+            class_breakdown = "{}"
+
         self.model.train()
         return {
-            "val_pres_acc": pres_acc,
-            "val_pres_f1":  pres_f1,
-            "val_type_acc": type_acc,
-            "val_type_f1":  type_f1,
+            "val_pres_acc":    pres_acc,
+            "val_pres_f1":     pres_f1,
+            "val_type_acc":    type_acc,
+            "val_type_f1":     type_f1,
+            "val_prox_loss":   val_prox_loss,
+            "class_breakdown": class_breakdown,
         }
