@@ -1,5 +1,5 @@
 """
-SensorDataset and ConsecutivePairDataset
+SensorDataset and StratifiedPairDataset
 
 Reads seismic AND audio parquet files, returning them independently so that
 each modality can be processed through its own frontend → TemporalEncoder
@@ -26,15 +26,23 @@ SensorDataset.__getitem__ returns:
 Windows overlap: stride = cfg.horizon_stride_sec seconds (default 0.7 s).
 Raw waveforms are cached once so there is no additional memory cost.
 
-ConsecutivePairDataset wraps SensorDataset for CITRIS CRL training:
-    {
-      'x_audio_t',   'x_audio_tn',
-      'x_seismic_t', 'x_seismic_tn',
-      'audio_avail', 'seismic_avail',
-      'interv_idx_t', 'interv_idx_tn',
-      'horizon_n',      — always 1
-      'vehicle_type', 'detection_label', 'segment_id'
-    }
+StratifiedPairDataset wraps SensorDataset for CITRIS CRL training.
+Each anchor yields K+1 partners drawn at __init__ time into pre-built pools:
+    - 1 consecutive (w+1): same recording, same vehicle, same environment
+    - n_partners_same_type: same dataset, same vehicle_type, different recording
+    - n_partners_diff_type: same dataset, different vehicle_type
+    - n_partners_cross_ds:  any other dataset
+
+Pool indices are stored as plain int lists (8 bytes × N_anchors × K total),
+so __getitem__ is O(1): one randint pick per stratum, no filtering at runtime.
+
+Batch keys (per partner slot p=0..K-1, plus anchor at 't'):
+    'x_audio_t', 'x_seismic_t'           — anchor window
+    'x_audio_p{p}', 'x_seismic_p{p}'     — partner p
+    'audio_avail', 'seismic_avail'        — both True (anchor must have both)
+    'detection_label_t', 'vehicle_type_t' — anchor labels
+    'detection_label_p{p}', 'vehicle_type_p{p}' — partner labels
+    'partner_stratum_p{p}'                — 0=consec,1=same_type,2=diff_type,3=cross
 """
 
 import re
@@ -430,89 +438,191 @@ class SensorDataset(Dataset):
 
 
 # ---------------------------------------------------------------------------
-# ConsecutivePairDataset
+# StratifiedPairDataset
 # ---------------------------------------------------------------------------
 
-class ConsecutivePairDataset(Dataset):
-    """
-    Yields strictly consecutive (w, w+1) window pairs from SensorDataset.
+# Stratum codes stored in partner_stratum_p{p}
+STRATUM_CONSEC     = 0
+STRATUM_SAME_TYPE  = 1
+STRATUM_DIFF_TYPE  = 2
+STRATUM_CROSS_DS   = 3
 
-    horizon_n is always 1. Pairs are only valid within the same
-    (dataset, vehicle, rs_node, seg_key) group, which encodes
-    (scene_id, run_id). This prevents temporal leakage across disjoint
-    runs in the same recording file.
+
+class StratifiedPairDataset(Dataset):
+    """
+    Yields (anchor, K partners) tuples where partners are drawn from four
+    stratified pools pre-built at __init__ time for O(1) __getitem__.
+
+    Anchor eligibility: both audio AND seismic must be available (so modality
+    availability is a simple scalar per batch, not per-partner masks).
+
+    Partner pools per anchor (stored as lists of flat _index positions):
+        consec_pool     : [i_t+1] — always exactly one, the consecutive window
+        same_type_pool  : same dataset, same vehicle_type, different gkey
+        diff_type_pool  : same dataset, different vehicle_type (both valid ≥ 0)
+        cross_ds_pool   : different dataset
+
+    n_partners_* config fields control how many are drawn per __getitem__.
+    Total partners K = 1 + n_partners_same_type + n_partners_diff_type + n_partners_cross_ds.
     """
 
     def __init__(self, sensor_dataset: SensorDataset):
-        self.ds = sensor_dataset
-        self._anchors: list[int] = []   # flat index positions valid as anchors
+        self.ds  = sensor_dataset
+        cfg      = sensor_dataset.cfg
+        self.n_same_type  = cfg.n_partners_same_type
+        self.n_diff_type  = cfg.n_partners_diff_type
+        self.n_cross_ds   = cfg.n_partners_cross_ds
 
         index = sensor_dataset._index
-        # Build a set of (gkey, w) for O(1) lookup
-        valid = {(entry[0], entry[1]) for entry in index}
+        groups = sensor_dataset._groups
 
-        for i, (gkey, w, *_) in enumerate(index):
-            # w+1 must exist in the same group (same run boundary)
-            if (gkey, w + 1) in valid:
-                self._anchors.append(i)
+        # ----------------------------------------------------------------
+        # Step 1: anchor eligibility — both modalities must be present
+        # ----------------------------------------------------------------
+        pos_map: dict[tuple, int] = {(e[0], e[1]): i for i, e in enumerate(index)}
 
-        # Map anchor flat-index → tn flat-index for O(1) label lookup
-        pos_map = {(entry[0], entry[1]): i for i, entry in enumerate(sensor_dataset._index)}
-        self._tn_map: dict[int, int] = {}
-        for i_anchor in self._anchors:
-            gkey, w_t = sensor_dataset._index[i_anchor][0], sensor_dataset._index[i_anchor][1]
-            self._tn_map[i_anchor] = pos_map[(gkey, w_t + 1)]
+        # For each valid anchor, pre-resolve the consecutive partner index
+        self._anchors:   list[int] = []
+        self._consec_idx: list[int] = []  # parallel to _anchors
+
+        for i, (gkey, w, vtype, det, a_sid, s_sid) in enumerate(index):
+            grp = groups[gkey]
+            # Anchor must have both modalities
+            if grp["audio_stem"] is None or grp["seismic_stem"] is None:
+                continue
+            # Consecutive partner must exist in the same group
+            tn_key = (gkey, w + 1)
+            if tn_key not in pos_map:
+                continue
+            j = pos_map[tn_key]
+            jgrp = groups[index[j][0]]
+            if jgrp["audio_stem"] is None or jgrp["seismic_stem"] is None:
+                continue
+            self._anchors.append(i)
+            self._consec_idx.append(j)
+
+        # ----------------------------------------------------------------
+        # Step 2: build per-stratum candidate pools over all eligible entries
+        #         (any index entry where both modalities exist)
+        # ----------------------------------------------------------------
+        # Buckets: dataset → list of flat index positions
+        # Sub-bucket: (dataset, vehicle_type) → list of flat index positions
+        #   vehicle_type used only when ≥ 0 (skip background/multi)
+        by_dataset:       dict[str, list[int]] = {}
+        by_ds_vtype:      dict[tuple, list[int]] = {}  # (dataset, vtype) → [idx]
+
+        for i, (gkey, w, vtype, det, a_sid, s_sid) in enumerate(index):
+            grp = groups[gkey]
+            if grp["audio_stem"] is None or grp["seismic_stem"] is None:
+                continue
+            ds_name = gkey[0]  # gkey = (dataset, vehicle, rs_node, seg_key)
+            by_dataset.setdefault(ds_name, []).append(i)
+            if vtype >= 0:
+                by_ds_vtype.setdefault((ds_name, vtype), []).append(i)
+
+        # ----------------------------------------------------------------
+        # Step 3: for each anchor, build the three random-partner pools
+        # ----------------------------------------------------------------
+        # Stored as lists-of-lists; pool[anchor_pos] = list[int]
+        self._same_type_pool: list[list[int]] = []
+        self._diff_type_pool: list[list[int]] = []
+        self._cross_ds_pool:  list[list[int]] = []
+
+        all_eligible = [j for bucket in by_dataset.values() for j in bucket]
+
+        for anchor_pos, i in enumerate(self._anchors):
+            gkey, w, vtype, det, _, _ = index[i]
+            ds_name = gkey[0]
+
+            # same_type: same dataset, same vehicle_type, different gkey
+            if vtype >= 0:
+                candidates = [j for j in by_ds_vtype.get((ds_name, vtype), [])
+                              if index[j][0] != gkey]
+            else:
+                candidates = []
+            self._same_type_pool.append(candidates if candidates else all_eligible)
+
+            # diff_type: same dataset, different valid vehicle_type
+            diff = [j for j in by_dataset.get(ds_name, [])
+                    if index[j][2] >= 0 and index[j][2] != vtype and index[j][0] != gkey]
+            self._diff_type_pool.append(diff if diff else all_eligible)
+
+            # cross_ds: different dataset entirely
+            cross = [j for ds, bucket in by_dataset.items()
+                     if ds != ds_name for j in bucket]
+            self._cross_ds_pool.append(cross if cross else all_eligible)
+
+        n_anchors = len(self._anchors)
+        print(
+            f"  StratifiedPairDataset: {n_anchors} anchors | "
+            f"avg pool sizes: same_type={sum(len(p) for p in self._same_type_pool)//max(n_anchors,1)} "
+            f"diff_type={sum(len(p) for p in self._diff_type_pool)//max(n_anchors,1)} "
+            f"cross_ds={sum(len(p) for p in self._cross_ds_pool)//max(n_anchors,1)}"
+        )
+
+    # ------------------------------------------------------------------
 
     def __len__(self) -> int:
         return len(self._anchors)
 
-    def __getitem__(self, idx: int) -> dict:
-        i_t = self._anchors[idx]
-        gkey, w_t, vehicle_type, det_label, audio_seg_id, seismic_seg_id = self.ds._index[i_t]
-        group = self.ds._groups[gkey]
-        w_tn = w_t + 1
+    def _pick(self, pool: list[int]) -> int:
+        """O(1) uniform draw from a pre-built pool."""
+        return pool[torch.randint(len(pool), (1,)).item()]
 
-        # Look up tn labels via pre-built map
-        tn_entry = self.ds._index[self._tn_map[i_t]]
-        _, _, vehicle_type_tn, det_label_tn, _, _ = tn_entry
-
-        if self.ds.is_train and torch.rand(1).item() < 0.60:
-            interv_t = torch.randint(1, N_INTERVENTIONS + 1, (1,)).item()
-        else:
-            interv_t = 0
-        if self.ds.is_train and torch.rand(1).item() < 0.60:
-            interv_tn = torch.randint(1, N_INTERVENTIONS + 1, (1,)).item()
-        else:
-            interv_tn = 0
-
-        audio_avail = group["audio_stem"] is not None
-        seismic_avail = group["seismic_stem"] is not None
-
-        def get(sensor, w, interv):
-            if sensor == "audio" and audio_avail and w < group["audio_nw"]:
-                return self.ds._get_window(sensor, group["audio_stem"], group["seg_key"], w, interv)
-            if sensor == "seismic" and seismic_avail and w < group["seismic_nw"]:
-                return self.ds._get_window(sensor, group["seismic_stem"], group["seg_key"], w, interv)
-            return self.ds._zero_window(sensor)
-
+    def _fetch(self, flat_idx: int, interv: int) -> dict:
+        """Load both modality windows for a given flat _index position."""
+        gkey, w, vtype, det, _, _ = self.ds._index[flat_idx]
+        grp = self.ds._groups[gkey]
         return {
-            "x_audio_t":          get("audio",   w_t,  interv_t),
-            "x_audio_tn":         get("audio",   w_tn, interv_tn),
-            "x_seismic_t":        get("seismic", w_t,  interv_t),
-            "x_seismic_tn":       get("seismic", w_tn, interv_tn),
-            "audio_avail":        audio_avail,
-            "seismic_avail":      seismic_avail,
-            "interv_idx_t":       interv_t,
-            "interv_idx_tn":      interv_tn,
-            "horizon_n":          1,
-            "vehicle_type":       vehicle_type,
-            "detection_label":    det_label,
-            "vehicle_type_t":     vehicle_type,
-            "vehicle_type_tn":    vehicle_type_tn,
-            "detection_label_t":  det_label,
-            "detection_label_tn": det_label_tn,
-            "segment_id":         seismic_seg_id if seismic_avail else audio_seg_id,
+            "x_audio":         self.ds._get_window("audio",   grp["audio_stem"],   grp["seg_key"], w, interv),
+            "x_seismic":       self.ds._get_window("seismic", grp["seismic_stem"], grp["seg_key"], w, interv),
+            "vehicle_type":    vtype,
+            "detection_label": det,
         }
+
+    def _rand_interv(self) -> int:
+        if self.ds.is_train and torch.rand(1).item() < 0.60:
+            return torch.randint(1, N_INTERVENTIONS + 1, (1,)).item()
+        return 0
+
+    def __getitem__(self, idx: int) -> dict:
+        anchor_pos = idx
+        i_t  = self._anchors[anchor_pos]
+        i_tn = self._consec_idx[anchor_pos]
+
+        anchor = self._fetch(i_t,  self._rand_interv())
+        consec = self._fetch(i_tn, self._rand_interv())
+
+        partners = [(consec, STRATUM_CONSEC)]
+
+        for _ in range(self.n_same_type):
+            j = self._pick(self._same_type_pool[anchor_pos])
+            partners.append((self._fetch(j, self._rand_interv()), STRATUM_SAME_TYPE))
+
+        for _ in range(self.n_diff_type):
+            j = self._pick(self._diff_type_pool[anchor_pos])
+            partners.append((self._fetch(j, self._rand_interv()), STRATUM_DIFF_TYPE))
+
+        for _ in range(self.n_cross_ds):
+            j = self._pick(self._cross_ds_pool[anchor_pos])
+            partners.append((self._fetch(j, self._rand_interv()), STRATUM_CROSS_DS))
+
+        item = {
+            "x_audio_t":          anchor["x_audio"],
+            "x_seismic_t":        anchor["x_seismic"],
+            "audio_avail":        True,
+            "seismic_avail":      True,
+            "detection_label_t":  anchor["detection_label"],
+            "vehicle_type_t":     anchor["vehicle_type"],
+        }
+        for p, (partner, stratum) in enumerate(partners):
+            item[f"x_audio_p{p}"]          = partner["x_audio"]
+            item[f"x_seismic_p{p}"]        = partner["x_seismic"]
+            item[f"detection_label_p{p}"]  = partner["detection_label"]
+            item[f"vehicle_type_p{p}"]     = partner["vehicle_type"]
+            item[f"partner_stratum_p{p}"]  = stratum
+
+        return item
 
 
 # ---------------------------------------------------------------------------
@@ -533,21 +643,28 @@ def collate_single(batch: list) -> dict:
 
 
 def collate_pairs(batch: list) -> dict:
-    return {
-        "x_audio_t":          torch.stack([b["x_audio_t"]     for b in batch]),
-        "x_audio_tn":         torch.stack([b["x_audio_tn"]    for b in batch]),
-        "x_seismic_t":        torch.stack([b["x_seismic_t"]   for b in batch]),
-        "x_seismic_tn":       torch.stack([b["x_seismic_tn"]  for b in batch]),
-        "audio_avail":        torch.tensor([b["audio_avail"]   for b in batch], dtype=torch.bool),
-        "seismic_avail":      torch.tensor([b["seismic_avail"] for b in batch], dtype=torch.bool),
-        "interv_idx_t":       torch.tensor([b["interv_idx_t"]    for b in batch], dtype=torch.long),
-        "interv_idx_tn":      torch.tensor([b["interv_idx_tn"]   for b in batch], dtype=torch.long),
-        "horizon_n":          torch.tensor([b["horizon_n"]        for b in batch], dtype=torch.long),
-        "vehicle_type":       torch.tensor([b["vehicle_type"]     for b in batch], dtype=torch.long),
-        "detection_label":    torch.tensor([b["detection_label"]  for b in batch], dtype=torch.long),
-        "vehicle_type_t":     torch.tensor([b["vehicle_type_t"]   for b in batch], dtype=torch.long),
-        "vehicle_type_tn":    torch.tensor([b["vehicle_type_tn"]  for b in batch], dtype=torch.long),
-        "detection_label_t":  torch.tensor([b["detection_label_t"]  for b in batch], dtype=torch.long),
-        "detection_label_tn": torch.tensor([b["detection_label_tn"] for b in batch], dtype=torch.long),
-        "segment_id":         torch.tensor([b["segment_id"]       for b in batch], dtype=torch.long),
+    """Collate for StratifiedPairDataset. Discovers partner slots dynamically."""
+    out = {
+        "x_audio_t":         torch.stack([b["x_audio_t"]   for b in batch]),
+        "x_seismic_t":       torch.stack([b["x_seismic_t"] for b in batch]),
+        "audio_avail":       torch.tensor([b["audio_avail"]   for b in batch], dtype=torch.bool),
+        "seismic_avail":     torch.tensor([b["seismic_avail"] for b in batch], dtype=torch.bool),
+        "detection_label_t": torch.tensor([b["detection_label_t"] for b in batch], dtype=torch.long),
+        "vehicle_type_t":    torch.tensor([b["vehicle_type_t"]    for b in batch], dtype=torch.long),
     }
+    # Discover how many partner slots exist from the first sample
+    p = 0
+    while f"x_audio_p{p}" in batch[0]:
+        out[f"x_audio_p{p}"]         = torch.stack([b[f"x_audio_p{p}"]   for b in batch])
+        out[f"x_seismic_p{p}"]       = torch.stack([b[f"x_seismic_p{p}"] for b in batch])
+        out[f"detection_label_p{p}"] = torch.tensor([b[f"detection_label_p{p}"] for b in batch], dtype=torch.long)
+        out[f"vehicle_type_p{p}"]    = torch.tensor([b[f"vehicle_type_p{p}"]    for b in batch], dtype=torch.long)
+        out[f"partner_stratum_p{p}"] = torch.tensor([b[f"partner_stratum_p{p}"] for b in batch], dtype=torch.long)
+        p += 1
+    out["n_partners"] = p
+    return out
+
+
+# Backward-compat alias used by older callers (exp1/exp2 noise_type mode still builds
+# ConsecutivePairDataset via train.py; run_experiments.py uses StratifiedPairDataset).
+ConsecutivePairDataset = StratifiedPairDataset

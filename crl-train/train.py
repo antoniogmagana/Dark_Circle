@@ -24,7 +24,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from crl_vehicle.config import CRLConfig, MODALITIES
-from crl_vehicle.data.dataset import SensorDataset, ConsecutivePairDataset, collate_pairs, collate_single
+from crl_vehicle.data.dataset import SensorDataset, StratifiedPairDataset, collate_pairs, collate_single
 from training.trainer import CRLModel, Trainer
 
 
@@ -51,8 +51,8 @@ def build_crl_loaders(
     config: CRLConfig,
 ) -> tuple[DataLoader, DataLoader]:
     """ConsecutivePairDataset loaders for CRL pre-training."""
-    train_ds = ConsecutivePairDataset(SensorDataset(data_dir, config, is_train=True))
-    val_ds   = ConsecutivePairDataset(SensorDataset(val_dir,  config, is_train=False))
+    train_ds = StratifiedPairDataset(SensorDataset(data_dir, config, is_train=True))
+    val_ds   = StratifiedPairDataset(SensorDataset(val_dir,  config, is_train=False))
 
     loader_kwargs = dict(
         batch_size=config.batch_size,

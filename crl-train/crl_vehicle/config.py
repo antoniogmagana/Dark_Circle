@@ -119,7 +119,7 @@ class CRLConfig:
     n_layers:        int   = 2
 
     # Training
-    batch_size:           int   = 512
+    batch_size:           int   = 128
     lr:                   float = 3e-4
     lr_min:               float = 1e-4
     wd:                   float = 1e-4
@@ -161,6 +161,12 @@ class CRLConfig:
     morlet_kernel_size:     int = 257
     morlet_pool_stride:     int = 64
     multiscale_pool_stride: int = 16
+
+    # Stratified partner sampling for CRL pair construction
+    # 1 consecutive (w+1) is always included; these control the random pool draws.
+    n_partners_same_type:  int = 1   # same dataset, same vehicle_type, diff recording
+    n_partners_diff_type:  int = 1   # same dataset, different vehicle_type
+    n_partners_cross_ds:   int = 1   # any other dataset
 
     # Hardware profile (set by hardware_profile() in run_experiments.py)
     hardware_profile_name: str = "auto"

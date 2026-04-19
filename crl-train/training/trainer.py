@@ -279,6 +279,11 @@ class Trainer:
     def _forward_pair(self, batch: dict, beta: float) -> tuple[torch.Tensor, dict]:
         """
         Shared forward pass for train and eval.
+
+        Anchor (suffix _t): recon + KL + aux supervision.
+        Each partner (suffix _p{p}): intervention loss only.
+        Intervention loss is averaged over all (anchor, partner) pairs.
+
         Returns (loss, metrics_dict).
         """
         recon_total    = torch.tensor(0.0, device=self.device)
@@ -291,96 +296,95 @@ class Trainer:
         pres_changed_total = type_changed_total = 0.0
         n_mod = 0
 
-        use_aux = self.cfg.use_aux_supervision
+        use_aux          = self.cfg.use_aux_supervision
         use_label_change = (self.cfg.intervention_mode == "label_change")
+        n_partners       = batch.get("n_partners", 1)
 
         for sensor in self.model.sensors:
             avail = batch[f"{sensor}_avail"]
             if not avail.any():
                 continue
 
-            x_t  = batch[f"x_{sensor}_t"][avail].to(self.device)
-            x_tn = batch[f"x_{sensor}_tn"][avail].to(self.device)
+            # ---- Encode anchor ----
+            x_t = batch[f"x_{sensor}_t"][avail].to(self.device)
+            feat_t, z_t, mu_t, lv_t = self.model.encode(sensor, x_t)
 
-            x_both = torch.cat([x_t, x_tn], dim=0)
-            feat_both, z_both, mu_both, lv_both = self.model.encode(sensor, x_both)
-            B = x_t.shape[0]
-            feat_t, feat_tn = feat_both[:B], feat_both[B:]
-            z_t,   z_tn    = z_both[:B],    z_both[B:]
-            mu_t,  mu_tn   = mu_both[:B],   mu_both[B:]
-            lv_t,  lv_tn   = lv_both[:B],   lv_both[B:]
+            if not mu_t.isfinite().all():
+                raise RuntimeError(
+                    f"mu non-finite for {sensor} (anchor). "
+                    f"Check frontend output: "
+                    f"feat min={feat_t.min().item():.3f} max={feat_t.max().item():.3f}"
+                )
 
-            assert mu_both.isfinite().all(), f"mu non-finite for {sensor}"
-            assert lv_both.isfinite().all(), f"lv non-finite for {sensor}"
+            # ---- Reconstruction + KL on anchor only ----
+            x_hat_t = self.model.decode(sensor, z_t)
+            recon   = reconstruction_loss(x_hat_t, feat_t)
 
-            x_hat_both = self.model.decode(sensor, z_both)
-            x_hat_t, x_hat_tn = x_hat_both[:B], x_hat_both[B:]
+            kl     = kl_divergence(mu_t, lv_t, beta=beta)
+            raw_kl = kl_divergence(mu_t, lv_t, beta=1.0).item()
+            raw_kl_total += raw_kl
 
-            recon = (reconstruction_loss(x_hat_t, feat_t) +
-                     reconstruction_loss(x_hat_tn, feat_tn)) / 2
-
-            kl_t  = kl_divergence(mu_t,  lv_t,  beta=beta)
-            kl_tn = kl_divergence(mu_tn, lv_tn, beta=beta)
-            kl    = (kl_t + kl_tn) / 2
-
-            raw_kl = (kl_divergence(mu_t,  lv_t,  beta=1.0) +
-                      kl_divergence(mu_tn, lv_tn, beta=1.0)) / 2
-            raw_kl_total += raw_kl.item()
-
-            # Split latent into named subspaces
             z_pres_t, z_type_t, z_prox_t, z_env_t, _ = self.model.latent.split(z_t)
-            z_pres_tn, z_type_tn, z_prox_tn, z_env_tn, _ = self.model.latent.split(z_tn)
 
-            # Intervention loss
+            # ---- Intervention loss: anchor vs each partner ----
+            interv = torch.tensor(0.0, device=self.device)
+            pres_changed_sum = type_changed_sum = 0.0
+
             if use_label_change:
-                det_t_lbl  = batch["detection_label_t"][avail].to(self.device)
-                det_tn_lbl = batch["detection_label_tn"][avail].to(self.device)
-                typ_t_lbl  = batch["vehicle_type_t"][avail].to(self.device)
-                typ_tn_lbl = batch["vehicle_type_tn"][avail].to(self.device)
-                targets = label_change_target(det_t_lbl, det_tn_lbl, typ_t_lbl, typ_tn_lbl)
-                logits  = self.model.interv_classifier(z_env_t, z_env_tn)
-                interv  = F.binary_cross_entropy_with_logits(logits, targets)
-                pres_changed_total += targets[:, 0].mean().item()
-                type_changed_total += targets[:, 1].mean().item()
-            else:
-                interv = torch.tensor(0.0, device=self.device)
+                det_t_lbl = batch["detection_label_t"][avail].to(self.device)
+                typ_t_lbl = batch["vehicle_type_t"][avail].to(self.device)
 
-            # Auxiliary supervision losses
+                for p in range(n_partners):
+                    x_p      = batch[f"x_{sensor}_p{p}"][avail].to(self.device)
+                    det_p    = batch[f"detection_label_p{p}"][avail].to(self.device)
+                    typ_p    = batch[f"vehicle_type_p{p}"][avail].to(self.device)
+
+                    _, z_p, mu_p, _ = self.model.encode(sensor, x_p)
+                    if not mu_p.isfinite().all():
+                        continue  # skip corrupted partner, don't crash
+
+                    _, _, _, z_env_p, _ = self.model.latent.split(z_p)
+
+                    targets = label_change_target(det_t_lbl, det_p, typ_t_lbl, typ_p)
+                    logits  = self.model.interv_classifier(z_env_t, z_env_p)
+                    interv  = interv + F.binary_cross_entropy_with_logits(logits, targets)
+                    pres_changed_sum += targets[:, 0].mean().item()
+                    type_changed_sum += targets[:, 1].mean().item()
+
+                if n_partners > 0:
+                    interv = interv / n_partners
+                    pres_changed_total += pres_changed_sum / n_partners
+                    type_changed_total += type_changed_sum / n_partners
+
+            # ---- Auxiliary supervision (anchor only) ----
             aux_pres = aux_type = aux_prox = torch.tensor(0.0, device=self.device)
             if use_aux:
-                det_t_lbl  = batch["detection_label_t"][avail].to(self.device)
-                det_tn_lbl = batch["detection_label_tn"][avail].to(self.device)
-                typ_t_lbl  = batch["vehicle_type_t"][avail].to(self.device)
-                typ_tn_lbl = batch["vehicle_type_tn"][avail].to(self.device)
+                det_t_lbl = batch["detection_label_t"][avail].to(self.device)
+                typ_t_lbl = batch["vehicle_type_t"][avail].to(self.device)
 
                 if not getattr(self, '_lc_rate_logged', False):
-                    pc = (det_t_lbl != det_tn_lbl).float().mean().item()
-                    tc = (typ_t_lbl != typ_tn_lbl).float().mean().item()
-                    print(f"  [diag] pair label-change rate: pres={pc:.3f} type={tc:.3f}")
+                    # Log label-change rate from the consecutive partner (p=0)
+                    if n_partners > 0:
+                        det_p0 = batch["detection_label_p0"][avail].to(self.device)
+                        typ_p0 = batch["vehicle_type_p0"][avail].to(self.device)
+                        pc = (det_t_lbl != det_p0).float().mean().item()
+                        tc = ((typ_t_lbl != typ_p0) & (typ_t_lbl >= 0) & (typ_p0 >= 0)).float().mean().item()
+                        print(f"  [diag] consec label-change rate: pres={pc:.3f} type={tc:.3f}")
                     self._lc_rate_logged = True
 
-                for z_pres_x, det_lbl_x in [(z_pres_t, det_t_lbl), (z_pres_tn, det_tn_lbl)]:
-                    logit = self.model.aux_pres_heads[sensor](z_pres_x).squeeze(-1)
-                    aux_pres = aux_pres + F.binary_cross_entropy_with_logits(
-                        logit, det_lbl_x.float()
-                    ) / 2
+                pres_logit = self.model.aux_pres_heads[sensor](z_pres_t).squeeze(-1)
+                aux_pres   = F.binary_cross_entropy_with_logits(pres_logit, det_t_lbl.float())
 
-                for z_type_x, det_lbl_x, typ_lbl_x in [
-                    (z_type_t,  det_t_lbl,  typ_t_lbl),
-                    (z_type_tn, det_tn_lbl, typ_tn_lbl),
-                ]:
-                    mask = (det_lbl_x == 1) & (typ_lbl_x >= 0)
-                    if mask.any():
-                        logits_type = self.model.aux_type_heads[sensor](z_type_x[mask])
-                        aux_type = aux_type + F.cross_entropy(
-                            logits_type, typ_lbl_x[mask]
-                        ) / 2
+                mask = (det_t_lbl == 1) & (typ_t_lbl >= 0)
+                if mask.any():
+                    aux_type = F.cross_entropy(
+                        self.model.aux_type_heads[sensor](z_type_t[mask]),
+                        typ_t_lbl[mask],
+                    )
 
-                for x_raw, z_prox_x in [(x_t, z_prox_t), (x_tn, z_prox_tn)]:
-                    rms = x_raw.pow(2).mean(dim=-1).sqrt().mean(dim=-1)
-                    rms_norm = (rms - rms.min()) / (rms.max() - rms.min() + 1e-8)
-                    prox_pred = z_prox_x.mean(dim=-1)
-                    aux_prox = aux_prox + F.mse_loss(prox_pred, rms_norm) / 2
+                rms      = x_t.pow(2).mean(dim=-1).sqrt().mean(dim=-1)
+                rms_norm = (rms - rms.min()) / (rms.max() - rms.min() + 1e-8)
+                aux_prox = F.mse_loss(z_prox_t.mean(dim=-1), rms_norm)
 
             recon_total    += recon
             kl_total       += kl
@@ -407,7 +411,7 @@ class Trainer:
         aux_prox_total = aux_prox_total / n_mod
 
         total = (recon_total + kl_total
-                 + self.cfg.lambda_interv  * interv_total
+                 + self.cfg.lambda_interv   * interv_total
                  + self.cfg.lambda_aux_pres * aux_pres_total
                  + self.cfg.lambda_aux_type * aux_type_total
                  + self.cfg.lambda_aux_prox * aux_prox_total)
@@ -433,8 +437,7 @@ class Trainer:
         for batch in loader:
             for sensor in self.model.sensors:
                 if batch[f"{sensor}_avail"].any():
-                    assert batch[f"x_{sensor}_t"].isfinite().all()
-                    assert batch[f"x_{sensor}_tn"].isfinite().all()
+                    assert batch[f"x_{sensor}_t"].isfinite().all(), f"x_{sensor}_t non-finite"
 
             self.optimizer.zero_grad()
             with torch.amp.autocast("cuda", enabled=(self.device.type == "cuda")):

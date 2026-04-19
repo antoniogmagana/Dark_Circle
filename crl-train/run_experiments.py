@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from crl_vehicle.config import CRLConfig, MODALITIES
 from crl_vehicle.data.dataset import (
-    SensorDataset, ConsecutivePairDataset,
+    SensorDataset, StratifiedPairDataset,
     collate_pairs, collate_single,
 )
 from training.trainer import CRLModel, Trainer
@@ -102,10 +102,11 @@ EXPERIMENTS = [
 # ---------------------------------------------------------------------------
 
 HARDWARE_PROFILES = {
-    "h100": {"batch_size": 512, "d_model": 128, "n_layers": 4, "num_workers": 12, "steps_per_epoch": None},
-    "mid":  {"batch_size": 128, "d_model": 64,  "n_layers": 2, "num_workers": 8,  "steps_per_epoch": None},
-    "low":  {"batch_size": 64,  "d_model": 64,  "n_layers": 2, "num_workers": 4,  "steps_per_epoch": 200},
-    "cpu":  {"batch_size": 32,  "d_model": 32,  "n_layers": 1, "num_workers": 2,  "steps_per_epoch": 50},
+    # batch_size reduced ~4x vs. pre-stratified to account for K=4 partner encoder passes.
+    "h100": {"batch_size": 128, "d_model": 128, "n_layers": 4, "num_workers": 12, "steps_per_epoch": None},
+    "mid":  {"batch_size": 64,  "d_model": 64,  "n_layers": 2, "num_workers": 8,  "steps_per_epoch": None},
+    "low":  {"batch_size": 32,  "d_model": 64,  "n_layers": 2, "num_workers": 4,  "steps_per_epoch": 200},
+    "cpu":  {"batch_size": 8,   "d_model": 32,  "n_layers": 1, "num_workers": 2,  "steps_per_epoch": 50},
 }
 
 
@@ -150,9 +151,9 @@ def get_device() -> torch.device:
 # ---------------------------------------------------------------------------
 
 def build_pair_loaders(data_dir: str, val_dir: str, cfg: CRLConfig):
-    """For CRL pre-training — consecutive pairs."""
-    train_ds = ConsecutivePairDataset(SensorDataset(data_dir, cfg, is_train=True))
-    val_ds   = ConsecutivePairDataset(SensorDataset(val_dir,  cfg, is_train=False))
+    """For CRL pre-training — stratified pairs."""
+    train_ds = StratifiedPairDataset(SensorDataset(data_dir, cfg, is_train=True))
+    val_ds   = StratifiedPairDataset(SensorDataset(val_dir,  cfg, is_train=False))
     kw = dict(
         batch_size=cfg.batch_size,
         num_workers=cfg.num_workers,

@@ -35,13 +35,15 @@ class MultiScale1DFrontend(nn.Module):
         self.project = nn.Conv1d(in_channels=branch_channels * len(kernel_sizes), out_channels=out_channels, kernel_size=1)
 
         # Create the parallel convolutional branches.
+        # GroupNorm instead of BatchNorm1d: no running stats means a single inf batch
+        # cannot poison subsequent forward passes, and it is stable across the mixed-
+        # dataset batches produced by stratified partner sampling.
+        # num_groups=1 is equivalent to LayerNorm over channels; kept small so it works
+        # even at batch_size=1 during smoke tests.
         self.branches = nn.ModuleList([
             nn.Sequential(
-                # padding = x // 2 is critical! It ensures that regardless of the kernel size,
-                # every branch outputs the exact same temporal sequence length, allowing
-                # them to be concatenated later.
                 nn.Conv1d(in_channels=self.in_channels, out_channels=branch_channels, kernel_size=x, stride=strides, padding=x // 2),
-                nn.BatchNorm1d(branch_channels),
+                nn.GroupNorm(num_groups=min(8, branch_channels), num_channels=branch_channels),
                 nn.GELU(),
             ) for x in kernel_sizes
         ])
@@ -54,13 +56,12 @@ class MultiScale1DFrontend(nn.Module):
         Returns:
             Mixed multi-scale features of shape (B, C_out, W // strides)
         """
-        # Pass the input through each branch independently.
-        # Then, concatenate the results along the channel dimension (dim=1).
-        # Because of our padding strategy, the temporal dimension (dim=2) matches perfectly.
-        x = torch.cat([branch(x) for branch in self.branches], dim=1)
-
-        # Mix the multi-scale features together and project to exactly out_channels.
-        return self.project(x)
+        # fp32 throughout: audio windows (16 000 samples) produce conv outputs that
+        # overflow fp16 (max ~65 504) at large strides, yielding inf → NaN in GroupNorm.
+        with torch.amp.autocast("cuda", enabled=False):
+            x = x.float()
+            x = torch.cat([branch(x) for branch in self.branches], dim=1)
+            return self.project(x)
 
 
 class LearnableMorlet1D(nn.Module):
