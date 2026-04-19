@@ -378,13 +378,13 @@ def main():
           f"(batch={cfg.batch_size}, d_model={cfg.d_model}, "
           f"n_layers={cfg.n_layers}, workers={cfg.num_workers})")
 
-    if args.crl_epochs:
+    if args.crl_epochs is not None:
         cfg.n_epochs = args.crl_epochs
-    if args.batch_size:
+    if args.batch_size is not None:
         cfg.batch_size = args.batch_size
-    if args.steps_per_epoch:
+    if args.steps_per_epoch is not None:
         cfg.steps_per_epoch = args.steps_per_epoch
-    if args.num_workers:
+    if args.num_workers is not None:
         cfg.num_workers = args.num_workers
 
     experiments_dir = Path(args.out_dir)
