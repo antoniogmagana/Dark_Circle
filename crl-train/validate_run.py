@@ -83,13 +83,13 @@ def _collect_embeddings(
     device: torch.device,
 ) -> dict[str, np.ndarray]:
     """Return a dict of numpy arrays for z blocks and labels."""
-    z_pres_list, z_type_list, z_prox_list, z_noise_list = [], [], [], []
+    z_pres_list, z_type_list = [], []
     vtypes, dets = [], []
 
     for batch in loader:
-        x = batch[f"{model.sensors[0]}"].to(device) # Assume single primary sensor
+        x = batch[f"{model.sensors[0]}"].to(device)
         _, z, _, _ = model.encode(model.sensors[0], x)
-        z_pres, z_type, z_prox, z_noise = model.latent.split(z)
+        z_pres, z_type, _, _, _ = model.latent.split(z)
 
         z_pres_list.append(z_pres.cpu().numpy())
         z_type_list.append(z_type.cpu().numpy())
@@ -425,8 +425,6 @@ def main() -> None:
     primary      = "seismic" if "seismic" in sensors else sensors[0]
 
     # ----------------------------------------------------------------
-    # check_unit_level(model, sample_batch, device, cfg) # This needs rework for new data format
-
     print("\n  Collecting embeddings over train and val splits...")
     train_embeds = _collect_embeddings(model, train_loader, device)
     val_embeds = _collect_embeddings(model, val_loader, device)

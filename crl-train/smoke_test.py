@@ -23,7 +23,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from crl_vehicle.config import CRLConfig, MODALITIES, default_audio_config, default_seismic_config
+from crl_vehicle.config import CRLConfig, MODALITIES
 from crl_vehicle.data.dataset import SensorDataset, ConsecutivePairDataset, collate_pairs
 from training.trainer import CRLModel, Trainer
 
@@ -182,11 +182,12 @@ def main():
             x_hat = model.decode(sensor, z)
             _check("  decoder x_hat (B, C_out, T')", x_hat, features.shape)
 
-            z_pres, z_type, z_prox, z_noise = model.latent.split(z)
-            _check("  split z_pres", z_pres, (x.shape[0], model.latent.d_pres))
-            _check("  split z_type", z_type, (x.shape[0], model.latent.d_type))
-            _check("  split z_prox", z_prox, (x.shape[0], model.latent.d_prox))
-            _check("  split z_noise", z_noise, (x.shape[0], model.latent.d_noise))
+            z_pres, z_type, z_prox, z_env, z_free = model.latent.split(z)
+            _check("  split z_pres", z_pres, (x.shape[0], model.latent.D_PRES))
+            _check("  split z_type", z_type, (x.shape[0], model.latent.D_TYPE))
+            _check("  split z_prox", z_prox, (x.shape[0], model.latent.D_PROX))
+            _check("  split z_env",  z_env,  (x.shape[0], model.latent.D_ENV))
+            _check("  split z_free", z_free, (x.shape[0], model.latent.D_FREE))
 
     # ----------------------------------------------------------------
     _header("4. Full forward pass + loss")

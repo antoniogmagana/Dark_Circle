@@ -7,7 +7,7 @@ CRL pre-training (ConsecutivePairDataset):
                                    → FeatureDecoder
 
     Loss = reconstruction_loss + beta * kl_divergence
-         + lambda_interv * intervention_matching_loss
+         + lambda_interv * F.binary_cross_entropy_with_logits
          + lambda_aux_* * aux_supervision_losses
 
     Checkpointing uses fixed-reference ELBO (beta=1) so the metric is
@@ -634,7 +634,6 @@ class Trainer:
     @torch.no_grad()
     def _eval_downstream(self, loader: DataLoader, sensor: str) -> dict:
         from sklearn.metrics import accuracy_score, f1_score
-        import json as _json
 
         self.model.eval()
         pres_head = self.model.pres_heads[sensor]
@@ -689,7 +688,7 @@ class Trainer:
         if cls_true:
             per_class = f1_score(cls_true, cls_pred, average=None, zero_division=0)
             from crl_vehicle.config import CLASS_MAP
-            class_breakdown = _json.dumps({CLASS_MAP.get(i, str(i)): round(float(v), 4)
+            class_breakdown = json.dumps({CLASS_MAP.get(i, str(i)): round(float(v), 4)
                                            for i, v in enumerate(per_class)})
         else:
             class_breakdown = "{}"
