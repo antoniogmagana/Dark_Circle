@@ -273,7 +273,7 @@ def run_experiment(
     # Load best CRL checkpoint before downstream
     best_ckpt = save_dir / "crl_best.pth"
     if best_ckpt.exists():
-        model.load_state_dict(torch.load(best_ckpt, map_location=device))
+        model.load_state_dict(torch.load(best_ckpt, map_location=device, weights_only=True))
 
     # Downstream head training
     t1 = time.time()
