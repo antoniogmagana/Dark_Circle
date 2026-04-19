@@ -98,6 +98,65 @@ def _compute_dir_hash(parquet_dir: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Disk cache I/O
+# ---------------------------------------------------------------------------
+
+def _save_cache(
+    cache_dir: Path,
+    cache_key: str,
+    sensor_cache: dict,
+    index: list,
+    groups: dict,
+    segment_id_map: dict,
+    seg_counter: int,
+) -> None:
+    slot = cache_dir / cache_key
+    slot.mkdir(parents=True, exist_ok=True)
+
+    for sensor in ("audio", "seismic"):
+        entries = sensor_cache[sensor]
+        if not entries:
+            np.save(slot / f"{sensor}.npy", np.empty((0,), dtype=np.float32))
+            with open(slot / f"{sensor}_meta.pkl", "wb") as f:
+                pickle.dump([], f)
+            continue
+
+        keys = list(entries.keys())
+        arrays = [entries[k]["data"] for k in keys]  # each (1, T_i)
+        max_len = max(a.shape[-1] for a in arrays)
+
+        padded = np.zeros((len(arrays), max_len), dtype=np.float32)
+        true_lens = []
+        for i, a in enumerate(arrays):
+            L = a.shape[-1]
+            padded[i, :L] = a[0]
+            true_lens.append(L)
+
+        np.save(slot / f"{sensor}.npy", padded)
+
+        meta = [
+            {
+                "stem":      k[0],
+                "seg_key":   k[1],
+                "true_len":  true_lens[idx],
+                "present":   entries[k]["present"],
+                "native_sr": entries[k]["native_sr"],
+                "target_sr": entries[k]["target_sr"],
+            }
+            for idx, k in enumerate(keys)
+        ]
+        with open(slot / f"{sensor}_meta.pkl", "wb") as f:
+            pickle.dump(meta, f)
+
+    with open(slot / "index.pkl", "wb") as f:
+        pickle.dump(index, f)
+    with open(slot / "groups.pkl", "wb") as f:
+        pickle.dump(groups, f)
+    with open(slot / "segment_id_map.pkl", "wb") as f:
+        pickle.dump({"map": segment_id_map, "counter": seg_counter}, f)
+
+
+# ---------------------------------------------------------------------------
 # Filename parsing
 # ---------------------------------------------------------------------------
 
