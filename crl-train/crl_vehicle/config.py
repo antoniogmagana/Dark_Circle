@@ -131,8 +131,8 @@ class CRLConfig:
     lambda_interv:    float = 1.0
 
     # Loss weights — auxiliary supervision
-    lambda_aux_pres:  float = 0.3
-    lambda_aux_type:  float = 0.3
+    lambda_aux_pres:  float = 1.0
+    lambda_aux_type:  float = 1.0
     lambda_aux_prox:  float = 0.1
 
     # Auxiliary supervision toggle (False = exp1_baseline behaviour)

@@ -348,21 +348,32 @@ class Trainer:
             # Auxiliary supervision losses
             aux_pres = aux_type = aux_prox = torch.tensor(0.0, device=self.device)
             if use_aux:
-                det_lbl = batch["detection_label"][avail].to(self.device)
-                typ_lbl = batch["vehicle_type"][avail].to(self.device)
+                det_t_lbl  = batch["detection_label_t"][avail].to(self.device)
+                det_tn_lbl = batch["detection_label_tn"][avail].to(self.device)
+                typ_t_lbl  = batch["vehicle_type_t"][avail].to(self.device)
+                typ_tn_lbl = batch["vehicle_type_tn"][avail].to(self.device)
 
-                for z_pres_x in [z_pres_t, z_pres_tn]:
+                if not getattr(self, '_lc_rate_logged', False):
+                    pc = (det_t_lbl != det_tn_lbl).float().mean().item()
+                    tc = (typ_t_lbl != typ_tn_lbl).float().mean().item()
+                    print(f"  [diag] pair label-change rate: pres={pc:.3f} type={tc:.3f}")
+                    self._lc_rate_logged = True
+
+                for z_pres_x, det_lbl_x in [(z_pres_t, det_t_lbl), (z_pres_tn, det_tn_lbl)]:
                     logit = self.model.aux_pres_heads[sensor](z_pres_x).squeeze(-1)
                     aux_pres = aux_pres + F.binary_cross_entropy_with_logits(
-                        logit, det_lbl.float()
+                        logit, det_lbl_x.float()
                     ) / 2
 
-                mask = (det_lbl == 1) & (typ_lbl >= 0)
-                if mask.any():
-                    for z_type_x in [z_type_t, z_type_tn]:
+                for z_type_x, det_lbl_x, typ_lbl_x in [
+                    (z_type_t,  det_t_lbl,  typ_t_lbl),
+                    (z_type_tn, det_tn_lbl, typ_tn_lbl),
+                ]:
+                    mask = (det_lbl_x == 1) & (typ_lbl_x >= 0)
+                    if mask.any():
                         logits_type = self.model.aux_type_heads[sensor](z_type_x[mask])
                         aux_type = aux_type + F.cross_entropy(
-                            logits_type, typ_lbl[mask]
+                            logits_type, typ_lbl_x[mask]
                         ) / 2
 
                 for x_raw, z_prox_x in [(x_t, z_prox_t), (x_tn, z_prox_tn)]:
@@ -621,6 +632,7 @@ class Trainer:
         det_true, det_pred = [], []
         cls_true, cls_pred = [], []
         prox_losses = []
+        z_pres_stds = []
 
         for batch in loader:
             avail = batch[f"{sensor}_avail"]
@@ -632,6 +644,7 @@ class Trainer:
 
             _, z, _, _ = self.model.encode(sensor, x)
             z_pres, z_type, z_prox, _, _ = self.model.latent.split(z)
+            z_pres_stds.append(z_pres.std(dim=0).cpu())
 
             pres_logit  = pres_head(z_pres).squeeze(-1)
             type_logits = type_head(z_type)
@@ -669,7 +682,19 @@ class Trainer:
         else:
             class_breakdown = "{}"
 
-        self.model.train()
+        if z_pres_stds:
+            mean_std = torch.stack(z_pres_stds).mean(dim=0)
+            print(f"  [{sensor}] z_pres per-dim std: {[round(v, 4) for v in mean_std.tolist()]}")
+        if det_pred:
+            n_pos = sum(det_pred)
+            print(f"  [{sensor}] val det_pred: {n_pos} pos / {len(det_pred) - n_pos} neg")
+        if cls_pred:
+            from collections import Counter
+            print(f"  [{sensor}] val type_pred dist: {dict(Counter(cls_pred))}")
+
+        pres_head.train()
+        type_head.train()
+        prox_head.train()
         return {
             "val_pres_acc":    pres_acc,
             "val_pres_f1":     pres_f1,
