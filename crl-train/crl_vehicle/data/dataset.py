@@ -46,6 +46,8 @@ Batch keys (per partner slot p=0..K-1, plus anchor at 't'):
 """
 
 import re
+import hashlib
+import pickle
 import numpy as np
 import pandas as pd
 import torch
@@ -77,6 +79,22 @@ _TARGET_SR = {
 }
 
 _RS_RE = re.compile(r"_rs\d+$")
+
+
+# ---------------------------------------------------------------------------
+# Disk-cache key
+# ---------------------------------------------------------------------------
+
+def _compute_dir_hash(parquet_dir: Path) -> str:
+    """
+    Stable hash of parquet directory contents: sorted (filename, mtime, size) tuples.
+    Invalidates when files are added, removed, or modified.
+    """
+    entries = sorted(
+        (p.name, p.stat().st_mtime_ns, p.stat().st_size)
+        for p in parquet_dir.glob("*.parquet")
+    )
+    return hashlib.sha256(str(entries).encode()).hexdigest()[:16]
 
 
 # ---------------------------------------------------------------------------
