@@ -49,10 +49,11 @@ def build_crl_loaders(
     data_dir: str,
     val_dir: str,
     config: CRLConfig,
+    cache_dir: Path | None = None,
 ) -> tuple[DataLoader, DataLoader]:
     """ConsecutivePairDataset loaders for CRL pre-training."""
-    train_ds = StratifiedPairDataset(SensorDataset(data_dir, config, is_train=True))
-    val_ds   = StratifiedPairDataset(SensorDataset(val_dir,  config, is_train=False))
+    train_ds = StratifiedPairDataset(SensorDataset(data_dir, config, is_train=True,  cache_dir=cache_dir))
+    val_ds   = StratifiedPairDataset(SensorDataset(val_dir,  config, is_train=False, cache_dir=cache_dir))
 
     loader_kwargs = dict(
         batch_size=config.batch_size,
@@ -72,10 +73,11 @@ def build_downstream_loaders(
     data_dir: str,
     val_dir: str,
     config: CRLConfig,
+    cache_dir: Path | None = None,
 ) -> tuple[DataLoader, DataLoader]:
     """Single-window SensorDataset loaders for downstream head training."""
-    train_ds = SensorDataset(data_dir, config, is_train=True)
-    val_ds   = SensorDataset(val_dir,  config, is_train=False)
+    train_ds = SensorDataset(data_dir, config, is_train=True,  cache_dir=cache_dir)
+    val_ds   = SensorDataset(val_dir,  config, is_train=False, cache_dir=cache_dir)
 
     loader_kwargs = dict(
         batch_size=config.batch_size,
@@ -110,6 +112,8 @@ def parse_args():
     p.add_argument("--frontend",     type=str, default="multiscale", choices=["multiscale", "morlet"],
                    help="Frontend architecture to use: 'multiscale' (early) or 'morlet' (late).")
     p.add_argument("--steps-per-epoch", type=int, default=None)
+    p.add_argument("--cache-dir", default=None,
+                   help="Directory for pre-built dataset disk cache. Skips parquet parse on hit.")
     return p.parse_args()
 
 
@@ -145,6 +149,7 @@ def main():
         save_dir = save_dir / args.frontend
     cfg.save_dir = str(save_dir)
     cfg.frontend_type = args.frontend
+    cache_dir = Path(args.cache_dir) if args.cache_dir else None
 
     sensors = args.sensors or MODALITIES
     print(f"Sensors: {sensors}")
@@ -157,7 +162,7 @@ def main():
     trainer = Trainer(model, cfg, device, save_dir)
 
     if args.phase in ("crl", "full"):
-        crl_train_loader, crl_val_loader = build_crl_loaders(args.data_dir, args.val_dir, cfg)
+        crl_train_loader, crl_val_loader = build_crl_loaders(args.data_dir, args.val_dir, cfg, cache_dir=cache_dir)
         trainer.train_crl(crl_train_loader, crl_val_loader, cfg.n_epochs)
 
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -177,7 +182,7 @@ def main():
         elif args.phase == "downstream":
             raise FileNotFoundError(f"No CRL checkpoint at {ckpt}. Run --phase crl first.")
 
-        ds_train_loader, ds_val_loader = build_downstream_loaders(args.data_dir, args.val_dir, cfg)
+        ds_train_loader, ds_val_loader = build_downstream_loaders(args.data_dir, args.val_dir, cfg, cache_dir=cache_dir)
         trainer.train_downstream(ds_train_loader, ds_val_loader, args.ds_epochs)
 
 
