@@ -17,8 +17,8 @@ This document tracks the ground-up rebuild of the Causal Representation Learning
 * [x] `MultiScale1DFrontend` (For Early Fusion)
   * [x] `__init__(in_channels, out_channels, kernel_sizes)`: Sets up parallel Conv1D branches.
   * [x] `forward(x)`: Processes and merges the multi-scale convolutions.
-* [x] `LearnableMorlet1D` (For Late Fusion)
-  * [x] `__init__(in_channels, out_channels, kernel_size)`: Initializes the time vector and learnable scale parameters.
+* [x] `MorletFilterbank` (For Late Fusion)
+  * [x] `__init__(in_channels, out_channels, kernel_size)`: Initializes the time vector and fixed scale buffers.
   * [x] `_build_wavelet_kernels()`: Dynamically builds the real (cosine) and imaginary (sine) filters.
   * [x] `forward(x)`: Applies the kernels and computes the power envelope.
 

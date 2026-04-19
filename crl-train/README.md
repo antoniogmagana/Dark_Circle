@@ -472,7 +472,7 @@ This two-phase approach validates that the latent representations are independen
 |---|---|
 | Remove intervention loss (`lambda_interv=0`) | Contribution of causal matching vs. a plain VAE |
 | Single modality (audio-only or seismic-only) | Modality-specific contribution; robustness to sensor dropout |
-| Use `LearnableMorlet1D` vs `MultiScale1DFrontend` | Impact of frontend choice on disentanglement |
+| Use `MorletFilterbank` vs `MultiScale1DFrontend` | Impact of frontend choice on disentanglement |
 
 ### 8.6 Sanity Tests for Scientific Integrity
 

@@ -29,7 +29,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from crl_vehicle.config import CRLConfig, MODALITIES, CLASS_MAP
-from crl_vehicle.models.frontend import MultiScale1DFrontend, LearnableMorlet1D
+from crl_vehicle.models.frontend import MultiScale1DFrontend, MorletFilterbank
 from crl_vehicle.models.encoder_decoder import TemporalEncoder, FeatureDecoder
 from crl_vehicle.models.latent import CausalLatentSpace
 from crl_vehicle.models.intervention import UnknownInterventionClassifier, label_change_target
@@ -91,12 +91,19 @@ class CRLModel(nn.Module):
                     nn.AvgPool1d(kernel_size=pool_stride, stride=pool_stride),
                 )
             elif self.cfg.frontend_type == "morlet":
-                pool_stride = config.morlet_pool_stride
+                # Match multiscale pool stride for seismic; use morlet_pool_stride for audio.
+                pool_stride = (config.multiscale_pool_stride
+                               if sensor == "seismic"
+                               else config.morlet_pool_stride)
+                # Clamp kernel to the window; ensure odd so padding='same' is symmetric.
+                ks = min(config.morlet_kernel_size, mod_cfg.window_size)
+                if ks % 2 == 0:
+                    ks -= 1
                 frontend = nn.Sequential(
-                    LearnableMorlet1D(
+                    MorletFilterbank(
                         in_channels=mod_cfg.n_channels,
                         out_channels=config.d_model,
-                        kernel_size=config.morlet_kernel_size,
+                        kernel_size=ks,
                         sample_rate=mod_cfg.sample_rate,
                     ),
                     nn.AvgPool1d(kernel_size=pool_stride, stride=pool_stride),
@@ -335,14 +342,13 @@ class Trainer:
             pres_changed_sum = type_changed_sum = 0.0
 
             if use_label_change:
-                # Batch all partner encodes together with the anchor for GPU efficiency.
+                # Batch all partner encodes together for GPU efficiency.
                 x_partners = [batch[f"x_{sensor}_p{p}"][avail].to(self.device)
                                for p in range(n_partners)]
-                x_all = torch.cat([x_t] + x_partners, dim=0)
+                x_all = torch.cat(x_partners, dim=0)
                 B = x_t.shape[0]
                 _, z_all, mu_all, _ = self.model.encode(sensor, x_all)
-                # Anchor mu already validated above; check partners only.
-                partner_mu = mu_all[B:]
+                partner_mu = mu_all
 
                 n_valid = 0
                 for p in range(n_partners):
@@ -350,7 +356,7 @@ class Trainer:
                     if not mu_p.isfinite().all():
                         continue  # skip corrupted partner, don't crash
 
-                    z_p = z_all[B + p * B: B + (p + 1) * B]
+                    z_p = z_all[p * B:(p + 1) * B]
                     det_p = batch[f"detection_label_p{p}"][avail].to(self.device)
                     typ_p = batch[f"vehicle_type_p{p}"][avail].to(self.device)
 

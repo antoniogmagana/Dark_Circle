@@ -64,17 +64,15 @@ class MultiScale1DFrontend(nn.Module):
             return self.project(x)
 
 
-class LearnableMorlet1D(nn.Module):
+class MorletFilterbank(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=128, sample_rate=200):
         """
         Fixed 1D Morlet Wavelet filterbank frontend.
 
         Applies a bank of `out_channels` complex Morlet wavelets to the input
-        signal. The wavelet scales are fixed at init (log-spaced to cover the
-        full frequency range of the sensor) and stored as buffers rather than
-        learnable parameters. This makes the filterbank a deterministic
-        featurizer — the encoder layers downstream learn which frequency bands
-        are discriminative.
+        signal. Scales are fixed at init (log-spaced over the sensor's frequency
+        range) and stored as buffers — no learned parameters. The encoder layers
+        downstream learn which frequency bands are discriminative.
 
         Args:
             in_channels: Number of input channels.
@@ -108,10 +106,11 @@ class LearnableMorlet1D(nn.Module):
         s_min = self.w0 / (2 * math.pi * f_max)
         scales = torch.exp(torch.linspace(math.log(s_min), math.log(s_max), out_channels))
 
-        # Build kernels once at init and store as buffers (no gradient, no rebuild per step).
+        # Build kernels once at init and store as a single fused buffer.
+        # Concatenating real and imaginary kernels along dim 0 lets us run one
+        # conv1d call instead of two, halving kernel-launch overhead.
         kernel_re, kernel_im = self._build_wavelet_kernels(scales)
-        self.register_buffer('kernel_re', kernel_re)
-        self.register_buffer('kernel_im', kernel_im)
+        self.register_buffer('kernel', torch.cat([kernel_re, kernel_im], dim=0))
 
     def _build_wavelet_kernels(self, scales):
         """
@@ -159,7 +158,7 @@ class LearnableMorlet1D(nn.Module):
         # AMP allowlist. Audio scales as small as ~1e-4 s can produce t_scaled
         # values up to ~526 — fine in fp32 but overflowing fp16 (max ~65504).
         with torch.amp.autocast("cuda", enabled=False):
-            conv_re = nn.functional.conv1d(x.float(), self.kernel_re, padding='same')
-            conv_im = nn.functional.conv1d(x.float(), self.kernel_im, padding='same')
+            out = nn.functional.conv1d(x.float(), self.kernel, padding='same')
+            conv_re, conv_im = out.chunk(2, dim=1)
             power = torch.sqrt(conv_re.pow(2) + conv_im.pow(2) + 1e-8)
         return torch.log1p(power)

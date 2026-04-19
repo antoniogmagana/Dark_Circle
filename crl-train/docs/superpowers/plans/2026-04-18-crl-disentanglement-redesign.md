@@ -578,7 +578,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from crl_vehicle.config import CRLConfig, MODALITIES, CLASS_MAP
-from crl_vehicle.models.frontend import MultiScale1DFrontend, LearnableMorlet1D
+from crl_vehicle.models.frontend import MultiScale1DFrontend, MorletFilterbank
 from crl_vehicle.models.encoder_decoder import TemporalEncoder, FeatureDecoder
 from crl_vehicle.models.latent import CausalLatentSpace
 from crl_vehicle.models.intervention import UnknownInterventionClassifier, label_change_target
@@ -629,7 +629,7 @@ Replace the `CRLModel.__init__` body (the part that builds `self.latent` and `se
             elif self.cfg.frontend_type == "morlet":
                 pool_stride = config.morlet_pool_stride
                 frontend = nn.Sequential(
-                    LearnableMorlet1D(
+                    MorletFilterbank(
                         in_channels=mod_cfg.n_channels,
                         out_channels=config.d_model,
                         kernel_size=config.morlet_kernel_size,
