@@ -43,7 +43,7 @@ class MultiScale1DFrontend(nn.Module):
         self.branches = nn.ModuleList([
             nn.Sequential(
                 nn.Conv1d(in_channels=self.in_channels, out_channels=branch_channels, kernel_size=x, stride=strides, padding=x // 2),
-                nn.GroupNorm(num_groups=min(8, branch_channels), num_channels=branch_channels),
+                nn.GroupNorm(num_groups=max(g for g in range(1, min(8, branch_channels) + 1) if branch_channels % g == 0), num_channels=branch_channels),
                 nn.GELU(),
             ) for x in kernel_sizes
         ])
