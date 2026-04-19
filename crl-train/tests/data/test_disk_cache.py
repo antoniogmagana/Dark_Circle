@@ -97,3 +97,36 @@ def test_load_cache_returns_none_for_missing_key(tmp_path):
     cache_dir.mkdir()
     result = _load_cache(cache_dir, "missing")
     assert result is None
+
+
+def test_sensor_dataset_writes_cache(tmp_path, monkeypatch):
+    """SensorDataset writes a cache on first construction, loads it on second."""
+    import crl_vehicle.data.dataset as ds_mod
+
+    built = []
+    def fake_build(self):
+        self._cache = {
+            "audio":   {("stem_a", None): {"data": np.zeros((1, 16000), dtype=np.float32), "present": np.ones(16000, dtype=bool), "native_sr": 16000, "target_sr": 16000}},
+            "seismic": {("stem_s", None): {"data": np.zeros((1, 200),   dtype=np.float32), "present": np.ones(200,   dtype=bool), "native_sr": 200,   "target_sr": 200}},
+        }
+        self._index = []
+        self._groups = {}
+        self._segment_id_map = {}
+        self._seg_counter = 0
+        built.append(True)
+
+    monkeypatch.setattr(ds_mod.SensorDataset, "_build_index", fake_build)
+    monkeypatch.setattr(ds_mod, "_compute_dir_hash", lambda p: "testhash")
+
+    cache_dir = tmp_path / "cache"
+    cfg = CRLConfig()
+    real_parquet_dir = tmp_path / "parquet"
+    real_parquet_dir.mkdir()
+
+    ds_mod.SensorDataset(str(real_parquet_dir), cfg, cache_dir=cache_dir)
+    assert len(built) == 1
+    assert (cache_dir / "testhash" / "audio.npy").exists()
+
+    built.clear()
+    ds_mod.SensorDataset(str(real_parquet_dir), cfg, cache_dir=cache_dir)
+    assert len(built) == 0

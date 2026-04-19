@@ -259,7 +259,8 @@ class SensorDataset(Dataset):
     """
 
     def __init__(
-        self, parquet_dir: str, config: CRLConfig, is_train: bool = True
+        self, parquet_dir: str, config: CRLConfig, is_train: bool = True,
+        cache_dir: Path | None = None,
     ):
         self.parquet_dir = Path(parquet_dir)
         self.cfg = config
@@ -282,7 +283,22 @@ class SensorDataset(Dataset):
         # (gkey, w, vehicle_type, det_label, audio_seg_id, seismic_seg_id)
         self._index: list = []
 
-        self._build_index()
+        loaded = False
+        if cache_dir is not None:
+            cache_key = _compute_dir_hash(self.parquet_dir)
+            result = _load_cache(cache_dir, cache_key)
+            if result is not None:
+                self._cache, self._index, self._groups, self._segment_id_map, self._seg_counter = result
+                print(f"  SensorDataset [{self.parquet_dir.name}]: loaded from disk cache ({cache_key})")
+                loaded = True
+
+        if not loaded:
+            self._build_index()
+            if cache_dir is not None:
+                print(f"  SensorDataset [{self.parquet_dir.name}]: saving disk cache ({cache_key})")
+                _save_cache(cache_dir, cache_key, self._cache, self._index, self._groups,
+                            self._segment_id_map, self._seg_counter)
+
         print(
             f"  SensorDataset [{self.parquet_dir.name}]: "
             f"{len(self._index)} windows, "
