@@ -1,0 +1,25 @@
+{
+  "summaries": [
+    {
+      "name": "exp3_redesigned",
+      "description": "Multiscale, label-change intervention, aux supervision ON (FAILED)",
+      "overrides": {
+        "frontend_type": "multiscale",
+        "lambda_interv": 1.0,
+        "use_aux_supervision": true,
+        "intervention_mode": "label_change"
+      },
+      "error": "mu non-finite for audio"
+    }
+  ],
+  "comparison": [
+    {
+      "name": "exp3_redesigned",
+      "description": "Multiscale, label-change intervention, aux supervision ON (FAILED)",
+      "best_val_ref_elbo": Infinity,
+      "mean_downstream_f1": 0.0,
+      "delta_f1": 0.0,
+      "verdict": "NO_CHANGE"
+    }
+  ]
+}
