@@ -123,6 +123,13 @@ def _vehicle_to_labels(dataset: str, vehicle: str):
     return CATEGORY_TO_IDX[type_str], True
 
 
+def _sample_interv(is_train: bool) -> int:
+    """Return a random intervention index (1..N_INTERVENTIONS) with 60% probability during training."""
+    if is_train and torch.rand(1).item() < 0.60:
+        return torch.randint(1, N_INTERVENTIONS + 1, (1,)).item()
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # SensorDataset
 # ---------------------------------------------------------------------------
@@ -398,10 +405,7 @@ class SensorDataset(Dataset):
 
         # Same intervention applied to both modalities — same environmental cause,
         # each sensor responds according to its own physics.
-        if self.is_train and torch.rand(1).item() < 0.60:
-            interv_idx = torch.randint(1, N_INTERVENTIONS + 1, (1,)).item()
-        else:
-            interv_idx = 0
+        interv_idx = _sample_interv(self.is_train)
 
         # Extract each modality independently; zero-pad if unavailable
         audio_avail = group["audio_stem"] is not None and w < group["audio_nw"]
@@ -530,6 +534,13 @@ class StratifiedPairDataset(Dataset):
 
         all_eligible = [j for bucket in by_dataset.values() for j in bucket]
 
+        # Pre-build cross-dataset pools once per dataset (O(datasets × eligible))
+        # rather than O(anchors × eligible) if built per anchor.
+        cross_by_ds: dict[str, list[int]] = {
+            ds_name: [j for ds, bucket in by_dataset.items() if ds != ds_name for j in bucket]
+            for ds_name in by_dataset
+        }
+
         for anchor_pos, i in enumerate(self._anchors):
             gkey, w, vtype, det, _, _ = index[i]
             ds_name = gkey[0]
@@ -547,9 +558,8 @@ class StratifiedPairDataset(Dataset):
                     if index[j][2] >= 0 and index[j][2] != vtype and index[j][0] != gkey]
             self._diff_type_pool.append(diff if diff else all_eligible)
 
-            # cross_ds: different dataset entirely
-            cross = [j for ds, bucket in by_dataset.items()
-                     if ds != ds_name for j in bucket]
+            # cross_ds: different dataset entirely (shared reference, not a copy)
+            cross = cross_by_ds.get(ds_name, [])
             self._cross_ds_pool.append(cross if cross else all_eligible)
 
         n_anchors = len(self._anchors)
@@ -581,14 +591,11 @@ class StratifiedPairDataset(Dataset):
         }
 
     def _rand_interv(self) -> int:
-        if self.ds.is_train and torch.rand(1).item() < 0.60:
-            return torch.randint(1, N_INTERVENTIONS + 1, (1,)).item()
-        return 0
+        return _sample_interv(self.ds.is_train)
 
     def __getitem__(self, idx: int) -> dict:
-        anchor_pos = idx
-        i_t  = self._anchors[anchor_pos]
-        i_tn = self._consec_idx[anchor_pos]
+        i_t  = self._anchors[idx]
+        i_tn = self._consec_idx[idx]
 
         anchor = self._fetch(i_t,  self._rand_interv())
         consec = self._fetch(i_tn, self._rand_interv())
@@ -596,15 +603,15 @@ class StratifiedPairDataset(Dataset):
         partners = [(consec, STRATUM_CONSEC)]
 
         for _ in range(self.n_same_type):
-            j = self._pick(self._same_type_pool[anchor_pos])
+            j = self._pick(self._same_type_pool[idx])
             partners.append((self._fetch(j, self._rand_interv()), STRATUM_SAME_TYPE))
 
         for _ in range(self.n_diff_type):
-            j = self._pick(self._diff_type_pool[anchor_pos])
+            j = self._pick(self._diff_type_pool[idx])
             partners.append((self._fetch(j, self._rand_interv()), STRATUM_DIFF_TYPE))
 
         for _ in range(self.n_cross_ds):
-            j = self._pick(self._cross_ds_pool[anchor_pos])
+            j = self._pick(self._cross_ds_pool[idx])
             partners.append((self._fetch(j, self._rand_interv()), STRATUM_CROSS_DS))
 
         item = {
@@ -665,6 +672,5 @@ def collate_pairs(batch: list) -> dict:
     return out
 
 
-# Backward-compat alias used by older callers (exp1/exp2 noise_type mode still builds
-# ConsecutivePairDataset via train.py; run_experiments.py uses StratifiedPairDataset).
+# Backward-compat alias: smoke_test.py and other callers import ConsecutivePairDataset.
 ConsecutivePairDataset = StratifiedPairDataset

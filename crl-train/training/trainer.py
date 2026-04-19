@@ -326,22 +326,33 @@ class Trainer:
 
             z_pres_t, z_type_t, z_prox_t, z_env_t, _ = self.model.latent.split(z_t)
 
+            # ---- Hoist anchor labels (used by both interv and aux blocks) ----
+            det_t_lbl = batch["detection_label_t"][avail].to(self.device)
+            typ_t_lbl = batch["vehicle_type_t"][avail].to(self.device)
+
             # ---- Intervention loss: anchor vs each partner ----
             interv = torch.tensor(0.0, device=self.device)
             pres_changed_sum = type_changed_sum = 0.0
 
             if use_label_change:
-                det_t_lbl = batch["detection_label_t"][avail].to(self.device)
-                typ_t_lbl = batch["vehicle_type_t"][avail].to(self.device)
+                # Batch all partner encodes together with the anchor for GPU efficiency.
+                x_partners = [batch[f"x_{sensor}_p{p}"][avail].to(self.device)
+                               for p in range(n_partners)]
+                x_all = torch.cat([x_t] + x_partners, dim=0)
+                B = x_t.shape[0]
+                _, z_all, mu_all, _ = self.model.encode(sensor, x_all)
+                # Anchor mu already validated above; check partners only.
+                partner_mu = mu_all[B:]
 
+                n_valid = 0
                 for p in range(n_partners):
-                    x_p      = batch[f"x_{sensor}_p{p}"][avail].to(self.device)
-                    det_p    = batch[f"detection_label_p{p}"][avail].to(self.device)
-                    typ_p    = batch[f"vehicle_type_p{p}"][avail].to(self.device)
-
-                    _, z_p, mu_p, _ = self.model.encode(sensor, x_p)
+                    mu_p = partner_mu[p * B:(p + 1) * B]
                     if not mu_p.isfinite().all():
                         continue  # skip corrupted partner, don't crash
+
+                    z_p = z_all[B + p * B: B + (p + 1) * B]
+                    det_p = batch[f"detection_label_p{p}"][avail].to(self.device)
+                    typ_p = batch[f"vehicle_type_p{p}"][avail].to(self.device)
 
                     _, _, _, z_env_p, _ = self.model.latent.split(z_p)
 
@@ -350,18 +361,16 @@ class Trainer:
                     interv  = interv + F.binary_cross_entropy_with_logits(logits, targets)
                     pres_changed_sum += targets[:, 0].mean().item()
                     type_changed_sum += targets[:, 1].mean().item()
+                    n_valid += 1
 
-                if n_partners > 0:
-                    interv = interv / n_partners
-                    pres_changed_total += pres_changed_sum / n_partners
-                    type_changed_total += type_changed_sum / n_partners
+                if n_valid > 0:
+                    interv = interv / n_valid
+                    pres_changed_total += pres_changed_sum / n_valid
+                    type_changed_total += type_changed_sum / n_valid
 
             # ---- Auxiliary supervision (anchor only) ----
             aux_pres = aux_type = aux_prox = torch.tensor(0.0, device=self.device)
             if use_aux:
-                det_t_lbl = batch["detection_label_t"][avail].to(self.device)
-                typ_t_lbl = batch["vehicle_type_t"][avail].to(self.device)
-
                 if not getattr(self, '_lc_rate_logged', False):
                     # Log label-change rate from the consecutive partner (p=0)
                     if n_partners > 0:
