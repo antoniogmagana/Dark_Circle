@@ -70,3 +70,30 @@ def test_save_cache_creates_files(tmp_path):
     assert (slot / "index.pkl").exists()
     assert (slot / "groups.pkl").exists()
     assert (slot / "segment_id_map.pkl").exists()
+
+
+def test_roundtrip_cache(tmp_path):
+    from crl_vehicle.data.dataset import _save_cache, _load_cache
+    cache, index, groups, sim, sc = _make_minimal_cache(tmp_path)
+    cache_dir = tmp_path / "cache"
+    _save_cache(cache_dir, "abc123", cache, index, groups, sim, sc)
+
+    loaded_cache, loaded_index, loaded_groups, loaded_sim, loaded_sc = \
+        _load_cache(cache_dir, "abc123")
+
+    orig = cache["audio"][("stem_a", None)]["data"]
+    loaded = loaded_cache["audio"][("stem_a", None)]["data"]
+    np.testing.assert_array_equal(orig, loaded)
+
+    assert loaded_index == index
+    assert loaded_groups == groups
+    assert loaded_sim == sim
+    assert loaded_sc == sc
+
+
+def test_load_cache_returns_none_for_missing_key(tmp_path):
+    from crl_vehicle.data.dataset import _load_cache
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    result = _load_cache(cache_dir, "missing")
+    assert result is None

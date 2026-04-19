@@ -156,6 +156,45 @@ def _save_cache(
         pickle.dump({"map": segment_id_map, "counter": seg_counter}, f)
 
 
+def _load_cache(cache_dir: Path, cache_key: str):
+    """
+    Returns (sensor_cache, index, groups, segment_id_map, seg_counter)
+    or None if the cache slot does not exist.
+    """
+    slot = cache_dir / cache_key
+    if not slot.exists():
+        return None
+
+    try:
+        sensor_cache = {"audio": {}, "seismic": {}}
+        for sensor in ("audio", "seismic"):
+            arr = np.load(slot / f"{sensor}.npy", mmap_mode="r")  # (N, max_len)
+            with open(slot / f"{sensor}_meta.pkl", "rb") as f:
+                meta = pickle.load(f)
+            for row_idx, m in enumerate(meta):
+                L = m["true_len"]
+                data_view = arr[row_idx:row_idx + 1, :L]  # zero-copy (1, L) view
+                sensor_cache[sensor][(m["stem"], m["seg_key"])] = {
+                    "data":      data_view,
+                    "present":   m["present"],
+                    "native_sr": m["native_sr"],
+                    "target_sr": m["target_sr"],
+                }
+
+        with open(slot / "index.pkl", "rb") as f:
+            index = pickle.load(f)
+        with open(slot / "groups.pkl", "rb") as f:
+            groups = pickle.load(f)
+        with open(slot / "segment_id_map.pkl", "rb") as f:
+            sid = pickle.load(f)
+
+        return sensor_cache, index, groups, sid["map"], sid["counter"]
+
+    except Exception as e:
+        print(f"  Warning: disk cache load failed ({e}), rebuilding.")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Filename parsing
 # ---------------------------------------------------------------------------
