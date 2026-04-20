@@ -210,7 +210,7 @@ class SensorDataset(Dataset):
 
             if a_file:
                 df = pd.read_parquet(a_file)
-                data = df.values.astype(np.float32)   # (n_windows, W)
+                data = df.select_dtypes(include=[np.number]).values.astype(np.float32)
                 self._cache["audio"][(audio_stem, None)] = {
                     "data": data, "n_windows": len(data)
                 }
@@ -220,7 +220,7 @@ class SensorDataset(Dataset):
 
             if s_file:
                 df = pd.read_parquet(s_file)
-                data = df.values.astype(np.float32)
+                data = df.select_dtypes(include=[np.number]).values.astype(np.float32)
                 self._cache["seismic"][(seismic_stem, None)] = {
                     "data": data, "n_windows": len(data)
                 }
