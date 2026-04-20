@@ -19,8 +19,8 @@ from training.trainer import CRLModel, Trainer
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train CRL model")
     p.add_argument("--phase", choices=["crl", "downstream", "full"], default="full")
-    p.add_argument("--data-dir", required=True, help="Training parquet directory", default="../data_files/parsed/train/")
-    p.add_argument("--val-dir",  required=True, help="Validation parquet directory", default="../data_files/parsed/val/")
+    p.add_argument("--data-dir", help="Training parquet directory", default="../data_files/parsed/train/")
+    p.add_argument("--val-dir", help="Validation parquet directory", default="../data_files/parsed/val/")
     p.add_argument("--sensors", nargs="+", default=["audio", "seismic"])
     p.add_argument("--crl-epochs",  type=int, default=100)
     p.add_argument("--ds-epochs",   type=int, default=50)
