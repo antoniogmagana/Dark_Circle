@@ -3,8 +3,46 @@ from dataclasses import dataclass
 
 LABEL_BACKGROUND = -1
 LABEL_MULTI = -2
-CATEGORY_TO_IDX = {"pedestrian": 0, "light": 1, "sport": 2, "utility": 3}
+CATEGORY_TO_IDX = {"pedestrian": 0, "light": 1, "medium": 2, "heavy": 3}
 
+DATASET_VEHICLE_MAP = {
+    "iobt": {
+        "polaris0150pm": ["light", "polaris"],
+        "polaris0215pm": ["light", "polaris"],
+        "polaris0235pm_nolineofsig": ["light", "polaris"],
+        "warhog1135am": ["light", "warhog"],
+        "warhog1149am": ["light", "warhog"],
+        "warhog_nolineofsight": ["light", "warhog"],
+        "silverado0255pm": ["heavy", "pickup"],
+        "silverado0315pm": ["heavy", "pickup"],
+    },
+    "focal": {
+        "walk": ["pedestrian", "walk"],
+        "walk2": ["pedestrian", "walk"],
+        "bicycle": ["pedestrian", "bicycle"],
+        "bicycle2": ["pedestrian", "bicycle"],
+        "motor": ["light", "motorcycle"],
+        "motor2": ["light", "motorcycle"],
+        "scooter": ["light", "scooter"],
+        "scooter2": ["light", "scooter"],
+        "forester": ["medium", "forester"],
+        "forester2": ["medium", "forester"],
+        "mustang": ["medium", "mustang"],
+        "mustang0528": ["medium", "mustang"],
+        "mustang2": ["medium", "mustang"],
+        "pickup": ["heavy", "pickup"],
+        "pickup2": ["heavy", "pickup"],
+        "tesla": ["heavy", "tesla"],
+        "tesla2": ["heavy", "tesla"],
+    },
+    "m3nvc": {
+        "background": ["background", "background"],
+        "cx30": ["medium", "cx30"],
+        "miata": ["medium", "miata"],
+        "mustang": ["medium", "mustang"],
+        "gle350": ["heavy", "gle350"],
+    },
+}
 
 @dataclass
 class ModalityConfig:

@@ -183,6 +183,66 @@ class CRLModel(nn.Module):
         for group in [self.pres_heads, self.type_heads, self.prox_heads]:
             yield from group.parameters()
 
+    def _finetune_params(self, top_n: int) -> list[nn.Parameter]:
+        """Return backbone parameters to unfreeze for fine-tuning.
+
+        top_n == -1: entire backbone.
+        top_n >= 1:  top N transformer layers + mu/lv projection heads.
+        """
+        if top_n == -1:
+            return list(self.backbone_parameters())
+
+        params: list[nn.Parameter] = []
+        if self.cfg.frontend_type == "multiscale":
+            enc = self.encoder
+            layers = list(enc.transformer.layers)
+            for layer in layers[-top_n:]:
+                params += list(layer.parameters())
+            params += list(enc.mu_head.parameters())
+            params += list(enc.lv_head.parameters())
+        else:
+            for enc in self.encoders.values():
+                layers = list(enc.transformer.layers)
+                for layer in layers[-top_n:]:
+                    params += list(layer.parameters())
+                params += list(enc.mu_head.parameters())
+                params += list(enc.lv_head.parameters())
+        return params
+
+
+# ---------------------------------------------------------------------------
+# Metric helpers
+# ---------------------------------------------------------------------------
+
+def _binary_f1_acc(logits: torch.Tensor, labels: torch.Tensor) -> tuple[float, float]:
+    """Binary F1 and accuracy from raw logits and {0,1} labels."""
+    if logits.numel() == 0:
+        return 0.0, 0.0
+    preds = (logits > 0).long()
+    tp = ((preds == 1) & (labels == 1)).sum().item()
+    fp = ((preds == 1) & (labels == 0)).sum().item()
+    fn = ((preds == 0) & (labels == 1)).sum().item()
+    f1  = (2 * tp) / max(2 * tp + fp + fn, 1)
+    acc = (preds == labels).float().mean().item()
+    return f1, acc
+
+
+def _macro_f1_acc(
+    logits: torch.Tensor, labels: torch.Tensor, n_classes: int
+) -> tuple[float, float]:
+    """Macro-averaged F1 and accuracy from class logits and integer labels."""
+    if logits.numel() == 0:
+        return 0.0, 0.0
+    preds = logits.argmax(dim=-1)
+    acc   = (preds == labels).float().mean().item()
+    f1_sum = 0.0
+    for c in range(n_classes):
+        tp = ((preds == c) & (labels == c)).sum().item()
+        fp = ((preds == c) & (labels != c)).sum().item()
+        fn = ((preds != c) & (labels == c)).sum().item()
+        f1_sum += (2 * tp) / max(2 * tp + fp + fn, 1)
+    return f1_sum / n_classes, acc
+
 
 # ---------------------------------------------------------------------------
 # Trainer
@@ -205,6 +265,8 @@ class Trainer:
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
         self.beta = 0.0
+        self._pres_pos_weight:    torch.Tensor | None = None
+        self._type_class_weights: torch.Tensor | None = None
         self.prev_val_recon = float("inf")
 
         self.optimizer = torch.optim.AdamW(
@@ -494,22 +556,47 @@ class Trainer:
         train_loader: DataLoader,
         val_loader: DataLoader,
         epochs: int,
+        pres_pos_weight: torch.Tensor | None = None,
+        type_class_weights: torch.Tensor | None = None,
+        finetune_top_n: int = 0,
     ) -> None:
-        # Load best CRL backbone if available
+        """Train downstream heads on frozen (or partially unfrozen) CRL backbone.
+
+        Args:
+            pres_pos_weight:    BCEWithLogitsLoss pos_weight for presence head.
+            type_class_weights: CrossEntropyLoss weight tensor for type head.
+            finetune_top_n:     0  = fully frozen backbone (heads only).
+                                N  = unfreeze top N transformer layers + mu/lv heads at 0.1x lr.
+                                -1 = unfreeze entire backbone at 0.1x lr.
+        """
         best_path = self.save_dir / "crl_best.pth"
         if best_path.exists():
             self.model.load_state_dict(torch.load(best_path, map_location=self.device))
 
-        # Freeze backbone
+        # Freeze everything, then selectively unfreeze
         for p in self.model.parameters():
             p.requires_grad_(False)
         for p in self.model.head_parameters():
             p.requires_grad_(True)
 
-        head_opt = torch.optim.AdamW(self.model.head_parameters(), lr=self.cfg.lr)
+        backbone_params: list[nn.Parameter] = []
+        if finetune_top_n != 0:
+            backbone_params = self._finetune_params(finetune_top_n)
+            for p in backbone_params:
+                p.requires_grad_(True)
+
+        param_groups = [{"params": list(self.model.head_parameters()), "lr": self.cfg.lr}]
+        if backbone_params:
+            param_groups.append({"params": backbone_params, "lr": self.cfg.lr * 0.1})
+
+        head_opt = torch.optim.AdamW(param_groups)
+        self._pres_pos_weight    = pres_pos_weight
+        self._type_class_weights = type_class_weights
+
         csv_path = self.save_dir / "downstream_metrics.csv"
         csv_file: IO | None = None
         csv_writer: csv.DictWriter | None = None
+        best_val_loss = float("inf")
 
         try:
             for epoch in range(epochs):
@@ -518,7 +605,7 @@ class Trainer:
                 n = 0
                 for batch in train_loader:
                     head_opt.zero_grad()
-                    loss = self._downstream_loss(batch)
+                    loss, _ = self._downstream_forward(batch)
                     loss.backward()
                     head_opt.step()
                     train_loss += loss.item()
@@ -527,15 +614,39 @@ class Trainer:
                 self.model.eval()
                 val_loss = 0.0
                 m = 0
+                pres_logits_all: list[torch.Tensor] = []
+                pres_labels_all: list[torch.Tensor] = []
+                type_logits_all: list[torch.Tensor] = []
+                type_labels_all: list[torch.Tensor] = []
                 with torch.no_grad():
                     for batch in val_loader:
-                        val_loss += self._downstream_loss(batch).item()
+                        loss, outputs = self._downstream_forward(batch)
+                        val_loss += loss.item()
                         m += 1
+                        pres_logits_all.append(outputs["pres_logits"].cpu())
+                        pres_labels_all.append(outputs["pres_labels"].cpu())
+                        if outputs["type_logits"] is not None:
+                            type_logits_all.append(outputs["type_logits"].cpu())
+                            type_labels_all.append(outputs["type_labels"].cpu())
 
+                pres_f1, pres_acc = _binary_f1_acc(
+                    torch.cat(pres_logits_all), torch.cat(pres_labels_all)
+                )
+                type_f1 = type_acc = 0.0
+                if type_logits_all:
+                    type_f1, type_acc = _macro_f1_acc(
+                        torch.cat(type_logits_all), torch.cat(type_labels_all), n_classes=4
+                    )
+
+                avg_val = val_loss / max(m, 1)
                 row = {
-                    "epoch":      epoch,
-                    "train_loss": train_loss / max(n, 1),
-                    "val_loss":   val_loss   / max(m, 1),
+                    "epoch":        epoch,
+                    "train_loss":   train_loss / max(n, 1),
+                    "val_loss":     avg_val,
+                    "val_pres_f1":  round(pres_f1,  4),
+                    "val_pres_acc": round(pres_acc,  4),
+                    "val_type_f1":  round(type_f1,  4),
+                    "val_type_acc": round(type_acc,  4),
                 }
                 if csv_writer is None:
                     csv_file = open(csv_path, "w", newline="")
@@ -544,20 +655,44 @@ class Trainer:
                 csv_writer.writerow(row)
                 csv_file.flush()
 
-                print(f"DS Epoch {epoch:3d} | train_loss={row['train_loss']:.4f} val_loss={row['val_loss']:.4f}")
+                if avg_val < best_val_loss:
+                    best_val_loss = avg_val
+                    torch.save(self.model.state_dict(), self.save_dir / "downstream_best.pth")
+
+                print(
+                    f"DS Epoch {epoch:3d} | train_loss={row['train_loss']:.4f} "
+                    f"val_loss={avg_val:.4f} "
+                    f"pres_f1={pres_f1:.3f} type_f1={type_f1:.3f}"
+                )
         finally:
             if csv_file is not None:
                 csv_file.close()
+            self._pres_pos_weight    = None
+            self._type_class_weights = None
 
-        # Unfreeze
         for p in self.model.parameters():
             p.requires_grad_(True)
 
-    def _downstream_loss(self, batch: dict) -> torch.Tensor:
+    def _downstream_forward(
+        self, batch: dict
+    ) -> tuple[torch.Tensor, dict]:
+        """Return (loss, {pres_logits, pres_labels, type_logits, type_labels}).
+
+        type_logits/type_labels are None when no valid-type samples exist in batch.
+        Logits returned on the same device as model; accumulate on CPU for epoch metrics.
+        """
         model = self.model
         dev   = self.device
         total = torch.tensor(0.0, device=dev)
         n = 0
+
+        pres_logits_list: list[torch.Tensor] = []
+        pres_labels_list: list[torch.Tensor] = []
+        type_logits_list: list[torch.Tensor] = []
+        type_labels_list: list[torch.Tensor] = []
+
+        ppw = self._pres_pos_weight
+        tcw = self._type_class_weights
 
         if self.cfg.frontend_type == "multiscale":
             avail = batch["audio_avail"].bool() & batch["seismic_avail"].bool()
@@ -568,14 +703,18 @@ class Trainer:
                 z_pres, z_type, _, _, _ = model.latent.split(z)
                 det   = batch["detection_label"][avail].float().to(dev)
                 vtype = batch["vehicle_type"][avail].to(dev)
+                pres_logit = model.pres_heads["fused"](z_pres).squeeze(-1)
                 total = total + torch.nn.functional.binary_cross_entropy_with_logits(
-                    model.pres_heads["fused"](z_pres).squeeze(-1), det
-                )
+                    pres_logit, det, pos_weight=ppw)
+                pres_logits_list.append(pres_logit.detach())
+                pres_labels_list.append(det.long())
                 valid = vtype >= 0
                 if valid.any():
+                    type_logit = model.type_heads["fused"](z_type[valid])
                     total = total + torch.nn.functional.cross_entropy(
-                        model.type_heads["fused"](z_type[valid]), vtype[valid]
-                    )
+                        type_logit, vtype[valid], weight=tcw)
+                    type_logits_list.append(type_logit.detach())
+                    type_labels_list.append(vtype[valid])
                 n += 1
         else:
             for sensor in model.sensors:
@@ -587,15 +726,25 @@ class Trainer:
                 z_pres, z_type, _, _, _ = model.latent.split(z)
                 det   = batch["detection_label"][avail].float().to(dev)
                 vtype = batch["vehicle_type"][avail].to(dev)
+                pres_logit = model.pres_heads[sensor](z_pres).squeeze(-1)
                 total = total + torch.nn.functional.binary_cross_entropy_with_logits(
-                    model.pres_heads[sensor](z_pres).squeeze(-1), det
-                )
+                    pres_logit, det, pos_weight=ppw)
+                pres_logits_list.append(pres_logit.detach())
+                pres_labels_list.append(det.long())
                 valid = vtype >= 0
                 if valid.any():
+                    type_logit = model.type_heads[sensor](z_type[valid])
                     total = total + torch.nn.functional.cross_entropy(
-                        model.type_heads[sensor](z_type[valid]), vtype[valid]
-                    )
+                        type_logit, vtype[valid], weight=tcw)
+                    type_logits_list.append(type_logit.detach())
+                    type_labels_list.append(vtype[valid])
                 n += 1
 
-        return total / max(n, 1)
+        outputs = {
+            "pres_logits": torch.cat(pres_logits_list) if pres_logits_list else torch.empty(0, device=dev),
+            "pres_labels": torch.cat(pres_labels_list) if pres_labels_list else torch.empty(0, dtype=torch.long, device=dev),
+            "type_logits": torch.cat(type_logits_list) if type_logits_list else None,
+            "type_labels": torch.cat(type_labels_list) if type_labels_list else None,
+        }
+        return total / max(n, 1), outputs
 

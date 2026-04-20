@@ -11,7 +11,7 @@ import torch
 from torch.utils.data import Dataset
 
 from crl_vehicle.config import (
-    CRLConfig, LABEL_BACKGROUND, LABEL_MULTI, CATEGORY_TO_IDX
+    CRLConfig, LABEL_BACKGROUND, LABEL_MULTI, CATEGORY_TO_IDX, DATASET_VEHICLE_MAP
 )
 from crl_vehicle.data.transforms import remove_dc, apply_intervention, N_INTERVENTIONS
 
@@ -26,46 +26,29 @@ _KNOWN_DATASETS = {"iobt", "focal", "m3nvc"}
 
 # Vehicle name → (vehicle_type_idx, is_valid)
 # vehicle_type_idx follows CATEGORY_TO_IDX; background/multi use LABEL_* constants
-_VEHICLE_REGISTRY: dict[str, tuple[int, bool]] = {}
-
-
-def _build_vehicle_registry() -> dict[str, tuple[int, bool]]:
-    """Build a lookup from vehicle stem → (label_idx, is_valid).
-    Vehicles not in this registry are invalid and excluded from training."""
-    reg: dict[str, tuple[int, bool]] = {}
-    # iobt vehicles
-    for name in ["polaris0150pm", "polaris0255pm", "polaris0075pm"]:
-        reg[name] = (CATEGORY_TO_IDX["light"], True)
-    for name in ["silverado0255pm", "silverado0150pm", "silverado0075pm",
-                 "ram0255pm", "ram0150pm", "ram0075pm",
-                 "f2500255pm", "f250150pm", "f250075pm"]:
-        reg[name] = (CATEGORY_TO_IDX["utility"], True)
-    for name in ["camaro0255pm", "camaro0150pm", "camaro0075pm",
-                 "mustang0255pm", "mustang0150pm", "mustang0075pm"]:
-        reg[name] = (CATEGORY_TO_IDX["sport"], True)
-    for name in ["pedestrian0255pm", "pedestrian0150pm", "pedestrian0075pm",
-                 "pedestrian"]:
-        reg[name] = (CATEGORY_TO_IDX["pedestrian"], True)
-    # focal vehicles
-    for name in ["motor", "sedan", "suv", "pickup"]:
-        reg[name] = (CATEGORY_TO_IDX["light"], True)
-    # m3nvc: background and multi-vehicle
-    reg["background"] = (LABEL_BACKGROUND, True)
-    return reg
-
-
-_VEHICLE_REGISTRY = _build_vehicle_registry()
-
-
 def _vehicle_to_labels(dataset: str, vehicle: str) -> tuple[int, bool]:
-    """Return (vehicle_type_idx, is_valid) for a (dataset, vehicle) pair."""
+    """Return (vehicle_type_idx, is_valid) for a (dataset, vehicle) pair.
+
+    Looks up DATASET_VEHICLE_MAP[dataset][vehicle]. Multi-vehicle stems
+    (containing '_' in m3nvc) are excluded. Unknown dataset/vehicle pairs
+    are excluded.
+    """
     if dataset == "m3nvc":
-        if "_" in vehicle:  # multi-vehicle: e.g., cx30_miata
-            return LABEL_MULTI, True
-        return LABEL_BACKGROUND, True
-    if vehicle in _VEHICLE_REGISTRY:
-        return _VEHICLE_REGISTRY[vehicle]
-    return -99, False
+        if "_" in vehicle:  # multi-vehicle compound stem — excluded
+            return LABEL_MULTI, False
+        if vehicle == "background":
+            return LABEL_BACKGROUND, True
+        ds_map = DATASET_VEHICLE_MAP.get("m3nvc", {})
+        entry = ds_map.get(vehicle)
+        if entry is None:
+            return -99, False
+        return CATEGORY_TO_IDX[entry[0]], True
+
+    ds_map = DATASET_VEHICLE_MAP.get(dataset, {})
+    entry = ds_map.get(vehicle)
+    if entry is None:
+        return -99, False
+    return CATEGORY_TO_IDX[entry[0]], True
 
 
 def _read_parquet_numpy(path: Path, window_size: int) -> np.ndarray:
@@ -475,6 +458,40 @@ def collate_single(batch: list[dict]) -> dict:
         else:
             out[key] = torch.tensor(vals)
     return out
+
+
+def compute_class_weights(ds: SensorDataset) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute class weights from the dataset index without iterating the dataloader.
+
+    Returns:
+        pres_pos_weight: scalar tensor for BCEWithLogitsLoss pos_weight (n_neg / n_pos)
+        type_weights:    (4,) tensor for CrossEntropyLoss weight (inverse freq, normalised)
+    """
+    from crl_vehicle.config import CATEGORY_TO_IDX
+    n_classes = len(CATEGORY_TO_IDX)
+
+    n_pos = n_neg = 0
+    type_counts = [0] * n_classes
+
+    for _, _, vtype, det_label, _, _ in ds._index:
+        if det_label == 1:
+            n_pos += 1
+        else:
+            n_neg += 1
+        if 0 <= vtype < n_classes:
+            type_counts[vtype] += 1
+
+    pres_pos_weight = torch.tensor(n_neg / max(n_pos, 1), dtype=torch.float32)
+
+    total_typed = sum(type_counts)
+    if total_typed == 0:
+        type_weights = torch.ones(n_classes, dtype=torch.float32)
+    else:
+        inv_freq = [total_typed / max(c, 1) for c in type_counts]
+        s = sum(inv_freq)
+        type_weights = torch.tensor([v / s * n_classes for v in inv_freq], dtype=torch.float32)
+
+    return pres_pos_weight, type_weights
 
 
 def collate_pairs(batch: list[dict]) -> dict:
