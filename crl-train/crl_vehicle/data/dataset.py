@@ -63,6 +63,20 @@ def _read_parquet_numpy(path: Path, window_size: int) -> np.ndarray:
     return arr[: n_windows * window_size].reshape(n_windows, window_size)
 
 
+def _read_parquet_present(path: Path, window_size: int) -> np.ndarray:
+    """Read the 'present' boolean column → per-window majority vote.
+
+    Returns bool array of shape (N_windows,). A window is True iff strictly
+    more than 50% of its samples have present=True. Same truncation contract
+    as _read_parquet_numpy so indices are always aligned.
+    """
+    col = pq.read_table(path, columns=["present"], use_threads=True)
+    arr = col.column("present").to_numpy()
+    n_windows = len(arr) // window_size
+    arr = arr[: n_windows * window_size].reshape(n_windows, window_size)
+    return arr.mean(axis=1) > 0.5
+
+
 def _parse_stem(stem: str, sensor: str) -> tuple[str, str, str] | None:
     """Parse '{dataset}_{sensor}_{vehicle}_{rs}' → (dataset, vehicle, rs_node) or None."""
     parts = stem.split("_")
@@ -168,6 +182,8 @@ class SensorDataset(Dataset):
 
             audio_nw = seismic_nw = 0
             audio_seg_id = seismic_seg_id = seg_id
+            audio_present_per_window: np.ndarray | None = None
+            seismic_present_per_window: np.ndarray | None = None
 
             if a_file:
                 W_a = self.cfg.modality_cfg("audio").window_size
@@ -177,6 +193,7 @@ class SensorDataset(Dataset):
                 }
                 seg_id += 1
                 audio_seg_id = seg_id
+                audio_present_per_window = _read_parquet_present(a_file, W_a)
 
             if s_file:
                 W_s = self.cfg.modality_cfg("seismic").window_size
@@ -186,10 +203,23 @@ class SensorDataset(Dataset):
                 }
                 seg_id += 1
                 seismic_seg_id = seg_id
+                seismic_present_per_window = _read_parquet_present(s_file, W_s)
 
             n_windows = min(audio_nw, seismic_nw) if audio_nw and seismic_nw else (audio_nw or seismic_nw)
             if n_windows == 0:
                 continue
+
+            # Build combined per-window presence using OR rule, sliced to n_windows
+            if audio_present_per_window is not None and seismic_present_per_window is not None:
+                combined_present = (
+                    audio_present_per_window[:n_windows] | seismic_present_per_window[:n_windows]
+                )
+            elif audio_present_per_window is not None:
+                combined_present = audio_present_per_window[:n_windows]
+            elif seismic_present_per_window is not None:
+                combined_present = seismic_present_per_window[:n_windows]
+            else:
+                combined_present = np.ones(n_windows, dtype=bool)
 
             self._groups[gkey] = {
                 "audio_stem":    audio_stem,
@@ -203,7 +233,11 @@ class SensorDataset(Dataset):
             }
 
             for w in range(n_windows):
-                self._index.append((gkey, w, vtype, det_label, audio_seg_id, seismic_seg_id))
+                if combined_present[w]:
+                    w_vtype, w_det_label = vtype, det_label
+                else:
+                    w_vtype, w_det_label = LABEL_BACKGROUND, 0
+                self._index.append((gkey, w, w_vtype, w_det_label, audio_seg_id, seismic_seg_id))
 
     def _preload_shared(self, cache_dir: Path | None) -> None:
         """Load every file into a shared-memory tensor before workers are forked.
@@ -225,23 +259,31 @@ class SensorDataset(Dataset):
                 src     = entry["path"]
                 pt_path = (cache_dir / f"{stem}.pt") if cache_dir else None
 
-                data: torch.Tensor | None = None
+                data_dict: dict | None = None
 
                 # Try loading from disk cache
                 if pt_path is not None and pt_path.exists():
                     if pt_path.stat().st_mtime >= src.stat().st_mtime:
-                        data = torch.load(pt_path, weights_only=True)
+                        loaded = torch.load(pt_path, weights_only=True)
+                        if isinstance(loaded, torch.Tensor):
+                            loaded = None  # old bare-tensor format — force re-read
+                        data_dict = loaded
 
-                if data is None:
+                if data_dict is None:
                     arr = _read_parquet_numpy(src, W)
-                    data = torch.from_numpy(arr.copy())  # owns its memory before sharing
+                    pres_arr = _read_parquet_present(src, W)
+                    data_dict = {
+                        "amplitude": torch.from_numpy(arr.copy()),
+                        "present":   torch.from_numpy(pres_arr.copy()),
+                    }
                     if pt_path is not None:
                         tmp = pt_path.with_suffix(".tmp")
-                        torch.save(data, tmp)
+                        torch.save(data_dict, tmp)
                         tmp.rename(pt_path)  # atomic on POSIX
 
-                data.share_memory_()
-                self._data_cache[sensor][cache_key] = data
+                data_dict["amplitude"].share_memory_()
+                data_dict["present"].share_memory_()
+                self._data_cache[sensor][cache_key] = data_dict
 
     # ------------------------------------------------------------------
     # Window loading
@@ -252,12 +294,12 @@ class SensorDataset(Dataset):
     ) -> torch.Tensor:
         mc = self.cfg.modality_cfg(sensor)
         cache_key = (stem, seg_key)
-        data = self._data_cache[sensor].get(cache_key)
+        data_dict = self._data_cache[sensor].get(cache_key)
 
-        if data is None or w >= len(data):
+        if data_dict is None or w >= len(data_dict["amplitude"]):
             return torch.zeros(1, mc.window_size)
 
-        x = data[w].unsqueeze(0).clone()  # clone: don't write into shared pages
+        x = data_dict["amplitude"][w].unsqueeze(0).clone()  # clone: don't write into shared pages
         x = remove_dc(x)
         if interv_idx > 0:
             x = apply_intervention(x, interv_idx, mc.sample_rate)

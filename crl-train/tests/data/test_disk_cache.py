@@ -1,16 +1,25 @@
 # tests/data/test_disk_cache.py
-"""Tests for SensorDataset parquet loading (no disk cache)."""
+"""Tests for parquet helpers and SensorDataset disk-cache logic."""
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from crl_vehicle.config import CRLConfig
-from crl_vehicle.data.dataset import SensorDataset, _read_parquet_numpy
+import torch
+
+from crl_vehicle.data.dataset import _read_parquet_numpy, _read_parquet_present
 
 
-def _write_dummy_parquet(path: Path, n_rows: int = 4, n_cols: int = 10) -> None:
-    df = pd.DataFrame(np.random.rand(n_rows, n_cols).astype("float32"))
-    df.to_parquet(path)
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _write_parquet(path: Path, amplitude: np.ndarray, present: np.ndarray) -> None:
+    """Write a parquet file with 'amplitude' (float32) and 'present' (bool) columns."""
+    df = pd.DataFrame({
+        "amplitude": amplitude.astype("float32"),
+        "present":   present.astype(bool),
+    })
+    df.to_parquet(path, index=False)
 
 
 # ---------------------------------------------------------------------------
@@ -19,88 +28,168 @@ def _write_dummy_parquet(path: Path, n_rows: int = 4, n_cols: int = 10) -> None:
 
 def test_read_parquet_numpy_shape(tmp_path):
     p = tmp_path / "test.parquet"
-    _write_dummy_parquet(p, n_rows=5, n_cols=8)
-    arr = _read_parquet_numpy(p)
-    assert arr.shape == (5, 8)
+    n_windows, window_size = 5, 8
+    amp = np.arange(n_windows * window_size, dtype="float32")
+    _write_parquet(p, amp, np.ones(len(amp), dtype=bool))
+    arr = _read_parquet_numpy(p, window_size)
+    assert arr.shape == (n_windows, window_size)
     assert arr.dtype == np.float32
+
+
+def test_read_parquet_numpy_truncates_remainder(tmp_path):
+    p = tmp_path / "test.parquet"
+    window_size = 4
+    amp = np.arange(11, dtype="float32")  # 2 full windows + 3 leftover
+    _write_parquet(p, amp, np.ones(len(amp), dtype=bool))
+    arr = _read_parquet_numpy(p, window_size)
+    assert arr.shape == (2, window_size)
 
 
 def test_read_parquet_numpy_values(tmp_path):
     p = tmp_path / "test.parquet"
-    data = np.arange(12, dtype="float32").reshape(3, 4)
-    pd.DataFrame(data).to_parquet(p)
-    arr = _read_parquet_numpy(p)
-    np.testing.assert_array_equal(arr, data)
-
-
-def test_read_parquet_numpy_drops_string_cols(tmp_path):
-    p = tmp_path / "mixed.parquet"
-    df = pd.DataFrame({"a": [1.0, 2.0], "b": ["x", "y"], "c": [3.0, 4.0]})
-    df.to_parquet(p)
-    arr = _read_parquet_numpy(p)
-    assert arr.shape == (2, 2)
-    assert arr.dtype == np.float32
+    window_size = 4
+    amp = np.arange(8, dtype="float32")
+    _write_parquet(p, amp, np.ones(len(amp), dtype=bool))
+    arr = _read_parquet_numpy(p, window_size)
+    np.testing.assert_array_equal(arr[0], [0, 1, 2, 3])
+    np.testing.assert_array_equal(arr[1], [4, 5, 6, 7])
 
 
 # ---------------------------------------------------------------------------
-# SensorDataset raises on empty directory
+# _read_parquet_present
 # ---------------------------------------------------------------------------
 
-def test_sensor_dataset_raises_on_empty_dir(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        SensorDataset(str(tmp_path), CRLConfig())
+def test_read_parquet_present_shape(tmp_path):
+    p = tmp_path / "test.parquet"
+    window_size = 4
+    amp = np.zeros(12, dtype="float32")
+    pres = np.ones(12, dtype=bool)
+    _write_parquet(p, amp, pres)
+    arr = _read_parquet_present(p, window_size)
+    assert arr.shape == (3,)
+    assert arr.dtype == bool
+
+
+def test_read_parquet_present_all_true(tmp_path):
+    p = tmp_path / "test.parquet"
+    window_size = 4
+    _write_parquet(p, np.zeros(8, dtype="float32"), np.ones(8, dtype=bool))
+    arr = _read_parquet_present(p, window_size)
+    assert arr.all()
+
+
+def test_read_parquet_present_all_false(tmp_path):
+    p = tmp_path / "test.parquet"
+    window_size = 4
+    _write_parquet(p, np.zeros(8, dtype="float32"), np.zeros(8, dtype=bool))
+    arr = _read_parquet_present(p, window_size)
+    assert not arr.any()
+
+
+def test_read_parquet_present_majority_strict(tmp_path):
+    """Exactly 50% True → False (strict >0.5 rule)."""
+    p = tmp_path / "test.parquet"
+    window_size = 4
+    # Window 0: [T, T, F, F] → mean=0.5, not >0.5 → False
+    # Window 1: [T, T, T, F] → mean=0.75, >0.5 → True
+    pres = np.array([True, True, False, False, True, True, True, False])
+    _write_parquet(p, np.zeros(8, dtype="float32"), pres)
+    arr = _read_parquet_present(p, window_size)
+    assert arr.shape == (2,)
+    assert arr[0] == False
+    assert arr[1] == True
+
+
+def test_read_parquet_present_truncates_remainder(tmp_path):
+    p = tmp_path / "test.parquet"
+    window_size = 4
+    pres = np.ones(11, dtype=bool)  # 2 full windows + 3 leftover
+    _write_parquet(p, np.zeros(11, dtype="float32"), pres)
+    arr = _read_parquet_present(p, window_size)
+    assert arr.shape == (2,)
 
 
 # ---------------------------------------------------------------------------
-# SensorDataset loads parquet without cache_dir
+# _read_parquet_numpy and _read_parquet_present have identical n_windows
 # ---------------------------------------------------------------------------
 
-def test_sensor_dataset_loads_without_cache(tmp_path, monkeypatch):
+def test_numpy_and_present_window_counts_match(tmp_path):
+    p = tmp_path / "test.parquet"
+    window_size = 5
+    n_samples = 23  # 4 complete windows, 3 leftover
+    _write_parquet(p, np.zeros(n_samples, dtype="float32"), np.ones(n_samples, dtype=bool))
+    amp_arr  = _read_parquet_numpy(p, window_size)
+    pres_arr = _read_parquet_present(p, window_size)
+    assert amp_arr.shape[0] == pres_arr.shape[0]
+
+
+# ---------------------------------------------------------------------------
+# _preload_shared: old bare-tensor cache is auto-detected and regenerated
+# ---------------------------------------------------------------------------
+
+def test_old_format_cache_regenerated(tmp_path):
+    """A bare Tensor .pt written by the old code is replaced with a dict on load."""
     import crl_vehicle.data.dataset as ds_mod
+    from crl_vehicle.config import CRLConfig
 
-    built = []
-
-    def fake_build(self, files):
-        self._cache = {
-            "audio":   {("stem_a", None): {"data": np.zeros((2, 16000), dtype="float32"), "n_windows": 2}},
-            "seismic": {("stem_s", None): {"data": np.zeros((2, 200),   dtype="float32"), "n_windows": 2}},
-        }
-        self._index  = []
-        self._groups = {}
-        built.append(True)
-
-    monkeypatch.setattr(ds_mod.SensorDataset, "_build_from_parquet", fake_build)
+    cfg = CRLConfig()
+    W_a = cfg.modality_cfg("audio").window_size
+    n_windows = 3
 
     parquet_dir = tmp_path / "parquet"
     parquet_dir.mkdir()
-    _write_dummy_parquet(parquet_dir / "iobt_audio_polaris0150pm_rs0.parquet")
+    cache_dir   = tmp_path / "cache"
+    cache_dir.mkdir()
 
-    ds_mod.SensorDataset(str(parquet_dir), CRLConfig())
-    assert len(built) == 1
+    amp  = np.zeros(n_windows * W_a, dtype="float32")
+    pres = np.ones(n_windows * W_a, dtype=bool)
+    pq_path = parquet_dir / "focal_audio_mustang_rs1.parquet"
+    _write_parquet(pq_path, amp, pres)
+
+    # Write old-format bare tensor cache (simulate pre-fix cache file)
+    stem    = "focal_audio_mustang_rs1"
+    pt_path = cache_dir / f"{stem}.pt"
+    old_tensor = torch.zeros(n_windows, W_a)
+    torch.save(old_tensor, pt_path)
+    # Make it appear newer than the parquet so mtime check passes
+    import os
+    os.utime(pt_path, (pq_path.stat().st_mtime + 10,) * 2)
+
+    ds = ds_mod.SensorDataset(str(parquet_dir), cfg, cache_dir=cache_dir)
+
+    # The cache should have been regenerated as a dict
+    new_loaded = torch.load(pt_path, weights_only=True)
+    assert isinstance(new_loaded, dict), "old bare-tensor cache was not regenerated as dict"
+    assert "amplitude" in new_loaded
+    assert "present"   in new_loaded
 
 
-def test_sensor_dataset_cache_dir_ignored(tmp_path, monkeypatch):
-    """Passing cache_dir no longer affects behaviour — build always runs."""
+def test_new_format_cache_loaded(tmp_path):
+    """A dict .pt written by the new code is loaded without re-reading parquet."""
     import crl_vehicle.data.dataset as ds_mod
+    from crl_vehicle.config import CRLConfig
 
-    built = []
-
-    def fake_build(self, files):
-        self._cache = {
-            "audio":   {("stem_a", None): {"data": np.zeros((1, 16000), dtype="float32"), "n_windows": 1}},
-            "seismic": {("stem_s", None): {"data": np.zeros((1, 200),   dtype="float32"), "n_windows": 1}},
-        }
-        self._index  = []
-        self._groups = {}
-        built.append(True)
-
-    monkeypatch.setattr(ds_mod.SensorDataset, "_build_from_parquet", fake_build)
+    cfg = CRLConfig()
+    W_a = cfg.modality_cfg("audio").window_size
+    n_windows = 2
 
     parquet_dir = tmp_path / "parquet"
     parquet_dir.mkdir()
-    _write_dummy_parquet(parquet_dir / "iobt_audio_polaris0150pm_rs0.parquet")
-    cache_dir = tmp_path / "cache"
+    cache_dir   = tmp_path / "cache"
+    cache_dir.mkdir()
 
-    ds_mod.SensorDataset(str(parquet_dir), CRLConfig(), cache_dir=cache_dir)
-    ds_mod.SensorDataset(str(parquet_dir), CRLConfig(), cache_dir=cache_dir)
-    assert len(built) == 2  # no caching — builds every time
+    amp  = np.zeros(n_windows * W_a, dtype="float32")
+    pres = np.ones(n_windows * W_a, dtype=bool)
+    pq_path = parquet_dir / "focal_audio_mustang_rs1.parquet"
+    _write_parquet(pq_path, amp, pres)
+
+    # First instantiation writes the new-format cache
+    ds_mod.SensorDataset(str(parquet_dir), cfg, cache_dir=cache_dir)
+
+    pt_path = cache_dir / "focal_audio_mustang_rs1.pt"
+    assert pt_path.exists()
+    loaded = torch.load(pt_path, weights_only=True)
+    assert isinstance(loaded, dict)
+    assert loaded["amplitude"].shape == (n_windows, W_a)
+    assert loaded["present"].shape   == (n_windows,)
+    assert loaded["present"].dtype   == torch.bool
