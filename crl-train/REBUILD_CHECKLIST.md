@@ -3,7 +3,7 @@
 This document tracks the ground-up rebuild of the Causal Representation Learning (CRL) pipeline, moving away from NOTEARS / learnable SCMs and towards CITRIS-style temporal intervention matching.
 
 ## Architecture Decisions
-* **Latent Space:** Fixed at 10 dimensions: presence (1), type (4), proximity (1), and noise (4).
+* **Latent Space:** presence, type, proximity, and noise.
 * **Causality Mechanism:** Interventional Matching using $t$ and $t+1$ temporal pairs to isolate changes in specific latent blocks.
 * **Modality Fusion:** 
   * *Early Fusion:* Multi-Scale 1D CNN frontend (captures transients and multiple frequencies natively).
