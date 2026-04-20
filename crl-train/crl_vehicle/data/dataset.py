@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -129,7 +130,14 @@ class SensorDataset(Dataset):
         self.parquet_dir = Path(parquet_dir)
         self.cfg = config
         self.is_train = is_train
+        # metadata store (path, n_windows); actual data arrays evicted via LRU
         self._cache: dict[str, dict] = {"audio": {}, "seismic": {}}
+        # LRU data cache: sensor → OrderedDict{(stem, seg_key) → np.ndarray}
+        # Capped at _CACHE_MAX_FILES entries per sensor to bound worker memory.
+        self._CACHE_MAX_FILES = 32
+        self._data_cache: dict[str, OrderedDict] = {
+            "audio": OrderedDict(), "seismic": OrderedDict()
+        }
         self._index: list = []   # [(gkey, w_idx, vtype, det_label, audio_seg_id, seismic_seg_id)]
         self._groups: dict = {}  # gkey → group metadata
 
@@ -227,9 +235,19 @@ class SensorDataset(Dataset):
         if entry is None:
             mc = self.cfg.modality_cfg(sensor)
             return torch.zeros(1, mc.window_size)
-        if "data" not in entry:
-            entry["data"] = _read_parquet_numpy(entry["path"])
-        data = entry["data"]
+
+        cache_key = (stem, seg_key)
+        lru = self._data_cache[sensor]
+        if cache_key not in lru:
+            data = _read_parquet_numpy(entry["path"])
+            lru[cache_key] = data
+            lru.move_to_end(cache_key)
+            if len(lru) > self._CACHE_MAX_FILES:
+                lru.popitem(last=False)  # evict least-recently-used
+        else:
+            lru.move_to_end(cache_key)
+        data = lru[cache_key]
+
         if w >= len(data):
             mc = self.cfg.modality_cfg(sensor)
             return torch.zeros(1, mc.window_size)
@@ -290,19 +308,14 @@ class StratifiedPairDataset(Dataset):
       audio_avail, seismic_avail,
       x_audio_p{p}, x_seismic_p{p}, detection_label_p{p}, vehicle_type_p{p},
       partner_stratum_p{p}   for p in 0..n_partners-1
+
+    Memory layout: shared lookup dicts are built once and sampled at __getitem__
+    time. Per-anchor storage is O(1) — only the consecutive successor index.
     """
 
     def __init__(self, sensor_dataset: SensorDataset) -> None:
         self.ds = sensor_dataset
         cfg = sensor_dataset.cfg
-
-        self._anchors: list[int] = []   # indices into sensor_dataset._index
-        self._pools: dict[str, list[int]] = {
-            "consec":    [],
-            "same_type": [],
-            "diff_type": [],
-            "cross_ds":  [],
-        }
 
         self._n_same  = cfg.n_partners_same_type
         self._n_diff  = cfg.n_partners_diff_type
@@ -314,113 +327,53 @@ class StratifiedPairDataset(Dataset):
         index = self.ds._index
         groups = self.ds._groups
 
-        # Maps for pool building
-        # gkey → list of global indices in that group
-        gkey_to_indices: dict[tuple, list[int]] = {}
-        for i, (gkey, w, vtype, det_label, a_seg, s_seg) in enumerate(index):
-            gkey_to_indices.setdefault(gkey, []).append(i)
+        self._anchors: list[int] = []
+        # Per-anchor: only the single consecutive successor (O(1) per anchor)
+        self._consec_next: dict[int, int] = {}
 
-        # (dataset, vtype) → list of global indices (excluding this gkey)
-        ds_vtype_to_indices: dict[tuple, list[int]] = {}
-        for i, (gkey, w, vtype, det_label, a_seg, s_seg) in enumerate(index):
-            ds_name = gkey[0]
-            key = (ds_name, vtype)
-            ds_vtype_to_indices.setdefault(key, []).append(i)
-
-        # dataset → list of global indices
-        ds_to_indices: dict[str, list[int]] = {}
-        for i, (gkey, w, vtype, det_label, a_seg, s_seg) in enumerate(index):
-            ds_name = gkey[0]
-            ds_to_indices.setdefault(ds_name, []).append(i)
-
-        # Anchor eligibility: must have a consecutive window in the same group
-        for gkey, idx_list in gkey_to_indices.items():
-            g = groups[gkey]
-            if not (g["audio_stem"] is not None and g["seismic_stem"] is not None):
-                continue  # both modalities required for anchor
-
-            # Sort by window index within group
-            sorted_idx = sorted(idx_list, key=lambda i: index[i][1])
-            ds_name = gkey[0]
-            vtype = groups[gkey]["vehicle_type"]
-
-            for pos, global_idx in enumerate(sorted_idx[:-1]):  # skip last (no next)
-                consec_idx = sorted_idx[pos + 1]
-                self._anchors.append(global_idx)
-
-                # Same-type pool: same dataset, same vtype, different gkey
-                same_type_pool = [
-                    j for j in ds_vtype_to_indices.get((ds_name, vtype), [])
-                    if index[j][0] != gkey
-                ]
-                # Diff-type pool: same dataset, different valid vtype
-                diff_type_pool = [
-                    j for j in ds_to_indices.get(ds_name, [])
-                    if index[j][2] != vtype and index[j][2] >= 0
-                    and index[j][0] != gkey
-                ]
-                # Cross-dataset pool: any other dataset
-                cross_ds_pool = [
-                    j for j in range(len(index))
-                    if index[j][0][0] != ds_name
-                ]
-
-                self._pools.setdefault("consec",    {})[global_idx] = [consec_idx]
-                self._pools.setdefault("same_type", {})[global_idx] = same_type_pool or [consec_idx]
-                self._pools.setdefault("diff_type", {})[global_idx] = diff_type_pool or [consec_idx]
-                self._pools.setdefault("cross_ds",  {})[global_idx] = cross_ds_pool  or [consec_idx]
-
-        # Rebuild as dicts if they were set as lists at class level
-        if isinstance(self._pools.get("consec"), list):
-            self._pools = {"consec": {}, "same_type": {}, "diff_type": {}, "cross_ds": {}}
-            self._build_index()
-
-    def _build_index(self) -> None:  # type: ignore[override]
-        """Rebuild properly with dict-based pools."""
-        index = self.ds._index
-        groups = self.ds._groups
-
-        self._anchors = []
-        self._consec_pool:    dict[int, list[int]] = {}
-        self._same_type_pool: dict[int, list[int]] = {}
-        self._diff_type_pool: dict[int, list[int]] = {}
-        self._cross_ds_pool:  dict[int, list[int]] = {}
+        # Shared pools — built once, referenced by all anchors
+        # (ds_name, vtype) → sorted list of all global indices with that (ds, type)
+        self._ds_vtype_idx: dict[tuple, list[int]] = {}
+        # ds_name → sorted list of all global indices from that dataset
+        self._ds_idx: dict[str, list[int]] = {}
 
         gkey_to_sorted: dict[tuple, list[int]] = {}
         for i, (gkey, w, vtype, det, a_seg, s_seg) in enumerate(index):
             gkey_to_sorted.setdefault(gkey, []).append(i)
+            ds = gkey[0]
+            self._ds_vtype_idx.setdefault((ds, vtype), []).append(i)
+            self._ds_idx.setdefault(ds, []).append(i)
         for gkey in gkey_to_sorted:
             gkey_to_sorted[gkey].sort(key=lambda i: index[i][1])
-
-        ds_vtype_idx: dict[tuple, list[int]] = {}
-        ds_idx: dict[str, list[int]] = {}
-        for i, (gkey, w, vtype, det, a_seg, s_seg) in enumerate(index):
-            ds = gkey[0]
-            ds_vtype_idx.setdefault((ds, vtype), []).append(i)
-            ds_idx.setdefault(ds, []).append(i)
 
         for gkey, sorted_list in gkey_to_sorted.items():
             g = groups[gkey]
             if not (g["audio_stem"] is not None and g["seismic_stem"] is not None):
                 continue
-            ds_name = gkey[0]
-            vtype = g["vehicle_type"]
-
             for pos, global_idx in enumerate(sorted_list[:-1]):
-                consec_idx = sorted_list[pos + 1]
                 self._anchors.append(global_idx)
+                self._consec_next[global_idx] = sorted_list[pos + 1]
 
-                same = [j for j in ds_vtype_idx.get((ds_name, vtype), [])
-                        if index[j][0] != gkey]
-                diff = [j for j in ds_idx.get(ds_name, [])
-                        if index[j][2] != vtype and index[j][2] >= 0
-                        and index[j][0] != gkey]
-                cross = [j for j in range(len(index)) if index[j][0][0] != ds_name]
+    def _sample_partner(self, anchor_idx: int, stratum: int) -> int:
+        """Sample one partner index for the given stratum, falling back to consec."""
+        index  = self.ds._index
+        gkey, _, vtype, _, _, _ = index[anchor_idx]
+        ds_name = gkey[0]
 
-                self._consec_pool[global_idx]    = [consec_idx]
-                self._same_type_pool[global_idx] = same  or [consec_idx]
-                self._diff_type_pool[global_idx] = diff  or [consec_idx]
-                self._cross_ds_pool[global_idx]  = cross or [consec_idx]
+        if stratum == STRATUM_CONSEC:
+            return self._consec_next[anchor_idx]
+
+        if stratum == STRATUM_SAME_TYPE:
+            pool = [j for j in self._ds_vtype_idx.get((ds_name, vtype), [])
+                    if index[j][0] != gkey]
+        elif stratum == STRATUM_DIFF_TYPE:
+            pool = [j for j in self._ds_idx.get(ds_name, [])
+                    if index[j][2] != vtype and index[j][2] >= 0
+                    and index[j][0] != gkey]
+        else:  # STRATUM_CROSS_DS
+            pool = [j for j in range(len(index)) if index[j][0][0] != ds_name]
+
+        return random.choice(pool) if pool else self._consec_next[anchor_idx]
 
     def _fetch(self, idx: int) -> dict:
         """Fetch a single window item from the underlying SensorDataset."""
@@ -457,20 +410,14 @@ class StratifiedPairDataset(Dataset):
             "seismic_avail":     anchor["seismic_avail"],
         }
 
-        partners: list[tuple[int, int]] = []  # (pool_idx, stratum)
-        # p0: consecutive
-        partners.append((random.choice(self._consec_pool[anchor_idx]),    STRATUM_CONSEC))
-        # p1..p{n_same}: same type
-        for _ in range(self._n_same):
-            partners.append((random.choice(self._same_type_pool[anchor_idx]), STRATUM_SAME_TYPE))
-        # next: diff type
-        for _ in range(self._n_diff):
-            partners.append((random.choice(self._diff_type_pool[anchor_idx]), STRATUM_DIFF_TYPE))
-        # next: cross dataset
-        for _ in range(self._n_cross):
-            partners.append((random.choice(self._cross_ds_pool[anchor_idx]),  STRATUM_CROSS_DS))
-
-        for p, (pidx, stratum) in enumerate(partners):
+        strata = (
+            [STRATUM_CONSEC]
+            + [STRATUM_SAME_TYPE] * self._n_same
+            + [STRATUM_DIFF_TYPE] * self._n_diff
+            + [STRATUM_CROSS_DS]  * self._n_cross
+        )
+        for p, stratum in enumerate(strata):
+            pidx = self._sample_partner(anchor_idx, stratum)
             pw = self._fetch(pidx)
             item[f"x_audio_p{p}"]         = pw["x_audio"]
             item[f"x_seismic_p{p}"]       = pw["x_seismic"]

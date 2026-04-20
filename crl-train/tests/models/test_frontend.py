@@ -55,9 +55,9 @@ class TestMorletFilterbank:
     def test_kernel_buffer_shape(self):
         fe = MorletFilterbank(in_channels=1, out_channels=32, kernel_size=101, sample_rate=200)
         buffers = dict(fe.named_buffers())
-        assert "kernel" in buffers
-        # kernel = cat([real, imag]) → (2*out_channels, in_channels, kernel_size)
-        assert buffers["kernel"].shape == (64, 1, 101)
+        assert "kernel_re" in buffers and "kernel_im" in buffers
+        assert buffers["kernel_re"].shape == (32, 1, 101)
+        assert buffers["kernel_im"].shape == (32, 1, 101)
 
     def test_output_finite_audio(self):
         fe = MorletFilterbank(in_channels=1, out_channels=64, kernel_size=257, sample_rate=16000)

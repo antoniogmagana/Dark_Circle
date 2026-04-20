@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import csv
-import copy
 from pathlib import Path
 from typing import Iterator
 
@@ -440,7 +439,6 @@ class Trainer:
         steps_per_epoch: int | None = None,
     ) -> None:
         best_ref_elbo = float("inf")
-        best_state: dict | None = None
         patience_count = 0
         metrics_rows: list[dict] = []
 
@@ -465,8 +463,7 @@ class Trainer:
 
             if ref_elbo < best_ref_elbo - 1e-5:
                 best_ref_elbo = ref_elbo
-                best_state = copy.deepcopy(self.model.state_dict())
-                torch.save(best_state, self.save_dir / "crl_best.pth")
+                torch.save(self.model.state_dict(), self.save_dir / "crl_best.pth")
                 patience_count = 0
             else:
                 patience_count += 1

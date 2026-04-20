@@ -61,10 +61,11 @@ class MorletFilterbank(nn.Module):
         scales = (w0 / (2 * math.pi)) / torch.logspace(
             math.log10(freq_min), math.log10(freq_max), steps=out_channels
         )
-        kernel = self._build_kernels(scales, w0)
-        self.register_buffer("kernel", kernel)
+        kernel_re, kernel_im = self._build_kernels(scales, w0)
+        self.register_buffer("kernel_re", kernel_re)
+        self.register_buffer("kernel_im", kernel_im)
 
-    def _build_kernels(self, scales: torch.Tensor, w0: float) -> torch.Tensor:
+    def _build_kernels(self, scales: torch.Tensor, w0: float) -> tuple[torch.Tensor, torch.Tensor]:
         t = torch.linspace(
             -self.kernel_size // 2, self.kernel_size // 2, self.kernel_size
         ).float()
@@ -74,15 +75,15 @@ class MorletFilterbank(nn.Module):
             gauss = torch.exp(-0.5 * (t / s) ** 2)
             kernels_re.append((norm * gauss * torch.cos(w0 * t / s)).unsqueeze(0))
             kernels_im.append((norm * gauss * torch.sin(w0 * t / s)).unsqueeze(0))
-        re = torch.stack(kernels_re, dim=0)  # (out, 1, ks)
-        im = torch.stack(kernels_im, dim=0)
-        re = re.expand(-1, self.in_channels, -1)
-        im = im.expand(-1, self.in_channels, -1)
-        return torch.cat([re, im], dim=0)    # (2*out, in, ks)
+        re = torch.stack(kernels_re, dim=0).expand(-1, self.in_channels, -1)  # (out, in, ks)
+        im = torch.stack(kernels_im, dim=0).expand(-1, self.in_channels, -1)
+        return re, im
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.float()
-        out = F.conv1d(x, self.kernel, padding=self.padding)
-        re, im = out[:, :self.out_channels], out[:, self.out_channels:]
-        power = re ** 2 + im ** 2
+        # Apply real and imaginary kernels separately to avoid materializing
+        # the full (B, 2*out, T) intermediate — peak activation is halved.
+        re_out = F.conv1d(x, self.kernel_re, padding=self.padding)
+        im_out = F.conv1d(x, self.kernel_im, padding=self.padding)
+        power = re_out.pow_(2).add_(im_out.pow_(2))
         return torch.log1p(power)
