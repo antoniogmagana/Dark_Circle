@@ -187,7 +187,7 @@ def main():
             _check("  split z_type", z_type, (x.shape[0], model.latent.D_TYPE))
             _check("  split z_prox", z_prox, (x.shape[0], model.latent.D_PROX))
             _check("  split z_env",  z_env,  (x.shape[0], model.latent.D_ENV))
-            _check("  split z_free", z_free, (x.shape[0], model.latent.D_FREE))
+            _check("  split z_free", z_free, (x.shape[0], model.latent.d_free))
 
     # ----------------------------------------------------------------
     _header("4. Full forward pass + loss")

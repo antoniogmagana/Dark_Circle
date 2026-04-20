@@ -75,9 +75,9 @@ EXPERIMENTS = [
         },
     },
     {
-        "name":        "larger_latent",
-        "description": "Larger latent space (d_z=48) for more disentanglement capacity",
-        "overrides":   {"d_z": 48},
+        "name":        "larger_free_subspace",
+        "description": "Larger free/nuisance subspace (d_free=13 vs 5) — extra capacity for signal variation the causal slots don't model",
+        "overrides":   {"d_z": 32},
     },
     {
         "name":        "aggressive_beta",

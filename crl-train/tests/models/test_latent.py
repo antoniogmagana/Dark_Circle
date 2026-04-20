@@ -13,15 +13,12 @@ def test_class_constants():
     assert CausalLatentSpace.D_TYPE == 6
     assert CausalLatentSpace.D_PROX == 3
     assert CausalLatentSpace.D_ENV  == 6
-    assert CausalLatentSpace.D_FREE == 5
-    assert CausalLatentSpace.D_Z    == 24
+    assert CausalLatentSpace.D_CAUSAL == 19
 
 
-def test_constants_sum_to_d_z():
-    total = (CausalLatentSpace.D_PRES + CausalLatentSpace.D_TYPE +
-             CausalLatentSpace.D_PROX + CausalLatentSpace.D_ENV +
-             CausalLatentSpace.D_FREE)
-    assert total == CausalLatentSpace.D_Z == 24
+def test_default_d_z_gives_d_free_5(latent):
+    assert latent.d_z == 24
+    assert latent.d_free == 5
 
 
 def test_split_shapes(latent):
@@ -50,8 +47,24 @@ def test_split_3d_input(latent):
     assert z_pres.shape == (4, 3, 4)
 
 
-def test_wrong_d_z_raises():
-    with pytest.raises(ValueError, match="d_z=24"):
+def test_larger_d_z_expands_only_free_subspace():
+    latent = CausalLatentSpace(d_z=32)
+    assert latent.d_z == 32
+    assert latent.d_free == 13
+
+    z = torch.zeros(2, 32)
+    z_pres, z_type, z_prox, z_env, z_free = latent.split(z)
+    assert z_pres.shape == (2, 4)
+    assert z_type.shape == (2, 6)
+    assert z_prox.shape == (2, 3)
+    assert z_env.shape  == (2, 6)
+    assert z_free.shape == (2, 13)
+
+
+def test_d_z_at_or_below_causal_budget_raises():
+    with pytest.raises(ValueError, match="d_z > 19"):
+        CausalLatentSpace(d_z=19)
+    with pytest.raises(ValueError, match="d_z > 19"):
         CausalLatentSpace(d_z=16)
 
 

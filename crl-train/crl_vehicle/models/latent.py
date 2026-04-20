@@ -8,19 +8,23 @@ class CausalLatentSpace(nn.Module):
     D_TYPE = 6   # dims 4-9
     D_PROX = 3   # dims 10-12
     D_ENV  = 6   # dims 13-18
-    D_FREE = 5   # dims 19-23
-    D_Z    = 24
+    D_CAUSAL = D_PRES + D_TYPE + D_PROX + D_ENV  # = 19
 
     def __init__(self, d_z: int = 24) -> None:
         super().__init__()
-        if d_z != 24:
-            raise ValueError(f"CausalLatentSpace requires d_z=24, got {d_z}")
+        if d_z <= self.D_CAUSAL:
+            raise ValueError(
+                f"CausalLatentSpace requires d_z > {self.D_CAUSAL} "
+                f"(to leave room for a free subspace), got {d_z}"
+            )
+        self.d_z = d_z
+        self.d_free = d_z - self.D_CAUSAL
         self._slices = {
             "pres": slice(0, 4),
             "type": slice(4, 10),
             "prox": slice(10, 13),
             "env":  slice(13, 19),
-            "free": slice(19, 24),
+            "free": slice(19, d_z),
         }
 
     def split(
