@@ -1,0 +1,67 @@
+from __future__ import annotations
+from dataclasses import dataclass
+
+LABEL_BACKGROUND = -1
+LABEL_MULTI = -2
+CATEGORY_TO_IDX = {"pedestrian": 0, "light": 1, "sport": 2, "utility": 3}
+
+
+@dataclass
+class ModalityConfig:
+    sample_rate: int = 200
+    window_size: int = 200
+    n_channels: int = 1
+
+
+@dataclass
+class CRLConfig:
+    # Latent space
+    d_z: int = 24
+
+    # Encoder/decoder
+    d_model: int = 64
+    n_heads: int = 4
+    n_layers: int = 2
+
+    # Frontend
+    frontend_type: str = "multiscale"   # "multiscale" | "morlet"
+    fused_seq_len: int = 32             # per-sensor token count after AdaptiveAvgPool1d
+    morlet_kernel_size: int = 257
+    multiscale_pool_stride: int = 16
+    morlet_pool_stride: int = 64
+
+    # Training
+    batch_size: int = 128
+    lr: float = 3e-4
+    lr_min: float = 1e-4
+    wd: float = 1e-4
+    n_epochs: int = 100
+    num_workers: int = 12
+    early_stop_patience: int = 25
+
+    # Loss weights
+    lambda_interv: float = 1.0
+    lambda_aux_pres: float = 1.0
+    lambda_aux_type: float = 1.0
+    lambda_aux_prox: float = 0.1
+
+    # Adaptive beta schedule
+    beta_step: float = 0.02
+    kl_floor: float = 0.01
+    kl_target: float = 0.5
+    recon_min_delta: float = 1e-4
+
+    # Data
+    horizon_stride_sec: float = 0.7
+
+    # Stratified partner sampling
+    n_partners_same_type: int = 1
+    n_partners_diff_type: int = 1
+    n_partners_cross_ds: int = 1
+
+    def modality_cfg(self, sensor: str) -> ModalityConfig:
+        if sensor == "audio":
+            return ModalityConfig(sample_rate=16000, window_size=16000, n_channels=1)
+        elif sensor == "seismic":
+            return ModalityConfig(sample_rate=200, window_size=200, n_channels=1)
+        raise ValueError(f"Unknown modality: {sensor!r}")
