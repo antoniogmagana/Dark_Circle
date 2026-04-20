@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Iterator
+from typing import IO, Iterator
 
 import torch
 import torch.nn as nn
@@ -440,39 +440,50 @@ class Trainer:
     ) -> None:
         best_ref_elbo = float("inf")
         patience_count = 0
-        metrics_rows: list[dict] = []
+        csv_path = self.save_dir / "crl_metrics.csv"
+        csv_file: IO | None = None
+        csv_writer: csv.DictWriter | None = None
 
-        for epoch in range(epochs):
-            train_m = self._train_epoch(train_loader, self.beta, steps_per_epoch)
-            val_m   = self._eval_epoch(val_loader, self.beta)
-            self.scheduler.step()
+        try:
+            for epoch in range(epochs):
+                train_m = self._train_epoch(train_loader, self.beta, steps_per_epoch)
+                val_m   = self._eval_epoch(val_loader, self.beta)
+                self.scheduler.step()
 
-            event = self._update_beta(val_m)
-            ref_elbo = val_m["val_ref_elbo"]
+                event = self._update_beta(val_m)
+                ref_elbo = val_m["val_ref_elbo"]
 
-            row = {"epoch": epoch, "beta": self.beta, "beta_event": event}
-            row.update(train_m)
-            row.update(val_m)
-            metrics_rows.append(row)
+                row = {"epoch": epoch, "beta": self.beta, "beta_event": event}
+                row.update(train_m)
+                row.update(val_m)
 
-            print(
-                f"Epoch {epoch:3d} | beta={self.beta:.3f} {event} | "
-                f"recon={val_m.get('val_recon',0):.4f} kl={val_m.get('val_raw_kl',0):.4f} "
-                f"ref_elbo={ref_elbo:.4f}"
-            )
+                if csv_writer is None:
+                    csv_file = open(csv_path, "w", newline="")
+                    csv_writer = csv.DictWriter(csv_file, fieldnames=list(row.keys()))
+                    csv_writer.writeheader()
+                csv_writer.writerow(row)
+                csv_file.flush()
 
-            if ref_elbo < best_ref_elbo - 1e-5:
-                best_ref_elbo = ref_elbo
-                torch.save(self.model.state_dict(), self.save_dir / "crl_best.pth")
-                patience_count = 0
-            else:
-                patience_count += 1
-                if patience_count >= self.cfg.early_stop_patience:
-                    print(f"Early stopping at epoch {epoch}")
-                    break
+                print(
+                    f"Epoch {epoch:3d} | beta={self.beta:.3f} {event} | "
+                    f"recon={val_m.get('val_recon',0):.4f} kl={val_m.get('val_raw_kl',0):.4f} "
+                    f"ref_elbo={ref_elbo:.4f}"
+                )
+
+                if ref_elbo < best_ref_elbo - 1e-5:
+                    best_ref_elbo = ref_elbo
+                    torch.save(self.model.state_dict(), self.save_dir / "crl_best.pth")
+                    patience_count = 0
+                else:
+                    patience_count += 1
+                    if patience_count >= self.cfg.early_stop_patience:
+                        print(f"Early stopping at epoch {epoch}")
+                        break
+        finally:
+            if csv_file is not None:
+                csv_file.close()
 
         torch.save(self.model.state_dict(), self.save_dir / "crl_final.pth")
-        self._save_csv(metrics_rows, self.save_dir / "crl_metrics.csv")
 
     # ------------------------------------------------------------------
     # Downstream training
@@ -496,14 +507,47 @@ class Trainer:
             p.requires_grad_(True)
 
         head_opt = torch.optim.AdamW(self.model.head_parameters(), lr=self.cfg.lr)
+        csv_path = self.save_dir / "downstream_metrics.csv"
+        csv_file: IO | None = None
+        csv_writer: csv.DictWriter | None = None
 
-        for epoch in range(epochs):
-            self.model.train()
-            for batch in train_loader:
-                head_opt.zero_grad()
-                loss = self._downstream_loss(batch)
-                loss.backward()
-                head_opt.step()
+        try:
+            for epoch in range(epochs):
+                self.model.train()
+                train_loss = 0.0
+                n = 0
+                for batch in train_loader:
+                    head_opt.zero_grad()
+                    loss = self._downstream_loss(batch)
+                    loss.backward()
+                    head_opt.step()
+                    train_loss += loss.item()
+                    n += 1
+
+                self.model.eval()
+                val_loss = 0.0
+                m = 0
+                with torch.no_grad():
+                    for batch in val_loader:
+                        val_loss += self._downstream_loss(batch).item()
+                        m += 1
+
+                row = {
+                    "epoch":      epoch,
+                    "train_loss": train_loss / max(n, 1),
+                    "val_loss":   val_loss   / max(m, 1),
+                }
+                if csv_writer is None:
+                    csv_file = open(csv_path, "w", newline="")
+                    csv_writer = csv.DictWriter(csv_file, fieldnames=list(row.keys()))
+                    csv_writer.writeheader()
+                csv_writer.writerow(row)
+                csv_file.flush()
+
+                print(f"DS Epoch {epoch:3d} | train_loss={row['train_loss']:.4f} val_loss={row['val_loss']:.4f}")
+        finally:
+            if csv_file is not None:
+                csv_file.close()
 
         # Unfreeze
         for p in self.model.parameters():
@@ -555,15 +599,3 @@ class Trainer:
 
         return total / max(n, 1)
 
-    # ------------------------------------------------------------------
-    # Utilities
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _save_csv(rows: list[dict], path: Path) -> None:
-        if not rows:
-            return
-        with open(path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-            writer.writeheader()
-            writer.writerows(rows)

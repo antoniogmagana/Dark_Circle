@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 
 import torch
@@ -46,7 +47,8 @@ def main() -> None:
         n_epochs=args.crl_epochs,
     )
 
-    save_dir = Path(args.save_dir or f"saved_crl/{args.frontend}")
+    run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    save_dir = Path(args.save_dir or f"saved_crl/{args.frontend}/{run_ts}")
     save_dir.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cache_dir = Path(args.cache_dir) if args.cache_dir else None
