@@ -115,6 +115,8 @@ class CRLModel(nn.Module):
         for sensor in self.sensors:
             mc = config.modality_cfg(sensor)
             ks = config.morlet_kernel_size
+            kernel_mb = (2 * config.d_model * mc.n_channels * ks * 4) / 1e6
+            print(f"  MorletFilterbank [{sensor}]: kernel {2*config.d_model}×{mc.n_channels}×{ks} = {kernel_mb:.2f} MB")
             self.frontends[sensor] = nn.Sequential(
                 MorletFilterbank(mc.n_channels, config.d_model, ks, mc.sample_rate),
                 nn.AvgPool1d(stride, stride),
