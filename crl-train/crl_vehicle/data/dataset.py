@@ -1,14 +1,12 @@
 """SensorDataset and StratifiedPairDataset for CRL training."""
 from __future__ import annotations
 
-import hashlib
-import pickle
 import random
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
+import pyarrow.parquet as pq
 import torch
 from torch.utils.data import Dataset
 
@@ -68,6 +66,19 @@ def _vehicle_to_labels(dataset: str, vehicle: str) -> tuple[int, bool]:
     if vehicle in _VEHICLE_REGISTRY:
         return _VEHICLE_REGISTRY[vehicle]
     return -99, False
+
+
+def _read_parquet_numpy(path: Path) -> np.ndarray:
+    """Read a parquet file → float32 numpy array (N_windows, W) using pyarrow threads."""
+    import pyarrow as pa
+    table = pq.read_table(path, use_threads=True)
+    numeric_cols = [
+        name for name, typ in zip(table.schema.names, table.schema.types)
+        if pa.types.is_integer(typ) or pa.types.is_floating(typ)
+    ]
+    if numeric_cols:
+        table = table.select(numeric_cols)
+    return table.to_pandas().values.astype(np.float32)
 
 
 def _parse_stem(stem: str, sensor: str) -> tuple[str, str, str] | None:
@@ -132,99 +143,7 @@ class SensorDataset(Dataset):
         parquet_files = sorted(self.parquet_dir.glob("*.parquet"))
         if not parquet_files:
             raise FileNotFoundError(f"No parquet files in {self.parquet_dir}")
-
-        if cache_dir is not None:
-            cache_key = self._cache_key()
-            if self._load_from_mmap_cache(cache_dir, cache_key):
-                return
-
         self._build_from_parquet(parquet_files)
-
-        if cache_dir is not None:
-            self._save_mmap_cache(cache_dir, cache_key)
-
-    def _cache_key(self) -> str:
-        files = sorted(self.parquet_dir.glob("*.parquet"))
-        h = hashlib.md5()
-        for f in files:
-            h.update(f.name.encode())
-            h.update(str(f.stat().st_mtime).encode())
-        return h.hexdigest()
-
-    def _save_mmap_cache(self, cache_dir: Path, cache_key: str) -> None:
-        slot = cache_dir / cache_key
-        slot.mkdir(parents=True, exist_ok=True)
-        print(f"  SensorDataset [{self.parquet_dir.name}]: saving mmap cache ({cache_key[:8]}…)")
-
-        for sensor in ("audio", "seismic"):
-            entries = self._cache[sensor]
-            keys = list(entries.keys())
-            if not keys:
-                np.save(slot / f"{sensor}.npy", np.empty((0, 0), dtype=np.float32))
-                with open(slot / f"{sensor}_meta.pkl", "wb") as f:
-                    pickle.dump([], f)
-                continue
-
-            # Stack all windows from all segments into one (N_total, W) array.
-            # Each entry["data"] is (N_windows, W) — already row-per-window.
-            row_offset = 0
-            meta = []
-            arrays = []
-            for key in keys:
-                d = entries[key]["data"]   # (N_windows, W)
-                n = len(d)
-                arrays.append(d)
-                meta.append({"stem": key[0], "seg_key": key[1],
-                             "n_windows": n, "row_offset": row_offset})
-                row_offset += n
-
-            stacked = np.concatenate(arrays, axis=0)  # (N_total, W)
-            np.save(slot / f"{sensor}.npy", stacked)
-            with open(slot / f"{sensor}_meta.pkl", "wb") as f:
-                pickle.dump(meta, f)
-
-        with open(slot / "index.pkl", "wb") as f:
-            pickle.dump(self._index, f)
-        with open(slot / "groups.pkl", "wb") as f:
-            pickle.dump(self._groups, f)
-
-    def _load_from_mmap_cache(self, cache_dir: Path, cache_key: str) -> bool:
-        slot = cache_dir / cache_key
-        required = [slot / n for n in (
-            "audio.npy", "seismic.npy",
-            "audio_meta.pkl", "seismic_meta.pkl",
-            "index.pkl", "groups.pkl",
-        )]
-        if not all(p.exists() for p in required):
-            return False
-
-        try:
-            for sensor in ("audio", "seismic"):
-                arr = np.load(slot / f"{sensor}.npy", mmap_mode="r")  # (N_total, W)
-                with open(slot / f"{sensor}_meta.pkl", "rb") as f:
-                    meta = pickle.load(f)
-                for m in meta:
-                    ro, n = m["row_offset"], m["n_windows"]
-                    # Zero-copy slice into mmap'd file — workers page-share via OS.
-                    self._cache[sensor][(m["stem"], m["seg_key"])] = {
-                        "data": arr[ro:ro + n],   # (n_windows, W) view
-                        "n_windows": n,
-                    }
-
-            with open(slot / "index.pkl", "rb") as f:
-                self._index = pickle.load(f)
-            with open(slot / "groups.pkl", "rb") as f:
-                self._groups = pickle.load(f)
-
-            print(f"  SensorDataset [{self.parquet_dir.name}]: loaded from mmap cache ({cache_key[:8]}…)")
-            return True
-
-        except Exception as e:
-            print(f"  SensorDataset [{self.parquet_dir.name}]: mmap cache load failed ({e}), rebuilding.")
-            self._cache = {"audio": {}, "seismic": {}}
-            self._index = []
-            self._groups = {}
-            return False
 
     def _build_from_parquet(self, files: list[Path]) -> None:
         # Group files by (dataset, vehicle, rs_node) and sensor
@@ -264,22 +183,18 @@ class SensorDataset(Dataset):
             audio_seg_id = seismic_seg_id = seg_id
 
             if a_file:
-                df = pd.read_parquet(a_file)
-                data = df.select_dtypes(include=[np.number]).values.astype(np.float32)
+                audio_nw = pq.ParquetFile(a_file).metadata.num_rows
                 self._cache["audio"][(audio_stem, None)] = {
-                    "data": data, "n_windows": len(data)
+                    "path": a_file, "n_windows": audio_nw
                 }
-                audio_nw = len(data)
                 seg_id += 1
                 audio_seg_id = seg_id
 
             if s_file:
-                df = pd.read_parquet(s_file)
-                data = df.select_dtypes(include=[np.number]).values.astype(np.float32)
+                seismic_nw = pq.ParquetFile(s_file).metadata.num_rows
                 self._cache["seismic"][(seismic_stem, None)] = {
-                    "data": data, "n_windows": len(data)
+                    "path": s_file, "n_windows": seismic_nw
                 }
-                seismic_nw = len(data)
                 seg_id += 1
                 seismic_seg_id = seg_id
 
@@ -312,6 +227,8 @@ class SensorDataset(Dataset):
         if entry is None:
             mc = self.cfg.modality_cfg(sensor)
             return torch.zeros(1, mc.window_size)
+        if "data" not in entry:
+            entry["data"] = _read_parquet_numpy(entry["path"])
         data = entry["data"]
         if w >= len(data):
             mc = self.cfg.modality_cfg(sensor)

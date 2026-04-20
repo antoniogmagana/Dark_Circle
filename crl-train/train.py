@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ds-epochs",   type=int, default=50)
     p.add_argument("--batch-size",  type=int, default=64)
     p.add_argument("--lr",          type=float, default=3e-4)
-    p.add_argument("--num-workers", type=int, default=8)
+    p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--save-dir",    default=None)
     p.add_argument("--frontend",    choices=["multiscale", "morlet"], default="multiscale")
     p.add_argument("--steps-per-epoch", type=int, default=None,
@@ -62,10 +62,12 @@ def main() -> None:
         train_loader = DataLoader(
             train_pair, batch_size=cfg.batch_size, shuffle=True,
             num_workers=cfg.num_workers, collate_fn=collate_pairs, pin_memory=True,
+            persistent_workers=cfg.num_workers > 0,
         )
         val_loader = DataLoader(
             val_pair, batch_size=cfg.batch_size, shuffle=False,
             num_workers=cfg.num_workers, collate_fn=collate_pairs, pin_memory=True,
+            persistent_workers=cfg.num_workers > 0,
         )
         trainer.train_crl(
             train_loader, val_loader,
@@ -79,10 +81,12 @@ def main() -> None:
         train_loader = DataLoader(
             train_ds, batch_size=cfg.batch_size, shuffle=True,
             num_workers=cfg.num_workers, collate_fn=collate_single, pin_memory=True,
+            persistent_workers=cfg.num_workers > 0,
         )
         val_loader = DataLoader(
             val_ds, batch_size=cfg.batch_size, shuffle=False,
             num_workers=cfg.num_workers, collate_fn=collate_single, pin_memory=True,
+            persistent_workers=cfg.num_workers > 0,
         )
         trainer.train_downstream(train_loader, val_loader, epochs=args.ds_epochs)
 
