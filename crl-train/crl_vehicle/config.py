@@ -36,7 +36,7 @@ class CRLConfig:
     lr_min: float = 1e-4
     wd: float = 1e-4
     n_epochs: int = 100
-    num_workers: int = 12
+    num_workers: int = 24
     early_stop_patience: int = 25
 
     # Loss weights

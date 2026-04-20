@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--frontend",    choices=["multiscale", "morlet"], default="multiscale")
     p.add_argument("--steps-per-epoch", type=int, default=None,
                    help="Limit batches per epoch (for smoke tests)")
-    p.add_argument("--cache-dir",   default=".cache/", help="Dataset disk cache directory")
+    p.add_argument("--cache-dir",   default="./saved_crl/cache", help="Dataset disk cache directory")
     return p.parse_args()
 
 

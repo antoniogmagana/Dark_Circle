@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import random
-from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -130,14 +129,11 @@ class SensorDataset(Dataset):
         self.parquet_dir = Path(parquet_dir)
         self.cfg = config
         self.is_train = is_train
-        # metadata store (path, n_windows); actual data arrays evicted via LRU
+        # metadata store: (stem, seg_key) → {path, n_windows}
         self._cache: dict[str, dict] = {"audio": {}, "seismic": {}}
-        # LRU data cache: sensor → OrderedDict{(stem, seg_key) → np.ndarray}
-        # Capped at _CACHE_MAX_FILES entries per sensor to bound worker memory.
-        self._CACHE_MAX_FILES = 32
-        self._data_cache: dict[str, OrderedDict] = {
-            "audio": OrderedDict(), "seismic": OrderedDict()
-        }
+        # Shared-memory tensor store: (stem, seg_key) → Tensor(N, W) in shared memory.
+        # Populated once at init, shared across all DataLoader workers with zero duplication.
+        self._data_cache: dict[str, dict] = {"audio": {}, "seismic": {}}
         self._index: list = []   # [(gkey, w_idx, vtype, det_label, audio_seg_id, seismic_seg_id)]
         self._groups: dict = {}  # gkey → group metadata
 
@@ -152,6 +148,7 @@ class SensorDataset(Dataset):
         if not parquet_files:
             raise FileNotFoundError(f"No parquet files in {self.parquet_dir}")
         self._build_from_parquet(parquet_files)
+        self._preload_shared(cache_dir)
 
     def _build_from_parquet(self, files: list[Path]) -> None:
         # Group files by (dataset, vehicle, rs_node) and sensor
@@ -224,6 +221,48 @@ class SensorDataset(Dataset):
             for w in range(n_windows):
                 self._index.append((gkey, w, vtype, det_label, audio_seg_id, seismic_seg_id))
 
+    def _preload_shared(self, cache_dir: Path | None) -> None:
+        """Load every file into a shared-memory tensor before workers are forked.
+
+        Load order per file:
+          1. If a valid .pt cache file exists (newer than source parquet), load it.
+          2. Otherwise read the parquet, normalize, save .pt atomically, then use it.
+          3. Call share_memory_() so all forked workers read the same physical pages.
+        """
+        if cache_dir is not None:
+            cache_dir = Path(cache_dir)
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+        for sensor in ("audio", "seismic"):
+            mc = self.cfg.modality_cfg(sensor)
+            W  = mc.window_size
+            for cache_key, entry in self._cache[sensor].items():
+                stem    = cache_key[0]
+                src     = entry["path"]
+                pt_path = (cache_dir / f"{stem}.pt") if cache_dir else None
+
+                data: torch.Tensor | None = None
+
+                # Try loading from disk cache
+                if pt_path is not None and pt_path.exists():
+                    if pt_path.stat().st_mtime >= src.stat().st_mtime:
+                        data = torch.load(pt_path, weights_only=True)
+
+                if data is None:
+                    arr = _read_parquet_numpy(src)
+                    if arr.shape[1] > W:
+                        arr = arr[:, :W]
+                    elif arr.shape[1] < W:
+                        arr = np.pad(arr, ((0, 0), (0, W - arr.shape[1])))
+                    data = torch.from_numpy(arr.copy())  # owns its memory before sharing
+                    if pt_path is not None:
+                        tmp = pt_path.with_suffix(".tmp")
+                        torch.save(data, tmp)
+                        tmp.rename(pt_path)  # atomic on POSIX
+
+                data.share_memory_()
+                self._data_cache[sensor][cache_key] = data
+
     # ------------------------------------------------------------------
     # Window loading
     # ------------------------------------------------------------------
@@ -231,33 +270,14 @@ class SensorDataset(Dataset):
     def _get_window(
         self, sensor: str, stem: str, seg_key: Any, w: int, interv_idx: int
     ) -> torch.Tensor:
-        entry = self._cache[sensor].get((stem, seg_key))
-        if entry is None:
-            mc = self.cfg.modality_cfg(sensor)
-            return torch.zeros(1, mc.window_size)
-
-        cache_key = (stem, seg_key)
-        lru = self._data_cache[sensor]
-        if cache_key not in lru:
-            data = _read_parquet_numpy(entry["path"])
-            lru[cache_key] = data
-            lru.move_to_end(cache_key)
-            if len(lru) > self._CACHE_MAX_FILES:
-                lru.popitem(last=False)  # evict least-recently-used
-        else:
-            lru.move_to_end(cache_key)
-        data = lru[cache_key]
-
         mc = self.cfg.modality_cfg(sensor)
-        if w >= len(data):
+        cache_key = (stem, seg_key)
+        data = self._data_cache[sensor].get(cache_key)
+
+        if data is None or w >= len(data):
             return torch.zeros(1, mc.window_size)
-        x = torch.from_numpy(data[w].copy()).unsqueeze(0)  # (1, W); .copy() makes mmap view writable
-        # Normalize length: truncate if longer, zero-pad if shorter
-        W = mc.window_size
-        if x.shape[-1] > W:
-            x = x[..., :W]
-        elif x.shape[-1] < W:
-            x = torch.nn.functional.pad(x, (0, W - x.shape[-1]))
+
+        x = data[w].unsqueeze(0).clone()  # clone: don't write into shared pages
         x = remove_dc(x)
         if interv_idx > 0:
             x = apply_intervention(x, interv_idx, mc.sample_rate)
@@ -341,22 +361,16 @@ class StratifiedPairDataset(Dataset):
         self._ds_vtype_idx: dict[tuple, list[int]] = {}
         # ds_name → indices from that dataset
         self._ds_idx: dict[str, list[int]] = {}
-        # ds_name → indices from ALL OTHER datasets (cross-ds pool)
-        self._cross_ds_idx: dict[str, list[int]] = {}
+        # cross-ds: derived on demand from _ds_idx[other_ds] — no separate storage
 
         gkey_to_sorted: dict[tuple, list[int]] = {}
-        all_ds: set[str] = set()
         for i, (gkey, w, vtype, det, a_seg, s_seg) in enumerate(index):
             gkey_to_sorted.setdefault(gkey, []).append(i)
             ds = gkey[0]
-            all_ds.add(ds)
             self._ds_vtype_idx.setdefault((ds, vtype), []).append(i)
             self._ds_idx.setdefault(ds, []).append(i)
         for gkey in gkey_to_sorted:
             gkey_to_sorted[gkey].sort(key=lambda i: index[i][1])
-        # Build cross-ds pool per dataset: indices where gkey[0] != ds
-        for ds in all_ds:
-            self._cross_ds_idx[ds] = [j for j in range(len(index)) if index[j][0][0] != ds]
 
         for gkey, sorted_list in gkey_to_sorted.items():
             g = groups[gkey]
@@ -385,8 +399,13 @@ class StratifiedPairDataset(Dataset):
             pool = [j for j in candidates
                     if index[j][2] != vtype and index[j][2] >= 0
                     and index[j][0] != gkey]
-        else:  # STRATUM_CROSS_DS — fully precomputed, O(1) pick
-            pool = self._cross_ds_idx.get(ds_name, [])
+        else:  # STRATUM_CROSS_DS — pick a random other dataset, then sample from it
+            other_ds_names = [d for d in self._ds_idx if d != ds_name]
+            if other_ds_names:
+                other_ds = random.choice(other_ds_names)
+                pool = self._ds_idx[other_ds]
+            else:
+                pool = []
 
         return random.choice(pool) if pool else fallback
 
