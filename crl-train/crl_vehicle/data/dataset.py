@@ -248,13 +248,18 @@ class SensorDataset(Dataset):
             lru.move_to_end(cache_key)
         data = lru[cache_key]
 
+        mc = self.cfg.modality_cfg(sensor)
         if w >= len(data):
-            mc = self.cfg.modality_cfg(sensor)
             return torch.zeros(1, mc.window_size)
         x = torch.from_numpy(data[w].copy()).unsqueeze(0)  # (1, W); .copy() makes mmap view writable
+        # Normalize length: truncate if longer, zero-pad if shorter
+        W = mc.window_size
+        if x.shape[-1] > W:
+            x = x[..., :W]
+        elif x.shape[-1] < W:
+            x = torch.nn.functional.pad(x, (0, W - x.shape[-1]))
         x = remove_dc(x)
         if interv_idx > 0:
-            mc = self.cfg.modality_cfg(sensor)
             x = apply_intervention(x, interv_idx, mc.sample_rate)
         return x
 
