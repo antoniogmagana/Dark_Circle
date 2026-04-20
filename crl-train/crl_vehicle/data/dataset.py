@@ -68,17 +68,16 @@ def _vehicle_to_labels(dataset: str, vehicle: str) -> tuple[int, bool]:
     return -99, False
 
 
-def _read_parquet_numpy(path: Path) -> np.ndarray:
-    """Read a parquet file → float32 numpy array (N_windows, W) using pyarrow threads."""
-    import pyarrow as pa
-    table = pq.read_table(path, use_threads=True)
-    numeric_cols = [
-        name for name, typ in zip(table.schema.names, table.schema.types)
-        if pa.types.is_integer(typ) or pa.types.is_floating(typ)
-    ]
-    if numeric_cols:
-        table = table.select(numeric_cols)
-    return table.to_pandas().values.astype(np.float32)
+def _read_parquet_numpy(path: Path, window_size: int) -> np.ndarray:
+    """Read a flat time-series parquet → float32 array (N_windows, window_size).
+
+    Expects an 'amplitude' signal column. Trailing samples that don't fill a
+    complete window are discarded.
+    """
+    col = pq.read_table(path, columns=["amplitude"], use_threads=True)
+    arr = col.column("amplitude").to_numpy().astype(np.float32)
+    n_windows = len(arr) // window_size
+    return arr[: n_windows * window_size].reshape(n_windows, window_size)
 
 
 def _parse_stem(stem: str, sensor: str) -> tuple[str, str, str] | None:
@@ -188,7 +187,8 @@ class SensorDataset(Dataset):
             audio_seg_id = seismic_seg_id = seg_id
 
             if a_file:
-                audio_nw = pq.read_metadata(a_file).num_rows
+                W_a = self.cfg.modality_cfg("audio").window_size
+                audio_nw = pq.read_metadata(a_file).num_rows // W_a
                 self._cache["audio"][(audio_stem, None)] = {
                     "path": a_file, "n_windows": audio_nw
                 }
@@ -196,7 +196,8 @@ class SensorDataset(Dataset):
                 audio_seg_id = seg_id
 
             if s_file:
-                seismic_nw = pq.read_metadata(s_file).num_rows
+                W_s = self.cfg.modality_cfg("seismic").window_size
+                seismic_nw = pq.read_metadata(s_file).num_rows // W_s
                 self._cache["seismic"][(seismic_stem, None)] = {
                     "path": s_file, "n_windows": seismic_nw
                 }
@@ -249,11 +250,7 @@ class SensorDataset(Dataset):
                         data = torch.load(pt_path, weights_only=True)
 
                 if data is None:
-                    arr = _read_parquet_numpy(src)
-                    if arr.shape[1] > W:
-                        arr = arr[:, :W]
-                    elif arr.shape[1] < W:
-                        arr = np.pad(arr, ((0, 0), (0, W - arr.shape[1])))
+                    arr = _read_parquet_numpy(src, W)
                     data = torch.from_numpy(arr.copy())  # owns its memory before sharing
                     if pt_path is not None:
                         tmp = pt_path.with_suffix(".tmp")
