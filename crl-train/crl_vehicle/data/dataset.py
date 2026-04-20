@@ -191,7 +191,7 @@ class SensorDataset(Dataset):
             audio_seg_id = seismic_seg_id = seg_id
 
             if a_file:
-                audio_nw = pq.ParquetFile(a_file).metadata.num_rows
+                audio_nw = pq.read_metadata(a_file).num_rows
                 self._cache["audio"][(audio_stem, None)] = {
                     "path": a_file, "n_windows": audio_nw
                 }
@@ -199,7 +199,7 @@ class SensorDataset(Dataset):
                 audio_seg_id = seg_id
 
             if s_file:
-                seismic_nw = pq.ParquetFile(s_file).metadata.num_rows
+                seismic_nw = pq.read_metadata(s_file).num_rows
                 self._cache["seismic"][(seismic_stem, None)] = {
                     "path": s_file, "n_windows": seismic_nw
                 }

@@ -54,9 +54,11 @@ def main() -> None:
     model   = CRLModel(cfg, sensors=args.sensors).to(device)
     trainer = Trainer(model, cfg, device, save_dir)
 
+    # Build datasets once — reused by both CRL and downstream phases
+    train_ds = SensorDataset(args.data_dir, cfg, is_train=True,  cache_dir=cache_dir)
+    val_ds   = SensorDataset(args.val_dir,  cfg, is_train=False, cache_dir=cache_dir)
+
     if args.phase in ("crl", "full"):
-        train_ds   = SensorDataset(args.data_dir, cfg, is_train=True,  cache_dir=cache_dir)
-        val_ds     = SensorDataset(args.val_dir,  cfg, is_train=False, cache_dir=cache_dir)
         train_pair = StratifiedPairDataset(train_ds)
         val_pair   = StratifiedPairDataset(val_ds)
         train_loader = DataLoader(
@@ -76,8 +78,6 @@ def main() -> None:
         )
 
     if args.phase in ("downstream", "full"):
-        train_ds = SensorDataset(args.data_dir, cfg, is_train=True,  cache_dir=cache_dir)
-        val_ds   = SensorDataset(args.val_dir,  cfg, is_train=False, cache_dir=cache_dir)
         train_loader = DataLoader(
             train_ds, batch_size=cfg.batch_size, shuffle=True,
             num_workers=cfg.num_workers, collate_fn=collate_single, pin_memory=True,
