@@ -336,20 +336,27 @@ class StratifiedPairDataset(Dataset):
         # Per-anchor: only the single consecutive successor (O(1) per anchor)
         self._consec_next: dict[int, int] = {}
 
-        # Shared pools — built once, referenced by all anchors
-        # (ds_name, vtype) → sorted list of all global indices with that (ds, type)
+        # Shared pools — built once, O(1) lookup at sample time
+        # (ds_name, vtype) → indices with that (ds, type)
         self._ds_vtype_idx: dict[tuple, list[int]] = {}
-        # ds_name → sorted list of all global indices from that dataset
+        # ds_name → indices from that dataset
         self._ds_idx: dict[str, list[int]] = {}
+        # ds_name → indices from ALL OTHER datasets (cross-ds pool)
+        self._cross_ds_idx: dict[str, list[int]] = {}
 
         gkey_to_sorted: dict[tuple, list[int]] = {}
+        all_ds: set[str] = set()
         for i, (gkey, w, vtype, det, a_seg, s_seg) in enumerate(index):
             gkey_to_sorted.setdefault(gkey, []).append(i)
             ds = gkey[0]
+            all_ds.add(ds)
             self._ds_vtype_idx.setdefault((ds, vtype), []).append(i)
             self._ds_idx.setdefault(ds, []).append(i)
         for gkey in gkey_to_sorted:
             gkey_to_sorted[gkey].sort(key=lambda i: index[i][1])
+        # Build cross-ds pool per dataset: indices where gkey[0] != ds
+        for ds in all_ds:
+            self._cross_ds_idx[ds] = [j for j in range(len(index)) if index[j][0][0] != ds]
 
         for gkey, sorted_list in gkey_to_sorted.items():
             g = groups[gkey]
@@ -364,21 +371,24 @@ class StratifiedPairDataset(Dataset):
         index  = self.ds._index
         gkey, _, vtype, _, _, _ = index[anchor_idx]
         ds_name = gkey[0]
+        fallback = self._consec_next[anchor_idx]
 
         if stratum == STRATUM_CONSEC:
-            return self._consec_next[anchor_idx]
+            return fallback
 
         if stratum == STRATUM_SAME_TYPE:
-            pool = [j for j in self._ds_vtype_idx.get((ds_name, vtype), [])
-                    if index[j][0] != gkey]
+            # rejection-sample from shared pool to exclude same gkey
+            candidates = self._ds_vtype_idx.get((ds_name, vtype), [])
+            pool = [j for j in candidates if index[j][0] != gkey]
         elif stratum == STRATUM_DIFF_TYPE:
-            pool = [j for j in self._ds_idx.get(ds_name, [])
+            candidates = self._ds_idx.get(ds_name, [])
+            pool = [j for j in candidates
                     if index[j][2] != vtype and index[j][2] >= 0
                     and index[j][0] != gkey]
-        else:  # STRATUM_CROSS_DS
-            pool = [j for j in range(len(index)) if index[j][0][0] != ds_name]
+        else:  # STRATUM_CROSS_DS — fully precomputed, O(1) pick
+            pool = self._cross_ds_idx.get(ds_name, [])
 
-        return random.choice(pool) if pool else self._consec_next[anchor_idx]
+        return random.choice(pool) if pool else fallback
 
     def _fetch(self, idx: int) -> dict:
         """Fetch a single window item from the underlying SensorDataset."""
