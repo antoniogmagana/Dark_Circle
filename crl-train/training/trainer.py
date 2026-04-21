@@ -711,24 +711,44 @@ class Trainer:
         if best_path.exists():
             print(f"  Loading CRL backbone from {best_path.name}")
             state = torch.load(best_path, map_location=self.device)
+            # Pre-filter: drop (aux_)type_heads tensors whose shape disagrees with
+            # the current model. This happens when probe_mode differs from the
+            # saved run (e.g., linear_ztype -> linear_fullz changes head in-features
+            # from D_TYPE=6 to d_z=24). load_state_dict(strict=False) tolerates
+            # missing/unexpected keys but NOT shape mismatches on shared keys, so
+            # these must be removed here; they then surface as missing keys below.
+            model_state = self.model.state_dict()
+            dropped_shape_mismatch: list[str] = []
+            for k in list(state.keys()):
+                if (
+                    k.startswith(("type_heads.", "aux_type_heads."))
+                    and k in model_state
+                    and state[k].shape != model_state[k].shape
+                ):
+                    dropped_shape_mismatch.append(k)
+                    state.pop(k)
             missing, unexpected = self.model.load_state_dict(state, strict=False)
-            # type_heads.* mismatches are expected when --probe-mode differs from the
-            # saved run. Anything else indicates a genuine shape/config mismatch
-            # (e.g., wrong d_z) and should fail loudly.
-            other_missing    = [k for k in missing    if not k.startswith("type_heads.")]
-            other_unexpected = [k for k in unexpected if not k.startswith("type_heads.")]
+            # type_heads.* / aux_type_heads.* mismatches are expected when
+            # --probe-mode differs from the saved run. Anything else indicates a
+            # genuine shape/config mismatch (e.g., wrong d_z) and should fail loudly.
+            def _is_type_head_key(k: str) -> bool:
+                return k.startswith(("type_heads.", "aux_type_heads."))
+
+            other_missing    = [k for k in missing    if not _is_type_head_key(k)]
+            other_unexpected = [k for k in unexpected if not _is_type_head_key(k)]
             if other_missing or other_unexpected:
                 raise RuntimeError(
                     f"Checkpoint load mismatch outside type_heads — refusing to "
                     f"silently train on partially-initialized backbone. "
                     f"Missing: {other_missing[:5]} | Unexpected: {other_unexpected[:5]}"
                 )
-            type_keys_missing    = [k for k in missing    if k.startswith("type_heads.")]
-            type_keys_unexpected = [k for k in unexpected if k.startswith("type_heads.")]
-            if type_keys_missing or type_keys_unexpected:
+            type_keys_missing    = [k for k in missing    if _is_type_head_key(k)]
+            type_keys_unexpected = [k for k in unexpected if _is_type_head_key(k)]
+            if type_keys_missing or type_keys_unexpected or dropped_shape_mismatch:
                 print(
                     f"  Probe-mode head swap: {len(type_keys_missing)} new type-head "
-                    f"param(s) will train from scratch; {len(type_keys_unexpected)} "
+                    f"param(s) will train from scratch; "
+                    f"{len(type_keys_unexpected) + len(dropped_shape_mismatch)} "
                     f"old param(s) in checkpoint discarded."
                 )
 
