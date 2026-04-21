@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 from typing import IO, Iterator
 
@@ -17,7 +18,8 @@ from crl_vehicle.models.intervention import (
     UnknownInterventionClassifier, label_change_target
 )
 from crl_vehicle.models.heads import (
-    LinearPresenceHead, LinearTypeHead, LinearProximityHead
+    LinearPresenceHead, LinearTypeHead, LinearProximityHead,
+    MLPTypeHead, FullZTypeHead,
 )
 from crl_vehicle.losses.crl_loss import (
     reconstruction_loss, kl_divergence, intervention_matching_loss
@@ -40,14 +42,22 @@ class CRLModel(nn.Module):
         per-sensor TemporalEncoder → per-sensor FeatureDecoder
     """
 
+    VALID_PROBE_MODES = ("linear_ztype", "mlp_ztype", "linear_fullz")
+
     def __init__(
         self,
         config: CRLConfig,
         sensors: list[str] | None = None,
+        probe_mode: str = "linear_ztype",
     ) -> None:
         super().__init__()
         self.cfg = config
         self.sensors = sensors or ["audio", "seismic"]
+        if probe_mode not in self.VALID_PROBE_MODES:
+            raise ValueError(
+                f"probe_mode must be one of {self.VALID_PROBE_MODES}, got {probe_mode!r}"
+            )
+        self.probe_mode = probe_mode
         d_z = config.d_z
 
         self.frontends = nn.ModuleDict()
@@ -73,10 +83,19 @@ class CRLModel(nn.Module):
 
         for key in head_keys:
             self.pres_heads[key]     = LinearPresenceHead()
-            self.type_heads[key]     = LinearTypeHead()
+            self.type_heads[key]     = self._build_type_head(d_z)
             self.prox_heads[key]     = LinearProximityHead()
             self.aux_pres_heads[key] = nn.Linear(CausalLatentSpace.D_PRES, 1)
             self.aux_type_heads[key] = nn.Linear(CausalLatentSpace.D_TYPE, 4)
+
+    def _build_type_head(self, d_z: int) -> nn.Module:
+        if self.probe_mode == "linear_ztype":
+            return LinearTypeHead()
+        if self.probe_mode == "mlp_ztype":
+            return MLPTypeHead()
+        if self.probe_mode == "linear_fullz":
+            return FullZTypeHead(d_z=d_z)
+        raise ValueError(f"Unknown probe_mode: {self.probe_mode!r}")
 
     def _init_multiscale(self, config: CRLConfig, d_z: int) -> None:
         T = config.fused_seq_len
@@ -244,6 +263,17 @@ def _macro_f1_acc(
     return f1_sum / n_classes, acc
 
 
+def _empty_aux_metrics() -> dict:
+    """Zeroed aux-metrics dict for batches with no valid samples."""
+    empty_f = torch.empty(0)
+    empty_l = torch.empty(0, dtype=torch.long)
+    return {
+        "recon": 0.0, "kl": 0.0, "raw_kl": 0.0, "interv": 0.0, "total": 0.0,
+        "aux_pres_logits": empty_f, "aux_pres_labels": empty_l,
+        "aux_type_logits": empty_f, "aux_type_labels": empty_l,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Trainer
 # ---------------------------------------------------------------------------
@@ -301,14 +331,20 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def _forward_pair(
-        self, batch: dict, beta: float
+        self, batch: dict, beta: float,
     ) -> tuple[torch.Tensor, dict]:
+        """Forward a pair batch and return (loss, metrics).
+
+        metrics always contains detached CPU tensors under keys `aux_pres_logits`,
+        `aux_pres_labels`, `aux_type_logits`, `aux_type_labels` for computing
+        epoch-level classification F1 on both train and val.
+        """
         if self.cfg.frontend_type == "multiscale":
             return self._forward_pair_fused(batch, beta)
         return self._forward_pair_per_sensor(batch, beta)
 
     def _forward_pair_fused(
-        self, batch: dict, beta: float
+        self, batch: dict, beta: float,
     ) -> tuple[torch.Tensor, dict]:
         model = self.model
         cfg   = self.cfg
@@ -317,7 +353,7 @@ class Trainer:
         avail = batch["audio_avail"].bool() & batch["seismic_avail"].bool()
         if not avail.any():
             zero = torch.tensor(0.0, device=dev, requires_grad=True)
-            return zero, {"recon": 0.0, "kl": 0.0, "raw_kl": 0.0, "interv": 0.0, "total": 0.0}
+            return zero, _empty_aux_metrics()
 
         x_a = batch["x_audio_t"][avail].to(dev)
         x_s = batch["x_seismic_t"][avail].to(dev)
@@ -339,10 +375,13 @@ class Trainer:
 
         valid_type = type_t >= 0
         aux_type = torch.tensor(0.0, device=dev)
+        aux_type_logit_valid = torch.empty(0, device=dev)
+        type_labels_valid    = torch.empty(0, dtype=torch.long, device=dev)
         if valid_type.any():
+            aux_type_logit_valid = model.aux_type_heads["fused"](z_type[valid_type])
+            type_labels_valid    = type_t[valid_type].long()
             aux_type = torch.nn.functional.cross_entropy(
-                model.aux_type_heads["fused"](z_type[valid_type]),
-                type_t[valid_type],
+                aux_type_logit_valid, type_labels_valid,
             )
 
         # Intervention: use consecutive partner (p0)
@@ -370,6 +409,10 @@ class Trainer:
             "raw_kl":  raw_kl.item(),
             "interv":  interv.item() if isinstance(interv, torch.Tensor) else interv,
             "total":   total.item(),
+            "aux_pres_logits": aux_pres_logit.detach().cpu(),
+            "aux_pres_labels": det_t.detach().long().cpu(),
+            "aux_type_logits": aux_type_logit_valid.detach().cpu(),
+            "aux_type_labels": type_labels_valid.detach().cpu(),
         }
         return total, metrics
 
@@ -383,6 +426,10 @@ class Trainer:
         total_loss = torch.tensor(0.0, device=dev)
         agg: dict[str, float] = {"recon": 0.0, "kl": 0.0, "raw_kl": 0.0,
                                   "interv": 0.0, "total": 0.0}
+        aux_pres_logits_all: list[torch.Tensor] = []
+        aux_pres_labels_all: list[torch.Tensor] = []
+        aux_type_logits_all: list[torch.Tensor] = []
+        aux_type_labels_all: list[torch.Tensor] = []
         n_active = 0
 
         for sensor in model.sensors:
@@ -408,14 +455,19 @@ class Trainer:
             aux_pres = torch.nn.functional.binary_cross_entropy_with_logits(
                 aux_pres_logit, det_t
             )
+            aux_pres_logits_all.append(aux_pres_logit.detach().cpu())
+            aux_pres_labels_all.append(det_t.detach().long().cpu())
 
             valid_type = type_t >= 0
             aux_type = torch.tensor(0.0, device=dev)
             if valid_type.any():
+                type_logit_valid = model.aux_type_heads[sensor](z_type[valid_type])
+                type_labels_valid = type_t[valid_type].long()
                 aux_type = torch.nn.functional.cross_entropy(
-                    model.aux_type_heads[sensor](z_type[valid_type]),
-                    type_t[valid_type],
+                    type_logit_valid, type_labels_valid,
                 )
+                aux_type_logits_all.append(type_logit_valid.detach().cpu())
+                aux_type_labels_all.append(type_labels_valid.detach().cpu())
 
             interv = torch.tensor(0.0, device=dev)
             n_partners = batch["n_partners"]
@@ -449,17 +501,73 @@ class Trainer:
         if n_active == 0:
             total_loss = torch.tensor(0.0, device=dev, requires_grad=True)
 
+        agg["aux_pres_logits"] = (
+            torch.cat(aux_pres_logits_all) if aux_pres_logits_all else torch.empty(0)
+        )
+        agg["aux_pres_labels"] = (
+            torch.cat(aux_pres_labels_all) if aux_pres_labels_all
+            else torch.empty(0, dtype=torch.long)
+        )
+        agg["aux_type_logits"] = (
+            torch.cat(aux_type_logits_all) if aux_type_logits_all else torch.empty(0)
+        )
+        agg["aux_type_labels"] = (
+            torch.cat(aux_type_labels_all) if aux_type_labels_all
+            else torch.empty(0, dtype=torch.long)
+        )
         return total_loss, agg
 
     # ------------------------------------------------------------------
     # Epoch helpers
     # ------------------------------------------------------------------
 
+    _AUX_TENSOR_KEYS = (
+        "aux_pres_logits", "aux_pres_labels",
+        "aux_type_logits", "aux_type_labels",
+    )
+
+    def _accumulate(
+        self,
+        scalar_agg: dict[str, float],
+        tensor_agg: dict[str, list[torch.Tensor]],
+        metrics: dict,
+    ) -> None:
+        for k, v in metrics.items():
+            if k in self._AUX_TENSOR_KEYS:
+                tensor_agg.setdefault(k, []).append(v)
+            else:
+                scalar_agg[k] = scalar_agg.get(k, 0.0) + v
+
+    def _finalize_epoch_metrics(
+        self,
+        scalar_agg: dict[str, float],
+        tensor_agg: dict[str, list[torch.Tensor]],
+        n_batches: int,
+        prefix: str,
+    ) -> dict:
+        out = {f"{prefix}{k}": v / max(n_batches, 1) for k, v in scalar_agg.items()}
+        pres_logits = torch.cat(tensor_agg.get("aux_pres_logits", [])) \
+            if tensor_agg.get("aux_pres_logits") else torch.empty(0)
+        pres_labels = torch.cat(tensor_agg.get("aux_pres_labels", [])) \
+            if tensor_agg.get("aux_pres_labels") else torch.empty(0, dtype=torch.long)
+        type_logits = torch.cat(tensor_agg.get("aux_type_logits", [])) \
+            if tensor_agg.get("aux_type_logits") else torch.empty(0)
+        type_labels = torch.cat(tensor_agg.get("aux_type_labels", [])) \
+            if tensor_agg.get("aux_type_labels") else torch.empty(0, dtype=torch.long)
+        pres_f1, pres_acc = _binary_f1_acc(pres_logits, pres_labels)
+        type_f1, type_acc = _macro_f1_acc(type_logits, type_labels, n_classes=4)
+        out[f"{prefix}aux_pres_f1"]  = round(pres_f1,  4)
+        out[f"{prefix}aux_pres_acc"] = round(pres_acc, 4)
+        out[f"{prefix}aux_type_f1"]  = round(type_f1,  4)
+        out[f"{prefix}aux_type_acc"] = round(type_acc, 4)
+        return out
+
     def _train_epoch(
         self, loader: DataLoader, beta: float, steps_per_epoch: int | None = None
     ) -> dict:
         self.model.train()
-        agg: dict[str, float] = {}
+        scalar_agg: dict[str, float] = {}
+        tensor_agg: dict[str, list[torch.Tensor]] = {}
         n = 0
         for i, batch in enumerate(loader):
             if steps_per_epoch is not None and i >= steps_per_epoch:
@@ -469,22 +577,21 @@ class Trainer:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
-            for k, v in metrics.items():
-                agg[k] = agg.get(k, 0.0) + v
+            self._accumulate(scalar_agg, tensor_agg, metrics)
             n += 1
-        return {f"train_{k}": v / max(n, 1) for k, v in agg.items()}
+        return self._finalize_epoch_metrics(scalar_agg, tensor_agg, n, prefix="train_")
 
     def _eval_epoch(self, loader: DataLoader, beta: float) -> dict:
         self.model.eval()
-        agg: dict[str, float] = {}
+        scalar_agg: dict[str, float] = {}
+        tensor_agg: dict[str, list[torch.Tensor]] = {}
         n = 0
         with torch.no_grad():
             for batch in loader:
                 _, metrics = self._forward_pair(batch, beta=1.0)
-                for k, v in metrics.items():
-                    agg[k] = agg.get(k, 0.0) + v
+                self._accumulate(scalar_agg, tensor_agg, metrics)
                 n += 1
-        out = {f"val_{k}": v / max(n, 1) for k, v in agg.items()}
+        out = self._finalize_epoch_metrics(scalar_agg, tensor_agg, n, prefix="val_")
         # ref_elbo = recon + KL (beta=1) — epoch-invariant checkpoint metric
         out["val_ref_elbo"] = out.get("val_recon", 0.0) + out.get("val_raw_kl", 0.0)
         return out
@@ -500,8 +607,10 @@ class Trainer:
         epochs: int,
         steps_per_epoch: int | None = None,
     ) -> None:
-        best_ref_elbo = float("inf")
-        patience_count = 0
+        best_ref_elbo    = float("inf")
+        best_aux_type_f1 = -1.0
+        best_aux_type_epoch = -1
+        patience_count   = 0
         csv_path = self.save_dir / "crl_metrics.csv"
         csv_file: IO | None = None
         csv_writer: csv.DictWriter | None = None
@@ -514,6 +623,7 @@ class Trainer:
 
                 event = self._update_beta(val_m)
                 ref_elbo = val_m["val_ref_elbo"]
+                aux_type_f1 = val_m.get("val_aux_type_f1", 0.0)
 
                 row = {"epoch": epoch, "beta": self.beta, "beta_event": event}
                 row.update(train_m)
@@ -529,7 +639,9 @@ class Trainer:
                 print(
                     f"Epoch {epoch:3d} | beta={self.beta:.3f} {event} | "
                     f"recon={val_m.get('val_recon',0):.4f} kl={val_m.get('val_raw_kl',0):.4f} "
-                    f"ref_elbo={ref_elbo:.4f}"
+                    f"ref_elbo={ref_elbo:.4f} "
+                    f"aux_pres_f1={val_m.get('val_aux_pres_f1',0):.3f} "
+                    f"aux_type_f1={aux_type_f1:.3f}"
                 )
 
                 if ref_elbo < best_ref_elbo - 1e-5:
@@ -541,11 +653,33 @@ class Trainer:
                     if patience_count >= self.cfg.early_stop_patience:
                         print(f"Early stopping at epoch {epoch}")
                         break
+
+                # Second checkpoint: best aux-type val F1 (downstream-proxy signal).
+                # Val F1 is classification accuracy on fixed-label targets — epoch-invariant
+                # under beta annealing, satisfying project CLAUDE.md §3 "Non-Stationarity".
+                if aux_type_f1 > best_aux_type_f1 + 1e-5:
+                    best_aux_type_f1    = aux_type_f1
+                    best_aux_type_epoch = epoch
+                    torch.save(
+                        self.model.state_dict(),
+                        self.save_dir / "crl_best_aux_type.pth",
+                    )
         finally:
             if csv_file is not None:
                 csv_file.close()
 
         torch.save(self.model.state_dict(), self.save_dir / "crl_final.pth")
+        summary_path = self.save_dir / "crl_checkpoint_summary.json"
+        summary_path.write_text(json.dumps({
+            "best_ref_elbo":             round(best_ref_elbo, 6),
+            "best_aux_type_f1":          round(best_aux_type_f1, 4),
+            "best_aux_type_epoch":       best_aux_type_epoch,
+            "checkpoints": {
+                "crl_best.pth":          "selected by val_ref_elbo (recon + raw_kl at beta=1)",
+                "crl_best_aux_type.pth": "selected by val_aux_type_f1 (downstream-proxy signal)",
+                "crl_final.pth":         "last epoch (may be post-early-stop)",
+            },
+        }, indent=2))
 
     # ------------------------------------------------------------------
     # Downstream training
@@ -559,6 +693,7 @@ class Trainer:
         pres_pos_weight: torch.Tensor | None = None,
         type_class_weights: torch.Tensor | None = None,
         finetune_top_n: int = 0,
+        ckpt_name: str = "crl_best.pth",
     ) -> None:
         """Train downstream heads on frozen (or partially unfrozen) CRL backbone.
 
@@ -568,10 +703,34 @@ class Trainer:
             finetune_top_n:     0  = fully frozen backbone (heads only).
                                 N  = unfreeze top N transformer layers + mu/lv heads at 0.1x lr.
                                 -1 = unfreeze entire backbone at 0.1x lr.
+            ckpt_name:          Which CRL checkpoint to load as the frozen backbone.
+                                Defaults to "crl_best.pth" (selected by val_ref_elbo).
+                                Pass "crl_best_aux_type.pth" to use the F1-selected one.
         """
-        best_path = self.save_dir / "crl_best.pth"
+        best_path = self.save_dir / ckpt_name
         if best_path.exists():
-            self.model.load_state_dict(torch.load(best_path, map_location=self.device))
+            print(f"  Loading CRL backbone from {best_path.name}")
+            state = torch.load(best_path, map_location=self.device)
+            missing, unexpected = self.model.load_state_dict(state, strict=False)
+            # type_heads.* mismatches are expected when --probe-mode differs from the
+            # saved run. Anything else indicates a genuine shape/config mismatch
+            # (e.g., wrong d_z) and should fail loudly.
+            other_missing    = [k for k in missing    if not k.startswith("type_heads.")]
+            other_unexpected = [k for k in unexpected if not k.startswith("type_heads.")]
+            if other_missing or other_unexpected:
+                raise RuntimeError(
+                    f"Checkpoint load mismatch outside type_heads — refusing to "
+                    f"silently train on partially-initialized backbone. "
+                    f"Missing: {other_missing[:5]} | Unexpected: {other_unexpected[:5]}"
+                )
+            type_keys_missing    = [k for k in missing    if k.startswith("type_heads.")]
+            type_keys_unexpected = [k for k in unexpected if k.startswith("type_heads.")]
+            if type_keys_missing or type_keys_unexpected:
+                print(
+                    f"  Probe-mode head swap: {len(type_keys_missing)} new type-head "
+                    f"param(s) will train from scratch; {len(type_keys_unexpected)} "
+                    f"old param(s) in checkpoint discarded."
+                )
 
         # Freeze everything, then selectively unfreeze
         for p in self.model.parameters():
@@ -694,6 +853,8 @@ class Trainer:
         ppw = self._pres_pos_weight
         tcw = self._type_class_weights
 
+        use_fullz = model.probe_mode == "linear_fullz"
+
         if self.cfg.frontend_type == "multiscale":
             avail = batch["audio_avail"].bool() & batch["seismic_avail"].bool()
             if avail.any():
@@ -710,7 +871,8 @@ class Trainer:
                 pres_labels_list.append(det.long())
                 valid = vtype >= 0
                 if valid.any():
-                    type_logit = model.type_heads["fused"](z_type[valid])
+                    z_for_type = z[valid] if use_fullz else z_type[valid]
+                    type_logit = model.type_heads["fused"](z_for_type)
                     total = total + torch.nn.functional.cross_entropy(
                         type_logit, vtype[valid], weight=tcw)
                     type_logits_list.append(type_logit.detach())
@@ -733,7 +895,8 @@ class Trainer:
                 pres_labels_list.append(det.long())
                 valid = vtype >= 0
                 if valid.any():
-                    type_logit = model.type_heads[sensor](z_type[valid])
+                    z_for_type = z[valid] if use_fullz else z_type[valid]
+                    type_logit = model.type_heads[sensor](z_for_type)
                     total = total + torch.nn.functional.cross_entropy(
                         type_logit, vtype[valid], weight=tcw)
                     type_logits_list.append(type_logit.detach())

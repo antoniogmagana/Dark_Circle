@@ -32,6 +32,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--out-dir",    default=None,
                    help="Where to write outputs (defaults to --save-dir)")
+    p.add_argument("--include-datasets", nargs="+", default=None,
+                   help="Only evaluate on these dataset prefixes (e.g. 'focal', 'iobt'). "
+                        "Matches the 'dataset' field parsed from parquet stems. "
+                        "When set, eval_report.json and confusion plots are written to "
+                        "a subdirectory named by the filter.")
     return p.parse_args()
 
 
@@ -171,6 +176,7 @@ def run_inference(
     pres_labels: list[torch.Tensor] = []
     type_logits: list[torch.Tensor] = []
     type_labels: list[torch.Tensor] = []
+    use_fullz = getattr(model, "probe_mode", "linear_ztype") == "linear_fullz"
 
     with torch.no_grad():
         for batch in loader:
@@ -188,7 +194,8 @@ def run_inference(
                 pres_labels.append(det.long())
                 valid = vtype >= 0
                 if valid.any():
-                    type_logits.append(model.type_heads["fused"](z_type[valid]).cpu())
+                    z_for_type = z[valid] if use_fullz else z_type[valid]
+                    type_logits.append(model.type_heads["fused"](z_for_type).cpu())
                     type_labels.append(vtype[valid])
             else:
                 for sensor in model.sensors:
@@ -204,7 +211,8 @@ def run_inference(
                     pres_labels.append(det.long())
                     valid = vtype >= 0
                     if valid.any():
-                        type_logits.append(model.type_heads[sensor](z_type[valid]).cpu())
+                        z_for_type = z[valid] if use_fullz else z_type[valid]
+                        type_logits.append(model.type_heads[sensor](z_for_type).cpu())
                         type_labels.append(vtype[valid])
 
     return {
@@ -232,6 +240,7 @@ def main() -> None:
     meta = json.loads(meta_path.read_text())
     cfg_dict = meta.get("config", {})
     sensors  = meta.get("sensors", ["audio", "seismic"])
+    probe_mode = meta.get("probe_mode", "linear_ztype")
     cfg = CRLConfig(**{k: v for k, v in cfg_dict.items() if hasattr(CRLConfig, k)
                        or k in CRLConfig.__dataclass_fields__})
 
@@ -245,16 +254,31 @@ def main() -> None:
             f"downstream_best.pth not found in {save_dir}. "
             "Run train.py --phase full (or --phase downstream) first."
         )
-    model = CRLModel(cfg, sensors=sensors).to(device)
+    model = CRLModel(cfg, sensors=sensors, probe_mode=probe_mode).to(device)
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
     model.eval()
-    print(f"  Loaded checkpoint: {ckpt_path}")
+    print(f"  Loaded checkpoint: {ckpt_path} (probe_mode={probe_mode})")
 
     # Load test dataset
     cache_dir = Path(args.cache_dir)
     print(f"  Loading test set from {args.test_dir} …")
     test_ds = SensorDataset(args.test_dir, cfg, is_train=False, cache_dir=cache_dir)
-    print(f"  {len(test_ds):,} test windows")
+    print(f"  {len(test_ds):,} test windows (pre-filter)")
+
+    # Optional dataset filter — prune _index to only keep windows from matching datasets.
+    # gkey is (ds, vehicle, rs, seg_key); index rows are (gkey, w, vtype, det, ...).
+    if args.include_datasets:
+        allowed = set(args.include_datasets)
+        filtered = [row for row in test_ds._index if row[0][0] in allowed]
+        dropped = len(test_ds._index) - len(filtered)
+        test_ds._index = filtered
+        print(f"  Dataset filter {sorted(allowed)}: kept {len(filtered):,} windows "
+              f"({dropped:,} dropped)")
+        if not filtered:
+            raise RuntimeError(f"No windows remain after filter {sorted(allowed)}")
+        # Redirect outputs to a subdirectory so multiple filtered runs don't collide.
+        out_dir = out_dir / ("filter_" + "_".join(sorted(allowed)))
+        out_dir.mkdir(parents=True, exist_ok=True)
 
     loader = DataLoader(
         test_ds, batch_size=args.batch_size, shuffle=False,
@@ -301,6 +325,7 @@ def main() -> None:
     report = {
         "save_dir":  str(save_dir),
         "test_dir":  args.test_dir,
+        "include_datasets": sorted(args.include_datasets) if args.include_datasets else None,
         "n_windows": len(test_ds),
         "presence":  pres_m,
         "type":      type_m,

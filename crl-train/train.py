@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--finetune-top-n", type=int, default=0,
                    help="Unfreeze top N encoder transformer layers during downstream "
                         "(0 = fully frozen backbone, -1 = unfreeze all)")
+    p.add_argument("--probe-mode",
+                   choices=["linear_ztype", "mlp_ztype", "linear_fullz"],
+                   default="linear_ztype",
+                   help="Downstream type-head architecture. linear_ztype: Linear(6,4) on "
+                        "z_type (default); mlp_ztype: Linear(6,32)-ReLU-Linear(32,4) on "
+                        "z_type; linear_fullz: Linear(d_z,4) on the full latent.")
+    p.add_argument("--crl-run-dir", default=None,
+                   help="Existing run dir to load crl_best.pth from. When set, --save-dir "
+                        "defaults to <crl-run-dir>/probes/<probe-mode>/ so probe artifacts "
+                        "don't overwrite the original downstream outputs.")
+    p.add_argument("--ckpt-name", default="crl_best.pth",
+                   help="Which CRL checkpoint to load for downstream. Options: "
+                        "crl_best.pth (val_ref_elbo, default), crl_best_aux_type.pth "
+                        "(val_aux_type_f1), crl_final.pth (last epoch).")
     return p.parse_args()
 
 
@@ -54,8 +69,23 @@ def main() -> None:
     )
 
     run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    save_dir = Path(args.save_dir or f"saved_crl/{args.frontend}/{run_ts}")
-    save_dir.mkdir(parents=True, exist_ok=True)
+    if args.crl_run_dir is not None:
+        crl_run_dir = Path(args.crl_run_dir)
+        default_save = crl_run_dir / "probes" / f"{args.probe_mode}__{Path(args.ckpt_name).stem}"
+        save_dir = Path(args.save_dir) if args.save_dir else default_save
+        save_dir.mkdir(parents=True, exist_ok=True)
+        # Mirror the selected CRL checkpoint into save_dir so train_downstream finds it.
+        src_ckpt = crl_run_dir / args.ckpt_name
+        dst_ckpt = save_dir / args.ckpt_name
+        if not src_ckpt.exists():
+            raise FileNotFoundError(
+                f"--crl-run-dir missing {args.ckpt_name}: {src_ckpt}"
+            )
+        if not dst_ckpt.exists() or src_ckpt.stat().st_mtime > dst_ckpt.stat().st_mtime:
+            shutil.copy2(src_ckpt, dst_ckpt)
+    else:
+        save_dir = Path(args.save_dir or f"saved_crl/{args.frontend}/{run_ts}")
+        save_dir.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cache_dir = Path(args.cache_dir) if args.cache_dir else None
 
@@ -66,7 +96,7 @@ def main() -> None:
     print(f"  Class weights — pres pos_weight: {pres_weight:.3f} | "
           f"type: {[round(w, 3) for w in type_weights.tolist()]}")
 
-    model   = CRLModel(cfg, sensors=args.sensors).to(device)
+    model   = CRLModel(cfg, sensors=args.sensors, probe_mode=args.probe_mode).to(device)
     trainer = Trainer(model, cfg, device, save_dir)
 
     if args.phase in ("crl", "full"):
@@ -105,11 +135,15 @@ def main() -> None:
             pres_pos_weight=pres_weight.to(device),
             type_class_weights=type_weights.to(device),
             finetune_top_n=args.finetune_top_n,
+            ckpt_name=args.ckpt_name,
         )
 
     (save_dir / "meta.json").write_text(json.dumps({
-        "config":  asdict(cfg),
-        "sensors": args.sensors,
+        "config":     asdict(cfg),
+        "sensors":    args.sensors,
+        "probe_mode": args.probe_mode,
+        "ckpt_name":  args.ckpt_name,
+        "crl_run_dir": str(Path(args.crl_run_dir).resolve()) if args.crl_run_dir else None,
     }, indent=2))
     print(f"Done. Artifacts in {save_dir}")
 
