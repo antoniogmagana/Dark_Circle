@@ -1,0 +1,17 @@
+{
+  "name": "baseline_morlet",
+  "timestamp": "2026-04-20_15-14-35",
+  "description": "Morlet frontend, otherwise default",
+  "overrides": {
+    "frontend_type": "morlet"
+  },
+  "crl_elapsed_min": 101.22,
+  "ds_elapsed_min": 17.86,
+  "best_val_ref_elbo": 0.4851,
+  "crl_converged_epoch": 83,
+  "val_pres_f1": 0.9886,
+  "val_pres_acc": 0.9779,
+  "val_type_f1": 0.3924,
+  "val_type_acc": 0.5715,
+  "val_loss": 1.3467
+}

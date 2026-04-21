@@ -1,0 +1,19 @@
+{
+  "name": "more_partners",
+  "timestamp": "2026-04-20_19-08-49",
+  "description": "2 same-type + 2 diff-type + 2 cross-dataset partners",
+  "overrides": {
+    "n_partners_same_type": 2,
+    "n_partners_diff_type": 2,
+    "n_partners_cross_ds": 2
+  },
+  "crl_elapsed_min": 55.9,
+  "ds_elapsed_min": 4.1,
+  "best_val_ref_elbo": 0.1878,
+  "crl_converged_epoch": 99,
+  "val_pres_f1": 0.9999,
+  "val_pres_acc": 0.9998,
+  "val_type_f1": 0.676,
+  "val_type_acc": 0.7405,
+  "val_loss": 1.3023
+}
