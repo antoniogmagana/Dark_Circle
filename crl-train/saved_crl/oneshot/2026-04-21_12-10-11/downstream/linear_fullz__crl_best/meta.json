@@ -1,0 +1,39 @@
+{
+  "config": {
+    "d_z": 24,
+    "d_model": 64,
+    "n_heads": 4,
+    "n_layers": 2,
+    "frontend_type": "multiscale",
+    "fused_seq_len": 32,
+    "morlet_kernel_size": 257,
+    "multiscale_pool_stride": 16,
+    "morlet_pool_stride": 64,
+    "batch_size": 64,
+    "lr": 0.0003,
+    "lr_min": 0.0001,
+    "wd": 0.0001,
+    "n_epochs": 100,
+    "num_workers": 4,
+    "early_stop_patience": 25,
+    "lambda_interv": 1.0,
+    "lambda_aux_pres": 1.0,
+    "lambda_aux_type": 1.0,
+    "lambda_aux_prox": 0.1,
+    "beta_step": 0.02,
+    "kl_floor": 0.01,
+    "kl_target": 0.5,
+    "recon_min_delta": 0.0001,
+    "horizon_stride_sec": 0.7,
+    "n_partners_same_type": 1,
+    "n_partners_diff_type": 1,
+    "n_partners_cross_ds": 1
+  },
+  "sensors": [
+    "audio",
+    "seismic"
+  ],
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best.pth",
+  "crl_run_dir": "/home/lvc_toolkit/project-files/Dark_Circle/crl-train/saved_crl/oneshot/2026-04-21_12-10-11/crl"
+}
