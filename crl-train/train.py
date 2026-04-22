@@ -33,6 +33,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--num-workers", type=int,   default=4)
     p.add_argument("--save-dir",    default=None)
     p.add_argument("--frontend",    choices=["multiscale", "morlet"], default="multiscale")
+    p.add_argument("--training-mode", choices=["vae", "contrastive"], default="vae",
+                   help="'vae' = ELBO + aux + interv (default). 'contrastive' = "
+                        "NT-Xent over stratified partners during CRL.")
     p.add_argument("--steps-per-epoch", type=int, default=None,
                    help="Limit batches per epoch (for smoke tests)")
     p.add_argument("--cache-dir",   default="./saved_crl/cache")
@@ -62,6 +65,7 @@ def main() -> None:
 
     cfg = CRLConfig(
         frontend_type=args.frontend,
+        training_mode=args.training_mode,
         batch_size=args.batch_size,
         lr=args.lr,
         num_workers=args.num_workers,

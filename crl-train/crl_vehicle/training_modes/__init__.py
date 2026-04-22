@@ -15,12 +15,14 @@ Selection is via CRLConfig.training_mode. Factory function build_training_mode
 reads the config and instantiates the correct mode + prior.
 """
 from crl_vehicle.training_modes.base import CheckpointState, TrainingMode
+from crl_vehicle.training_modes.contrastive_mode import ContrastiveTrainingMode
 from crl_vehicle.training_modes.factory import build_training_mode
 from crl_vehicle.training_modes.vae_mode import VAETrainingMode
 
 __all__ = [
     "TrainingMode",
     "VAETrainingMode",
+    "ContrastiveTrainingMode",
     "CheckpointState",
     "build_training_mode",
 ]

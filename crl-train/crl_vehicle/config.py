@@ -126,6 +126,10 @@ class CRLConfig:
     n_partners_diff_type: int = 1
     n_partners_cross_ds: int = 1
 
+    # Contrastive mode (training_mode="contrastive")
+    contrastive_temperature: float = 0.1
+    contrastive_d_proj: int = 64
+
     def modality_cfg(self, sensor: str) -> ModalityConfig:
         if sensor == "audio":
             return ModalityConfig(sample_rate=16000, window_size=16000, n_channels=1)

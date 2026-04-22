@@ -103,6 +103,12 @@ def parse_args() -> argparse.Namespace:
                    help="Prior over z. 'standard'=N(0,I); 'conditional'=iVAE "
                         "(label-conditioned MLP → (μ, logσ²)). Conditional "
                         "gives identifiability under label variation.")
+    p.add_argument("--training-mode", choices=["vae", "contrastive"],
+                   default="vae",
+                   help="'vae' (default) = ELBO + aux heads + intervention "
+                        "matching. 'contrastive' = NT-Xent over stratified "
+                        "partners (no decoder/KL/aux during CRL); downstream "
+                        "probes still run post-hoc.")
     p.add_argument("--sensors", nargs="+", default=["audio", "seismic"])
     p.add_argument("--skip-existing", action="store_true",
                    help="Skip sub-runs that already have their completion marker.")
@@ -136,7 +142,9 @@ def phase_crl(
     meta_path = crl_dir / "meta.json"
     ref_ckpt  = crl_dir / "crl_best.pth"
     aux_ckpt  = crl_dir / "crl_best_aux_type.pth"
-    done_markers_present = all(p.exists() for p in (meta_path, ref_ckpt, aux_ckpt))
+    # Contrastive runs emit only crl_best.pth; VAE runs emit both.
+    required_ckpts = (ref_ckpt,) if cfg.training_mode == "contrastive" else (ref_ckpt, aux_ckpt)
+    done_markers_present = meta_path.exists() and all(p.exists() for p in required_ckpts)
 
     if skip_existing and done_markers_present:
         print(f"  [skip] CRL outputs already present in {crl_dir}")
@@ -678,6 +686,7 @@ def main() -> None:
         frontend_type=args.frontend,
         morlet_use_phase=args.morlet_use_phase,
         prior_type=args.prior_type,
+        training_mode=args.training_mode,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         n_epochs=args.crl_epochs,
