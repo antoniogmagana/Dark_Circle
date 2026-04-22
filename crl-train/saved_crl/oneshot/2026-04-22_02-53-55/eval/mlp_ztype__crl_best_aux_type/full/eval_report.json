@@ -1,0 +1,166 @@
+{
+  "run_name": "mlp_ztype__crl_best_aux_type",
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "split": "full",
+  "include_datasets": null,
+  "n_windows": 12432,
+  "presence": {
+    "accuracy": 0.7191,
+    "precision": 0.8786,
+    "recall": 0.6847,
+    "specificity": 0.794,
+    "f1": 0.7697,
+    "balanced_accuracy": 0.7394,
+    "mcc": 0.4456,
+    "tp": 5834,
+    "fp": 806,
+    "fn": 2686,
+    "tn": 3106
+  },
+  "type": {
+    "accuracy": 0.2637,
+    "macro_f1": 0.2713,
+    "macro_f1_support_only": 0.2713,
+    "macro_precision": 0.27,
+    "macro_recall": 0.3967,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.1791,
+        "recall": 0.1167,
+        "f1": 0.1413,
+        "support": 3051
+      },
+      "light": {
+        "precision": 0.1765,
+        "recall": 0.2831,
+        "f1": 0.2174,
+        "support": 1420
+      },
+      "medium": {
+        "precision": 0.4854,
+        "recall": 0.2706,
+        "f1": 0.3475,
+        "support": 3440
+      },
+      "heavy": {
+        "precision": 0.2389,
+        "recall": 0.9163,
+        "f1": 0.3789,
+        "support": 609
+      }
+    },
+    "confusion_matrix": [
+      [
+        356,
+        934,
+        691,
+        1070
+      ],
+      [
+        186,
+        402,
+        248,
+        584
+      ],
+      [
+        1446,
+        939,
+        931,
+        124
+      ],
+      [
+        0,
+        3,
+        48,
+        558
+      ]
+    ]
+  },
+  "presence_target_calibrated": {
+    "accuracy": 0.6853,
+    "precision": 0.6853,
+    "recall": 1.0,
+    "specificity": 0.0,
+    "f1": 0.8133,
+    "balanced_accuracy": 0.5,
+    "mcc": 0.0,
+    "tp": 8520,
+    "fp": 3912,
+    "fn": 0,
+    "tn": 0,
+    "p_split": 0.685328,
+    "p_train_assumed": 0.5
+  },
+  "type_target_calibrated": {
+    "accuracy": 0.2803,
+    "macro_f1": 0.1447,
+    "macro_f1_support_only": 0.1447,
+    "macro_precision": 0.1306,
+    "macro_recall": 0.1782,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.2198,
+        "recall": 0.1662,
+        "f1": 0.1892,
+        "support": 3051
+      },
+      "light": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 1420
+      },
+      "medium": {
+        "precision": 0.3028,
+        "recall": 0.5468,
+        "f1": 0.3897,
+        "support": 3440
+      },
+      "heavy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 609
+      }
+    },
+    "confusion_matrix": [
+      [
+        507,
+        0,
+        2544,
+        0
+      ],
+      [
+        241,
+        0,
+        1179,
+        0
+      ],
+      [
+        1559,
+        0,
+        1881,
+        0
+      ],
+      [
+        0,
+        0,
+        609,
+        0
+      ]
+    ],
+    "p_split": [
+      0.358099,
+      0.166667,
+      0.403756,
+      0.071479
+    ],
+    "p_train_assumed": [
+      0.25,
+      0.25,
+      0.25,
+      0.25
+    ]
+  }
+}

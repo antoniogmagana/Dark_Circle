@@ -1,0 +1,168 @@
+{
+  "run_name": "mlp_ztype__crl_best_aux_type",
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "split": "iobt",
+  "include_datasets": [
+    "iobt"
+  ],
+  "n_windows": 3204,
+  "presence": {
+    "accuracy": 0.6194,
+    "precision": 0.806,
+    "recall": 0.5254,
+    "specificity": 0.7817,
+    "f1": 0.6361,
+    "balanced_accuracy": 0.6535,
+    "mcc": 0.3006,
+    "tp": 2132,
+    "fp": 513,
+    "fn": 1926,
+    "tn": 1837
+  },
+  "type": {
+    "accuracy": 0.1806,
+    "macro_f1": 0.1026,
+    "macro_f1_support_only": 0.2051,
+    "macro_precision": 0.4864,
+    "macro_recall": 0.065,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 0.9455,
+        "recall": 0.2567,
+        "f1": 0.4038,
+        "support": 2840
+      },
+      "medium": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "heavy": {
+        "precision": 1.0,
+        "recall": 0.0033,
+        "f1": 0.0065,
+        "support": 1218
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1314,
+        729,
+        797,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        562,
+        42,
+        610,
+        4
+      ]
+    ]
+  },
+  "presence_target_calibrated": {
+    "accuracy": 0.6731,
+    "precision": 0.6755,
+    "recall": 0.931,
+    "specificity": 0.2277,
+    "f1": 0.7829,
+    "balanced_accuracy": 0.5793,
+    "mcc": 0.2295,
+    "tp": 3778,
+    "fp": 1815,
+    "fn": 280,
+    "tn": 535,
+    "p_split": 0.633271,
+    "p_train_assumed": 0.5
+  },
+  "type_target_calibrated": {
+    "accuracy": 0.6947,
+    "macro_f1": 0.2409,
+    "macro_f1_support_only": 0.4818,
+    "macro_precision": 0.2914,
+    "macro_recall": 0.2609,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 0.7096,
+        "recall": 0.9542,
+        "f1": 0.8139,
+        "support": 2840
+      },
+      "medium": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "heavy": {
+        "precision": 0.4561,
+        "recall": 0.0895,
+        "f1": 0.1496,
+        "support": 1218
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        2710,
+        0,
+        130
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1109,
+        0,
+        109
+      ]
+    ],
+    "p_split": [
+      0.0,
+      0.699852,
+      0.0,
+      0.300148
+    ],
+    "p_train_assumed": [
+      0.25,
+      0.25,
+      0.25,
+      0.25
+    ]
+  }
+}
