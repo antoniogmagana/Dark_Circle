@@ -174,6 +174,9 @@ class TestForwardPair:
 
 
 class TestBetaAnnealing:
+    """Beta schedule lives in VAETrainingMode.update_beta — Trainer only
+    stores self.beta and passes it through. These tests drive the mode
+    directly, bypassing the epoch loop."""
 
     @pytest.fixture
     def trainer(self, tmp_path):
@@ -181,30 +184,38 @@ class TestBetaAnnealing:
                         kl_floor=0.01, kl_target=0.5, beta_step=0.1)
         return Trainer(CRLModel(cfg), cfg, torch.device("cpu"), tmp_path)
 
-    def test_update_beta_exists(self, trainer):
-        assert hasattr(trainer, "_update_beta")
+    def _step(self, trainer, val_m):
+        """Invoke mode.update_beta with trainer's current state and assign."""
+        new_beta, event = trainer.mode.update_beta(
+            trainer.beta, val_m, trainer.ckpt_state, trainer.cfg
+        )
+        trainer.beta = new_beta
+        return event
 
     def test_initial_beta_zero(self, trainer):
         assert trainer.beta == 0.0
 
+    def test_mode_owns_update_beta(self, trainer):
+        assert hasattr(trainer.mode, "update_beta")
+
     def test_increases_when_kl_above_target(self, trainer):
-        trainer.prev_val_recon = 1.0
-        trainer._update_beta({"val_recon": 0.9, "val_raw_kl": 1.0})
+        trainer.ckpt_state.prev_val_recon = 1.0
+        self._step(trainer, {"val_recon": 0.9, "val_raw_kl": 1.0})
         assert trainer.beta > 0.0
 
     def test_decreases_on_collapse(self, trainer):
         trainer.beta = 0.5
-        trainer.prev_val_recon = 1.0
-        trainer._update_beta({"val_recon": 0.9, "val_raw_kl": 0.001})
+        trainer.ckpt_state.prev_val_recon = 1.0
+        self._step(trainer, {"val_recon": 0.9, "val_raw_kl": 0.001})
         assert trainer.beta < 0.5
 
     def test_bounded_0_to_1(self, trainer):
         trainer.beta = 1.0
-        trainer.prev_val_recon = 1.0
-        trainer._update_beta({"val_recon": 0.9, "val_raw_kl": 1.0})
+        trainer.ckpt_state.prev_val_recon = 1.0
+        self._step(trainer, {"val_recon": 0.9, "val_raw_kl": 1.0})
         assert trainer.beta <= 1.0
 
     def test_returns_event_string(self, trainer):
-        trainer.prev_val_recon = 1.0
-        event = trainer._update_beta({"val_recon": 0.9, "val_raw_kl": 0.8})
+        trainer.ckpt_state.prev_val_recon = 1.0
+        event = self._step(trainer, {"val_recon": 0.9, "val_raw_kl": 0.8})
         assert event in ("↑", "→hold", "↓collapse")

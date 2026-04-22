@@ -14,15 +14,13 @@ from crl_vehicle.config import CRLConfig
 from crl_vehicle.models.frontend import MultiScale1DFrontend, MorletFilterbank
 from crl_vehicle.models.latent import CausalLatentSpace
 from crl_vehicle.models.encoder_decoder import TemporalEncoder, FeatureDecoder
-from crl_vehicle.models.intervention import (
-    UnknownInterventionClassifier, label_change_target
-)
+from crl_vehicle.models.intervention import UnknownInterventionClassifier
 from crl_vehicle.models.heads import (
     LinearPresenceHead, LinearTypeHead, LinearProximityHead,
     MLPTypeHead, FullZTypeHead,
 )
-from crl_vehicle.losses.crl_loss import (
-    reconstruction_loss, kl_divergence, intervention_matching_loss
+from crl_vehicle.training_modes import (
+    CheckpointState, TrainingMode, build_training_mode,
 )
 
 
@@ -263,23 +261,17 @@ def _macro_f1_acc(
     return f1_sum / n_classes, acc
 
 
-def _empty_aux_metrics() -> dict:
-    """Zeroed aux-metrics dict for batches with no valid samples."""
-    empty_f = torch.empty(0)
-    empty_l = torch.empty(0, dtype=torch.long)
-    return {
-        "recon": 0.0, "kl": 0.0, "raw_kl": 0.0, "interv": 0.0, "total": 0.0,
-        "aux_pres_logits": empty_f, "aux_pres_labels": empty_l,
-        "aux_type_logits": empty_f, "aux_type_labels": empty_l,
-    }
-
-
 # ---------------------------------------------------------------------------
 # Trainer
 # ---------------------------------------------------------------------------
 
 class Trainer:
-    """Handles CRL pre-training and downstream head training."""
+    """Handles CRL pre-training and downstream head training.
+
+    Owns the epoch loop, optimizer, CSV logging, and patience counter. All
+    algorithm-specific logic (loss computation, beta schedule, checkpoint
+    selection) lives in a TrainingMode instance built from config.
+    """
 
     def __init__(
         self,
@@ -294,228 +286,36 @@ class Trainer:
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
+        self.mode: TrainingMode = build_training_mode(config).to(device)
+        self.ckpt_state = CheckpointState()
+
         self.beta = 0.0
         self._pres_pos_weight:    torch.Tensor | None = None
         self._type_class_weights: torch.Tensor | None = None
-        self.prev_val_recon = float("inf")
 
-        self.optimizer = torch.optim.AdamW(
-            model.backbone_parameters(),
-            lr=config.lr,
-            weight_decay=config.wd,
-        )
+        # The optimizer covers both model backbone and any learnable params
+        # carried by the mode (e.g. ConditionalPrior MLP at Checkpoint 2).
+        backbone_param_ids = {id(p) for p in model.backbone_parameters()}
+        mode_params = [p for p in self.mode.parameters()
+                       if id(p) not in backbone_param_ids]
+        param_groups = [
+            {"params": model.backbone_parameters(), "weight_decay": config.wd}
+        ]
+        if mode_params:
+            param_groups.append({"params": mode_params, "weight_decay": config.wd})
+        self.optimizer = torch.optim.AdamW(param_groups, lr=config.lr)
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=config.n_epochs, eta_min=config.lr_min
         )
 
     # ------------------------------------------------------------------
-    # Beta annealing
-    # ------------------------------------------------------------------
-
-    def _update_beta(self, val_m: dict) -> str:
-        raw_kl = val_m["val_raw_kl"]
-        recon_improving = (
-            val_m["val_recon"] < self.prev_val_recon - self.cfg.recon_min_delta
-        )
-        self.prev_val_recon = val_m["val_recon"]
-        if raw_kl < self.cfg.kl_floor:
-            self.beta = max(0.0, self.beta - self.cfg.beta_step)
-            return "↓collapse"
-        elif recon_improving or raw_kl > self.cfg.kl_target:
-            self.beta = min(1.0, self.beta + self.cfg.beta_step)
-            return "↑"
-        return "→hold"
-
-    # ------------------------------------------------------------------
-    # Forward pair
+    # Forward pair — delegates to the TrainingMode.
     # ------------------------------------------------------------------
 
     def _forward_pair(
         self, batch: dict, beta: float,
     ) -> tuple[torch.Tensor, dict]:
-        """Forward a pair batch and return (loss, metrics).
-
-        metrics always contains detached CPU tensors under keys `aux_pres_logits`,
-        `aux_pres_labels`, `aux_type_logits`, `aux_type_labels` for computing
-        epoch-level classification F1 on both train and val.
-        """
-        if self.cfg.frontend_type == "multiscale":
-            return self._forward_pair_fused(batch, beta)
-        return self._forward_pair_per_sensor(batch, beta)
-
-    def _forward_pair_fused(
-        self, batch: dict, beta: float,
-    ) -> tuple[torch.Tensor, dict]:
-        model = self.model
-        cfg   = self.cfg
-        dev   = self.device
-
-        avail = batch["audio_avail"].bool() & batch["seismic_avail"].bool()
-        if not avail.any():
-            zero = torch.tensor(0.0, device=dev, requires_grad=True)
-            return zero, _empty_aux_metrics()
-
-        x_a = batch["x_audio_t"][avail].to(dev)
-        x_s = batch["x_seismic_t"][avail].to(dev)
-
-        features, z_t, mu_t, lv_t = model.encode_fused(x_a, x_s)
-        x_hat = model.decode_fused(z_t)
-
-        recon   = reconstruction_loss(x_hat, features.detach())
-        kl      = kl_divergence(mu_t, lv_t, beta=beta)
-        raw_kl  = kl_divergence(mu_t, lv_t, beta=1.0)
-
-        # Aux supervised losses on anchor
-        z_pres, z_type, z_prox, z_env, _ = model.latent.split(z_t)
-        det_t  = batch["detection_label_t"][avail].float().to(dev)
-        type_t = batch["vehicle_type_t"][avail].to(dev)
-
-        aux_pres_logit = model.aux_pres_heads["fused"](z_pres).squeeze(-1)
-        aux_pres = torch.nn.functional.binary_cross_entropy_with_logits(aux_pres_logit, det_t)
-
-        valid_type = type_t >= 0
-        aux_type = torch.tensor(0.0, device=dev)
-        aux_type_logit_valid = torch.empty(0, device=dev)
-        type_labels_valid    = torch.empty(0, dtype=torch.long, device=dev)
-        if valid_type.any():
-            aux_type_logit_valid = model.aux_type_heads["fused"](z_type[valid_type])
-            type_labels_valid    = type_t[valid_type].long()
-            aux_type = torch.nn.functional.cross_entropy(
-                aux_type_logit_valid, type_labels_valid,
-            )
-
-        # Intervention: use consecutive partner (p0)
-        n_partners = batch["n_partners"]
-        interv = torch.tensor(0.0, device=dev)
-        if n_partners > 0:
-            x_a_p0 = batch["x_audio_p0"][avail].to(dev)
-            x_s_p0 = batch["x_seismic_p0"][avail].to(dev)
-            _, z_tn, _, _ = model.encode_fused(x_a_p0, x_s_p0)
-            _, _, _, z_env_tn, _ = model.latent.split(z_tn)
-            det_tn   = batch["detection_label_p0"][avail].to(dev)
-            type_tn  = batch["vehicle_type_p0"][avail].to(dev)
-            targets  = label_change_target(det_t.long(), det_tn, type_t, type_tn).to(dev)
-            logits   = model.interv_classifier(z_env, z_env_tn)
-            interv   = intervention_matching_loss(logits, targets)
-
-        total = (recon + kl
-                 + cfg.lambda_interv   * interv
-                 + cfg.lambda_aux_pres * aux_pres
-                 + cfg.lambda_aux_type * aux_type)
-
-        metrics = {
-            "recon":   recon.item(),
-            "kl":      kl.item(),
-            "raw_kl":  raw_kl.item(),
-            "interv":  interv.item() if isinstance(interv, torch.Tensor) else interv,
-            "total":   total.item(),
-            "aux_pres_logits": aux_pres_logit.detach().cpu(),
-            "aux_pres_labels": det_t.detach().long().cpu(),
-            "aux_type_logits": aux_type_logit_valid.detach().cpu(),
-            "aux_type_labels": type_labels_valid.detach().cpu(),
-        }
-        return total, metrics
-
-    def _forward_pair_per_sensor(
-        self, batch: dict, beta: float
-    ) -> tuple[torch.Tensor, dict]:
-        model = self.model
-        cfg   = self.cfg
-        dev   = self.device
-
-        total_loss = torch.tensor(0.0, device=dev)
-        agg: dict[str, float] = {"recon": 0.0, "kl": 0.0, "raw_kl": 0.0,
-                                  "interv": 0.0, "total": 0.0}
-        aux_pres_logits_all: list[torch.Tensor] = []
-        aux_pres_labels_all: list[torch.Tensor] = []
-        aux_type_logits_all: list[torch.Tensor] = []
-        aux_type_labels_all: list[torch.Tensor] = []
-        n_active = 0
-
-        for sensor in model.sensors:
-            avail_key = f"{sensor}_avail"
-            avail = batch[avail_key].bool()
-            if not avail.any():
-                continue
-
-            x_key = f"x_{sensor}_t"
-            x = batch[x_key][avail].to(dev)
-            features, z_t, mu_t, lv_t = model.encode(sensor, x)
-            x_hat = model.decode(sensor, z_t)
-
-            recon  = reconstruction_loss(x_hat, features.detach())
-            kl     = kl_divergence(mu_t, lv_t, beta=beta)
-            raw_kl = kl_divergence(mu_t, lv_t, beta=1.0)
-
-            z_pres, z_type, z_prox, z_env, _ = model.latent.split(z_t)
-            det_t  = batch["detection_label_t"][avail].float().to(dev)
-            type_t = batch["vehicle_type_t"][avail].to(dev)
-
-            aux_pres_logit = model.aux_pres_heads[sensor](z_pres).squeeze(-1)
-            aux_pres = torch.nn.functional.binary_cross_entropy_with_logits(
-                aux_pres_logit, det_t
-            )
-            aux_pres_logits_all.append(aux_pres_logit.detach().cpu())
-            aux_pres_labels_all.append(det_t.detach().long().cpu())
-
-            valid_type = type_t >= 0
-            aux_type = torch.tensor(0.0, device=dev)
-            if valid_type.any():
-                type_logit_valid = model.aux_type_heads[sensor](z_type[valid_type])
-                type_labels_valid = type_t[valid_type].long()
-                aux_type = torch.nn.functional.cross_entropy(
-                    type_logit_valid, type_labels_valid,
-                )
-                aux_type_logits_all.append(type_logit_valid.detach().cpu())
-                aux_type_labels_all.append(type_labels_valid.detach().cpu())
-
-            interv = torch.tensor(0.0, device=dev)
-            n_partners = batch["n_partners"]
-            if n_partners > 0:
-                x_p0 = batch[f"x_{sensor}_p0"][avail].to(dev)
-                _, z_tn, _, _ = model.encode(sensor, x_p0)
-                _, _, _, z_env_tn, _ = model.latent.split(z_tn)
-                det_tn  = batch["detection_label_p0"][avail].to(dev)
-                type_tn = batch["vehicle_type_p0"][avail].to(dev)
-                targets = label_change_target(det_t.long(), det_tn, type_t, type_tn).to(dev)
-                logits  = model.interv_classifier(z_env, z_env_tn)
-                interv  = intervention_matching_loss(logits, targets)
-
-            sensor_loss = (recon + kl
-                           + cfg.lambda_interv   * interv
-                           + cfg.lambda_aux_pres * aux_pres
-                           + cfg.lambda_aux_type * aux_type)
-            total_loss = total_loss + sensor_loss
-            agg["recon"]  += recon.item()
-            agg["kl"]     += kl.item()
-            agg["raw_kl"] += raw_kl.item()
-            agg["interv"] += interv.item() if isinstance(interv, torch.Tensor) else interv
-            agg["total"]  += sensor_loss.item()
-            n_active += 1
-
-        if n_active > 1:
-            total_loss = total_loss / n_active
-            for k in agg:
-                agg[k] /= n_active
-
-        if n_active == 0:
-            total_loss = torch.tensor(0.0, device=dev, requires_grad=True)
-
-        agg["aux_pres_logits"] = (
-            torch.cat(aux_pres_logits_all) if aux_pres_logits_all else torch.empty(0)
-        )
-        agg["aux_pres_labels"] = (
-            torch.cat(aux_pres_labels_all) if aux_pres_labels_all
-            else torch.empty(0, dtype=torch.long)
-        )
-        agg["aux_type_logits"] = (
-            torch.cat(aux_type_logits_all) if aux_type_logits_all else torch.empty(0)
-        )
-        agg["aux_type_labels"] = (
-            torch.cat(aux_type_labels_all) if aux_type_labels_all
-            else torch.empty(0, dtype=torch.long)
-        )
-        return total_loss, agg
+        return self.mode.forward_pair(self.model, batch, beta, self.device)
 
     # ------------------------------------------------------------------
     # Epoch helpers
@@ -592,9 +392,7 @@ class Trainer:
                 self._accumulate(scalar_agg, tensor_agg, metrics)
                 n += 1
         out = self._finalize_epoch_metrics(scalar_agg, tensor_agg, n, prefix="val_")
-        # ref_elbo = recon + KL (beta=1) — epoch-invariant checkpoint metric
-        out["val_ref_elbo"] = out.get("val_recon", 0.0) + out.get("val_raw_kl", 0.0)
-        return out
+        return self.mode.val_metrics_summary(out)
 
     # ------------------------------------------------------------------
     # CRL pre-training
@@ -607,10 +405,10 @@ class Trainer:
         epochs: int,
         steps_per_epoch: int | None = None,
     ) -> None:
-        best_ref_elbo    = float("inf")
-        best_aux_type_f1 = -1.0
-        best_aux_type_epoch = -1
-        patience_count   = 0
+        """Run CRL pre-training. Algorithm-specific logic (beta, checkpoints,
+        early stopping metric) is delegated to self.mode; this method owns
+        only the epoch loop, CSV logging, and patience counting."""
+        early_stop_metric = self.mode.early_stop_metric()
         csv_path = self.save_dir / "crl_metrics.csv"
         csv_file: IO | None = None
         csv_writer: csv.DictWriter | None = None
@@ -621,14 +419,14 @@ class Trainer:
                 val_m   = self._eval_epoch(val_loader, self.beta)
                 self.scheduler.step()
 
-                event = self._update_beta(val_m)
-                ref_elbo = val_m["val_ref_elbo"]
-                aux_type_f1 = val_m.get("val_aux_type_f1", 0.0)
+                new_beta, event = self.mode.update_beta(
+                    self.beta, val_m, self.ckpt_state, self.cfg
+                )
+                self.beta = new_beta
 
                 row = {"epoch": epoch, "beta": self.beta, "beta_event": event}
                 row.update(train_m)
                 row.update(val_m)
-
                 if csv_writer is None:
                     csv_file = open(csv_path, "w", newline="")
                     csv_writer = csv.DictWriter(csv_file, fieldnames=list(row.keys()))
@@ -638,48 +436,30 @@ class Trainer:
 
                 print(
                     f"Epoch {epoch:3d} | beta={self.beta:.3f} {event} | "
-                    f"recon={val_m.get('val_recon',0):.4f} kl={val_m.get('val_raw_kl',0):.4f} "
-                    f"ref_elbo={ref_elbo:.4f} "
+                    f"recon={val_m.get('val_recon',0):.4f} "
+                    f"kl={val_m.get('val_raw_kl',0):.4f} "
+                    f"{early_stop_metric}={val_m.get(early_stop_metric, 0):.4f} "
                     f"aux_pres_f1={val_m.get('val_aux_pres_f1',0):.3f} "
-                    f"aux_type_f1={aux_type_f1:.3f}"
+                    f"aux_type_f1={val_m.get('val_aux_type_f1',0):.3f}"
                 )
 
-                if ref_elbo < best_ref_elbo - 1e-5:
-                    best_ref_elbo = ref_elbo
-                    torch.save(self.model.state_dict(), self.save_dir / "crl_best.pth")
-                    patience_count = 0
-                else:
-                    patience_count += 1
-                    if patience_count >= self.cfg.early_stop_patience:
-                        print(f"Early stopping at epoch {epoch}")
-                        break
+                saves = self.mode.should_save_checkpoint(val_m, epoch, self.ckpt_state)
+                for ckpt_name, should_save in saves.items():
+                    if should_save:
+                        torch.save(self.model.state_dict(), self.save_dir / ckpt_name)
 
-                # Second checkpoint: best aux-type val F1 (downstream-proxy signal).
-                # Val F1 is classification accuracy on fixed-label targets — epoch-invariant
-                # under beta annealing, satisfying project CLAUDE.md §3 "Non-Stationarity".
-                if aux_type_f1 > best_aux_type_f1 + 1e-5:
-                    best_aux_type_f1    = aux_type_f1
-                    best_aux_type_epoch = epoch
-                    torch.save(
-                        self.model.state_dict(),
-                        self.save_dir / "crl_best_aux_type.pth",
-                    )
+                if self.ckpt_state.patience_count >= self.cfg.early_stop_patience:
+                    print(f"Early stopping at epoch {epoch}")
+                    break
         finally:
             if csv_file is not None:
                 csv_file.close()
 
         torch.save(self.model.state_dict(), self.save_dir / "crl_final.pth")
         summary_path = self.save_dir / "crl_checkpoint_summary.json"
-        summary_path.write_text(json.dumps({
-            "best_ref_elbo":             round(best_ref_elbo, 6),
-            "best_aux_type_f1":          round(best_aux_type_f1, 4),
-            "best_aux_type_epoch":       best_aux_type_epoch,
-            "checkpoints": {
-                "crl_best.pth":          "selected by val_ref_elbo (recon + raw_kl at beta=1)",
-                "crl_best_aux_type.pth": "selected by val_aux_type_f1 (downstream-proxy signal)",
-                "crl_final.pth":         "last epoch (may be post-early-stop)",
-            },
-        }, indent=2))
+        summary_path.write_text(
+            json.dumps(self.mode.checkpoint_summary(self.ckpt_state), indent=2)
+        )
 
     # ------------------------------------------------------------------
     # Downstream training

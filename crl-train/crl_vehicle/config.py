@@ -61,6 +61,13 @@ class CRLConfig:
     n_heads: int = 4
     n_layers: int = 2
 
+    # Training mode — selects which TrainingMode + Prior to instantiate.
+    # ("vae", "standard")    — classical CRL (Checkpoint 1).
+    # ("vae", "conditional") — iVAE (Checkpoint 2, not yet implemented).
+    # ("contrastive", *)     — NT-Xent (Checkpoint 3, not yet implemented).
+    training_mode: str = "vae"
+    prior_type:    str = "standard"
+
     # Frontend
     frontend_type: str = "multiscale"   # "multiscale" | "morlet"
     fused_seq_len: int = 32             # per-sensor token count after AdaptiveAvgPool1d
