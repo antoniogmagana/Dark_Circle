@@ -66,13 +66,23 @@ def binary_metrics(logits: torch.Tensor, labels: torch.Tensor) -> dict:
     tn = ((preds == 0) & (labels == 0)).sum().item()
     precision = tp / max(tp + fp, 1)
     recall    = tp / max(tp + fn, 1)
+    specificity = tn / max(tn + fp, 1)
     f1        = (2 * precision * recall) / max(precision + recall, 1e-8)
     acc       = (tp + tn) / max(len(labels), 1)
+    balanced_accuracy = 0.5 * (recall + specificity)
+    # Matthews correlation coefficient — 0 for degenerate predictors regardless
+    # of class skew. Denominator underflow → 0.
+    import math as _math
+    mcc_den = _math.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    mcc = ((tp * tn) - (fp * fn)) / mcc_den if mcc_den > 0 else 0.0
     return {
         "accuracy":  round(acc,       4),
         "precision": round(precision, 4),
         "recall":    round(recall,    4),
+        "specificity": round(specificity, 4),
         "f1":        round(f1,        4),
+        "balanced_accuracy": round(balanced_accuracy, 4),
+        "mcc":       round(mcc,       4),
         "tp": tp, "fp": fp, "fn": fn, "tn": tn,
     }
 
@@ -394,10 +404,15 @@ def main() -> None:
         print("  Diagnostic only — deployment does not know target priors")
         print(f"{'=' * 55}")
         if pres_cal_m:
-            print(f"  presence macro_f1 = {pres_cal_m['f1']} "
-                  f"(p_split={pres_cal_m['p_split']})")
+            # F1 is prior-sensitive and can be inflated by a "always-positive"
+            # degenerate classifier under heavy skew. balanced_accuracy and MCC
+            # are robust to this; report all three so the degeneracy is visible.
+            print(f"  presence f1          = {pres_cal_m['f1']}")
+            print(f"  presence bal_acc     = {pres_cal_m['balanced_accuracy']}")
+            print(f"  presence mcc         = {pres_cal_m['mcc']}")
+            print(f"           (p_split={pres_cal_m['p_split']})")
         if type_cal_m:
-            print(f"  type     macro_f1 = {type_cal_m['macro_f1']} "
+            print(f"  type     macro_f1    = {type_cal_m['macro_f1']} "
                   f"(support_only={type_cal_m['macro_f1_support_only']}, "
                   f"p_split={type_cal_m['p_split']})")
 

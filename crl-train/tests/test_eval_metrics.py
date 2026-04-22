@@ -2,7 +2,10 @@
 import pytest
 import torch
 
-from eval import binary_metrics, multiclass_metrics, recalibrated_multiclass_metrics
+from eval import (
+    binary_metrics, multiclass_metrics,
+    recalibrated_binary_metrics, recalibrated_multiclass_metrics,
+)
 
 
 class TestMulticlassSupportOnly:
@@ -38,6 +41,63 @@ class TestMulticlassSupportOnly:
         labels = torch.empty(0, dtype=torch.long)
         m = multiclass_metrics(logits, labels, n_classes=4)
         assert m["macro_f1_support_only"] == 0.0
+
+
+class TestBinaryDegeneracyDetection:
+    """balanced_accuracy and MCC must expose degenerate classifiers that F1 hides."""
+
+    def test_all_positive_predictor_f1_inflated_but_mcc_zero(self):
+        # 70% positive class, predict positive for everything. F1 looks OK
+        # (≈0.82), but the classifier is useless — bal_acc=0.5, mcc=0.
+        logits = torch.full((100,), 10.0)  # all positive predictions
+        labels = torch.cat([torch.ones(70), torch.zeros(30)]).long()
+        m = binary_metrics(logits, labels)
+        assert m["recall"] == pytest.approx(1.0)
+        assert m["specificity"] == pytest.approx(0.0)
+        assert m["f1"] > 0.8
+        assert m["balanced_accuracy"] == pytest.approx(0.5)
+        assert m["mcc"] == pytest.approx(0.0)
+
+    def test_all_negative_predictor_also_detected(self):
+        logits = torch.full((100,), -10.0)
+        labels = torch.cat([torch.ones(70), torch.zeros(30)]).long()
+        m = binary_metrics(logits, labels)
+        assert m["recall"] == pytest.approx(0.0)
+        assert m["balanced_accuracy"] == pytest.approx(0.5)
+        assert m["mcc"] == pytest.approx(0.0)
+
+    def test_perfect_classifier_all_metrics_max(self):
+        logits = torch.tensor([10.0, 10.0, -10.0, -10.0])
+        labels = torch.tensor([1, 1, 0, 0])
+        m = binary_metrics(logits, labels)
+        assert m["f1"] == pytest.approx(1.0)
+        assert m["balanced_accuracy"] == pytest.approx(1.0)
+        assert m["mcc"] == pytest.approx(1.0)
+
+    def test_random_classifier_mcc_near_zero(self):
+        torch.manual_seed(0)
+        logits = torch.randn(1000)
+        labels = torch.randint(0, 2, (1000,))
+        m = binary_metrics(logits, labels)
+        # Not strictly 0 due to finite sample, but small relative to 1.
+        assert abs(m["mcc"]) < 0.15
+
+    def test_inverted_classifier_has_negative_mcc(self):
+        # Predict opposite of truth: mcc must be negative.
+        logits = torch.tensor([-10.0, -10.0, 10.0, 10.0])
+        labels = torch.tensor([1, 1, 0, 0])
+        m = binary_metrics(logits, labels)
+        assert m["mcc"] == pytest.approx(-1.0)
+
+
+class TestRecalibratedBinaryRobustMetrics:
+    def test_recalibrated_binary_emits_balanced_accuracy_and_mcc(self):
+        logits = torch.randn(50)
+        labels = torch.randint(0, 2, (50,))
+        m = recalibrated_binary_metrics(logits, labels)
+        assert "balanced_accuracy" in m
+        assert "mcc" in m
+        assert "specificity" in m
 
 
 class TestRecalibratedInheritsSupportOnly:
