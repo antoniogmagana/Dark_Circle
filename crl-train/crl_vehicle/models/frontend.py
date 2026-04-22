@@ -40,7 +40,17 @@ class MultiScale1DFrontend(nn.Module):
 
 class MorletFilterbank(nn.Module):
     """Fixed Morlet wavelet filterbank — no learnable parameters.
-    Registers combined real+imag kernel as a buffer; forward returns log-power envelope."""
+
+    If freq_min / freq_max are omitted, falls back to sample-rate-based
+    defaults: freq_min = 2 Hz (SR ≤ 200) or 20 Hz (SR > 200); freq_max =
+    SR/4. Explicit freq_min/freq_max override the heuristic — use them
+    to give audio and seismic sensor-appropriate band allocation.
+
+    If use_phase=True, forward returns [log_power, cos_phase, sin_phase]
+    along the channel axis → 3 * out_channels output channels. Phase is
+    computed per bin as arctan2(im, re) and represented in the unit circle
+    so downstream layers see a differentiable, wrap-free signal.
+    """
 
     def __init__(
         self,
@@ -49,15 +59,27 @@ class MorletFilterbank(nn.Module):
         kernel_size: int = 128,
         sample_rate: int = 200,
         w0: float = 6.0,
+        freq_min: float | None = None,
+        freq_max: float | None = None,
+        use_phase: bool = False,
     ) -> None:
         super().__init__()
-        self.in_channels = in_channels
+        self.in_channels  = in_channels
         self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.padding = kernel_size // 2
+        self.kernel_size  = kernel_size
+        self.padding      = kernel_size // 2
+        self.use_phase    = use_phase
 
-        freq_min = 2.0 if sample_rate <= 200 else 20.0
-        freq_max = sample_rate / 4.0
+        if freq_min is None:
+            freq_min = 2.0 if sample_rate <= 200 else 20.0
+        if freq_max is None:
+            freq_max = sample_rate / 4.0
+        if freq_min <= 0 or freq_max <= freq_min:
+            raise ValueError(
+                f"Invalid freq range: freq_min={freq_min}, freq_max={freq_max}"
+            )
+
+        self.sample_rate = sample_rate
         scales = (w0 / (2 * math.pi)) / torch.logspace(
             math.log10(freq_min), math.log10(freq_max), steps=out_channels
         )
@@ -65,10 +87,19 @@ class MorletFilterbank(nn.Module):
         self.register_buffer("kernel_re", kernel_re)
         self.register_buffer("kernel_im", kernel_im)
 
+    @property
+    def total_out_channels(self) -> int:
+        """Channels emitted by forward. 3x when use_phase=True."""
+        return 3 * self.out_channels if self.use_phase else self.out_channels
+
     def _build_kernels(self, scales: torch.Tensor, w0: float) -> tuple[torch.Tensor, torch.Tensor]:
+        # t must be in seconds so (t/s) is dimensionless (s is w0/(2π·freq)
+        # which has units of seconds). The old version used t in samples,
+        # which caused kernels to underflow to zero at SR ≥ ~400 with any
+        # non-default freq range — see commit message for details.
         t = torch.linspace(
             -self.kernel_size // 2, self.kernel_size // 2, self.kernel_size
-        ).float()
+        ).float() / self.sample_rate
         kernels_re, kernels_im = [], []
         for s in scales:
             norm = (math.pi * s.item()) ** -0.25
@@ -81,9 +112,17 @@ class MorletFilterbank(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.float()
-        # Apply real and imaginary kernels separately to avoid materializing
-        # the full (B, 2*out, T) intermediate — peak activation is halved.
         re_out = F.conv1d(x, self.kernel_re, padding=self.padding)
         im_out = F.conv1d(x, self.kernel_im, padding=self.padding)
+
+        if self.use_phase:
+            # Compute phase BEFORE squaring re/im (pow_ mutates them).
+            mag = torch.sqrt(re_out.pow(2) + im_out.pow(2) + 1e-8)
+            cos_phase = re_out / mag
+            sin_phase = im_out / mag
+            log_power = torch.log1p(re_out.pow(2) + im_out.pow(2))
+            return torch.cat([log_power, cos_phase, sin_phase], dim=1)
+
+        # Log-power only — in-place ops are safe here.
         power = re_out.pow_(2).add_(im_out.pow_(2))
         return torch.log1p(power)

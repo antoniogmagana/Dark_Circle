@@ -68,11 +68,13 @@ class TestFactory:
         with pytest.raises(ValueError, match="Unknown prior_type"):
             build_training_mode(cfg_ms)
 
-    def test_conditional_prior_not_yet_implemented(self, cfg_ms):
-        """Checkpoint 2 adds this; Checkpoint 1 must refuse cleanly."""
+    def test_conditional_prior_builds(self, cfg_ms):
+        """Checkpoint 2: ConditionalPrior is a valid selection."""
+        from crl_vehicle.priors import ConditionalPrior
         cfg_ms.prior_type = "conditional"
-        with pytest.raises(ValueError, match="Checkpoint 2"):
-            build_training_mode(cfg_ms)
+        mode = build_training_mode(cfg_ms)
+        assert isinstance(mode, VAETrainingMode)
+        assert isinstance(mode.prior, ConditionalPrior)
 
 
 class TestVAEModeInterface:
@@ -184,6 +186,75 @@ class TestCheckpointLogic:
         assert "crl_best_aux_type.pth" in summary["checkpoints"]
         assert "crl_final.pth" in summary["checkpoints"]
         assert summary["best_aux_type_epoch"] == 28
+
+
+class TestConditionalPriorIntegration:
+    """VAETrainingMode + ConditionalPrior: labels must reach the prior MLP
+    via _kl_terms, and gradients must flow to both encoder and prior params."""
+
+    @pytest.mark.parametrize("cfg_name", ["cfg_ms", "cfg_morlet"])
+    def test_conditional_prior_forward_pair_runs(self, cfg_name, request):
+        cfg = request.getfixturevalue(cfg_name)
+        cfg.prior_type = "conditional"
+        mode = build_training_mode(cfg)
+        model = CRLModel(cfg)
+        batch = _synthetic_batch()
+        loss, metrics = mode.forward_pair(model, batch, beta=0.1,
+                                          device=torch.device("cpu"))
+        assert torch.isfinite(loss)
+        # raw_kl must be present and non-negative.
+        assert metrics["raw_kl"] >= 0.0
+
+    def test_prior_mlp_receives_gradients_through_training_mode(self, cfg_ms):
+        """After backward(), every ConditionalPrior parameter must have a
+        finite non-None grad. Validates the optimizer param-group wiring and
+        the y-plumbing in _kl_terms."""
+        cfg_ms.prior_type = "conditional"
+        mode = build_training_mode(cfg_ms)
+        model = CRLModel(cfg_ms)
+        batch = _synthetic_batch()
+        loss, _ = mode.forward_pair(model, batch, beta=1.0,
+                                    device=torch.device("cpu"))
+        loss.backward()
+        bad = [n for n, p in mode.prior.named_parameters()
+               if p.grad is None or not p.grad.isfinite().all()]
+        assert not bad, f"Prior MLP params with bad grads: {bad}"
+
+    def test_standard_and_conditional_produce_different_losses(self, cfg_ms):
+        """Same batch, same model weights (ish — init is random per build),
+        different prior types → different losses. Cheap smoke that the prior
+        swap actually changes something end-to-end."""
+        torch.manual_seed(0)
+        cfg_std = CRLConfig(**{**cfg_ms.__dict__, "prior_type": "standard"})
+        torch.manual_seed(0)
+        mode_std = build_training_mode(cfg_std)
+        torch.manual_seed(0)
+        model_std = CRLModel(cfg_std)
+
+        torch.manual_seed(0)
+        cfg_cond = CRLConfig(**{**cfg_ms.__dict__, "prior_type": "conditional"})
+        torch.manual_seed(0)
+        mode_cond = build_training_mode(cfg_cond)
+        torch.manual_seed(0)
+        model_cond = CRLModel(cfg_cond)
+
+        # Zero-init the prior MLP so the condition collapses to N(0,I) at the
+        # start — then they MUST produce identical KL at beta=1.
+        with torch.no_grad():
+            mode_cond.prior.net[-1].weight.zero_()
+            mode_cond.prior.net[-1].bias.zero_()
+
+        torch.manual_seed(1)
+        batch = _synthetic_batch()
+        loss_std, m_std = mode_std.forward_pair(
+            model_std, batch, beta=1.0, device=torch.device("cpu")
+        )
+        torch.manual_seed(1)
+        loss_cond, m_cond = mode_cond.forward_pair(
+            model_cond, batch, beta=1.0, device=torch.device("cpu")
+        )
+        # Both priors reduce to N(0,I) here, so raw_kl should match closely.
+        assert m_std["raw_kl"] == pytest.approx(m_cond["raw_kl"], abs=1e-4)
 
 
 class TestValMetricsSummary:

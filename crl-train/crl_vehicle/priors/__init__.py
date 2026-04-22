@@ -11,6 +11,7 @@ scalar tensor (summed over latent dims, meaned over batch, unscaled by beta —
 beta application lives in the training mode).
 """
 from crl_vehicle.priors.base import Prior
+from crl_vehicle.priors.conditional import ConditionalPrior
 from crl_vehicle.priors.standard import StandardPrior
 
-__all__ = ["Prior", "StandardPrior"]
+__all__ = ["Prior", "StandardPrior", "ConditionalPrior"]

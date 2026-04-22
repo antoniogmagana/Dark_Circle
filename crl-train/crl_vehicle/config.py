@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 LABEL_BACKGROUND = -1
 LABEL_MULTI = -2
@@ -69,11 +69,33 @@ class CRLConfig:
     prior_type:    str = "standard"
 
     # Frontend
-    frontend_type: str = "multiscale"   # "multiscale" | "morlet"
+    # "multiscale"        — shared learned conv bank (early fusion).
+    # "morlet"            — shared Morlet bank per sensor, SR-derived freq range.
+    # "morlet_per_sensor" — Morlet bank per sensor with explicit freq ranges
+    #                       from morlet_per_sensor_params (below).
+    frontend_type: str = "multiscale"
     fused_seq_len: int = 32             # per-sensor token count after AdaptiveAvgPool1d
     morlet_kernel_size: int = 257
     multiscale_pool_stride: int = 16
     morlet_pool_stride: int = 64
+
+    # Phase channels: when True, Morlet variants emit [log_power, cos_phase,
+    # sin_phase] → 3× channel count. Preserves phase/onset structure that
+    # vehicle-onset discrimination depends on. Default False for backward
+    # compatibility.
+    morlet_use_phase: bool = False
+
+    # Per-sensor Morlet frequency ranges for frontend_type="morlet_per_sensor".
+    # Audio: 20 Hz–8 kHz (SR/2 band above speech; engine harmonics + tire noise).
+    # Seismic: 2–40 Hz (typical vehicle ground-vibration band).
+    # out_channels_frac scales d_model to produce the per-sensor channel count;
+    # keep at 1.0 unless you want one sensor to dominate channel budget.
+    morlet_per_sensor_params: dict = field(default_factory=lambda: {
+        "audio":   {"freq_min": 20.0,  "freq_max": 8000.0,
+                    "out_channels_frac": 1.0, "w0": 6.0},
+        "seismic": {"freq_min": 2.0,   "freq_max": 40.0,
+                    "out_channels_frac": 1.0, "w0": 6.0},
+    })
 
     # Training
     batch_size: int = 128

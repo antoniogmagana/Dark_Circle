@@ -92,7 +92,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--eval-batch-size", type=int, default=256)
     p.add_argument("--steps-per-epoch", type=int, default=None,
                    help="Cap batches per CRL epoch (smoke tests)")
-    p.add_argument("--frontend", choices=["multiscale", "morlet"], default="multiscale")
+    p.add_argument("--frontend",
+                   choices=["multiscale", "morlet", "morlet_per_sensor"],
+                   default="multiscale")
+    p.add_argument("--morlet-use-phase", action="store_true",
+                   help="Morlet variants emit [log_power, cos_phase, sin_phase] "
+                        "→ 3× channels. Preserves phase/onset structure.")
+    p.add_argument("--prior-type", choices=["standard", "conditional"],
+                   default="standard",
+                   help="Prior over z. 'standard'=N(0,I); 'conditional'=iVAE "
+                        "(label-conditioned MLP → (μ, logσ²)). Conditional "
+                        "gives identifiability under label variation.")
     p.add_argument("--sensors", nargs="+", default=["audio", "seismic"])
     p.add_argument("--skip-existing", action="store_true",
                    help="Skip sub-runs that already have their completion marker.")
@@ -666,6 +676,8 @@ def main() -> None:
     # Base CRLConfig (same knobs as train.py)
     base_cfg = CRLConfig(
         frontend_type=args.frontend,
+        morlet_use_phase=args.morlet_use_phase,
+        prior_type=args.prior_type,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         n_epochs=args.crl_epochs,

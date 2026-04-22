@@ -68,6 +68,9 @@ class CRLModel(nn.Module):
         elif config.frontend_type == "morlet":
             self._init_morlet(config, d_z)
             head_keys = self.sensors
+        elif config.frontend_type == "morlet_per_sensor":
+            self._init_morlet_per_sensor(config, d_z)
+            head_keys = self.sensors
         else:
             raise ValueError(f"Unknown frontend_type: {config.frontend_type!r}")
 
@@ -128,25 +131,101 @@ class CRLModel(nn.Module):
         self.encoders = nn.ModuleDict()
         self.decoders = nn.ModuleDict()
         stride = config.morlet_pool_stride
+        use_phase = getattr(config, "morlet_use_phase", False)
         for sensor in self.sensors:
             mc = config.modality_cfg(sensor)
             ks = config.morlet_kernel_size
             kernel_mb = (2 * config.d_model * mc.n_channels * ks * 4) / 1e6
             print(f"  MorletFilterbank [{sensor}]: kernel {2*config.d_model}×{mc.n_channels}×{ks} = {kernel_mb:.2f} MB")
-            self.frontends[sensor] = nn.Sequential(
-                MorletFilterbank(mc.n_channels, config.d_model, ks, mc.sample_rate),
-                nn.AvgPool1d(stride, stride),
+            bank = MorletFilterbank(
+                mc.n_channels, config.d_model, ks, mc.sample_rate,
+                use_phase=use_phase,
             )
+            self.frontends[sensor] = nn.Sequential(
+                bank, nn.AvgPool1d(stride, stride),
+            )
+            # Downstream encoder sees bank.total_out_channels (3× if phase).
+            enc_in_channels = bank.total_out_channels
             seq_len = mc.window_size // stride
             self.encoders[sensor] = TemporalEncoder(
-                in_channels=config.d_model,
+                in_channels=enc_in_channels,
+                d_z=d_z,
+                d_model=config.d_model,
+                n_heads=config.n_heads,
+                n_layers=config.n_layers,
+            )
+            # Decoder must match frontend channel count — recon target is
+            # the frontend's raw output, which is 3× when use_phase=True.
+            self.decoders[sensor] = FeatureDecoder(
+                out_channels=enc_in_channels,
+                seq_len=max(1, seq_len),
+                d_z=d_z,
+                d_model=config.d_model,
+            )
+
+    def _init_morlet_per_sensor(self, config: CRLConfig, d_z: int) -> None:
+        """Per-sensor Morlet banks with sensor-specific freq ranges.
+
+        Audio and seismic each get a bank whose freq_min/freq_max, channel
+        count, and w0 come from config.morlet_per_sensor_params[sensor].
+        Otherwise identical plumbing to _init_morlet: late fusion, one
+        encoder/decoder per sensor.
+        """
+        self.encoder = None
+        self.decoder = None
+        self.encoders = nn.ModuleDict()
+        self.decoders = nn.ModuleDict()
+        stride = config.morlet_pool_stride
+        use_phase = config.morlet_use_phase
+        params_by_sensor = config.morlet_per_sensor_params
+
+        for sensor in self.sensors:
+            if sensor not in params_by_sensor:
+                raise ValueError(
+                    f"morlet_per_sensor requires params for {sensor!r} in "
+                    f"config.morlet_per_sensor_params (got keys "
+                    f"{list(params_by_sensor.keys())})"
+                )
+            sp = params_by_sensor[sensor]
+            mc = config.modality_cfg(sensor)
+            ks = config.morlet_kernel_size
+            out_channels = max(1, int(round(config.d_model * sp.get("out_channels_frac", 1.0))))
+            freq_min = float(sp["freq_min"])
+            freq_max = float(sp["freq_max"])
+            w0 = float(sp.get("w0", 6.0))
+
+            kernel_mb = (2 * out_channels * mc.n_channels * ks * 4) / 1e6
+            print(
+                f"  MorletFilterbank [{sensor}]: "
+                f"{out_channels}ch × [{freq_min:g}, {freq_max:g}] Hz, "
+                f"w0={w0}, ks={ks} = {kernel_mb:.2f} MB"
+                + (", +phase" if use_phase else "")
+            )
+
+            bank = MorletFilterbank(
+                in_channels=mc.n_channels,
+                out_channels=out_channels,
+                kernel_size=ks,
+                sample_rate=mc.sample_rate,
+                w0=w0,
+                freq_min=freq_min,
+                freq_max=freq_max,
+                use_phase=use_phase,
+            )
+            self.frontends[sensor] = nn.Sequential(
+                bank, nn.AvgPool1d(stride, stride),
+            )
+            enc_in_channels = bank.total_out_channels
+            seq_len = mc.window_size // stride
+            self.encoders[sensor] = TemporalEncoder(
+                in_channels=enc_in_channels,
                 d_z=d_z,
                 d_model=config.d_model,
                 n_heads=config.n_heads,
                 n_layers=config.n_layers,
             )
             self.decoders[sensor] = FeatureDecoder(
-                out_channels=config.d_model,
+                out_channels=enc_in_channels,
                 seq_len=max(1, seq_len),
                 d_z=d_z,
                 d_model=config.d_model,
