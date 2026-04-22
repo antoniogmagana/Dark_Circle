@@ -51,6 +51,7 @@ from crl_vehicle.data.dataset import (
 from training.trainer import CRLModel, Trainer
 from eval import (
     run_inference, binary_metrics, multiclass_metrics,
+    recalibrated_binary_metrics, recalibrated_multiclass_metrics,
     _plot_binary_confusion, _plot_confusion_matrix,
     N_TYPE_CLASSES, IDX_TO_CLASS,
 )
@@ -95,6 +96,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--sensors", nargs="+", default=["audio", "seismic"])
     p.add_argument("--skip-existing", action="store_true",
                    help="Skip sub-runs that already have their completion marker.")
+    p.add_argument("--recalibrate", action="store_true",
+                   help="Write target-prior-calibrated metrics alongside raw metrics "
+                        "in each phase_evals report (diagnostic only).")
     return p.parse_args()
 
 
@@ -332,6 +336,7 @@ def phase_evals(
     eval_batch_size: int,
     num_workers: int,
     skip_existing: bool,
+    recalibrate: bool = False,
 ) -> list[dict]:
     """Evaluate each downstream model on {full, focal, iobt} splits.
 
@@ -411,6 +416,19 @@ def phase_evals(
                 "presence":   pres_m,
                 "type":       type_m,
             }
+            if recalibrate:
+                report["presence_target_calibrated"] = recalibrated_binary_metrics(
+                    outputs["pres_logits"], outputs["pres_labels"]
+                )
+                if outputs["type_logits"] is not None \
+                        and outputs["type_logits"].numel() > 0:
+                    report["type_target_calibrated"] = \
+                        recalibrated_multiclass_metrics(
+                            outputs["type_logits"], outputs["type_labels"],
+                            N_TYPE_CLASSES,
+                        )
+                else:
+                    report["type_target_calibrated"] = None
             report_path.write_text(json.dumps(report, indent=2))
 
             # Confusion plots (per split).
@@ -543,24 +561,55 @@ def write_reports(
         "average to classes with support > 0 in that split and is the fair "
         "cross-split comparison.\n"
     )
-    lines.append(
-        "| run | split | n_windows | pres_f1 | type_macro_f1 | "
-        "type_macro_f1_support_only | type_acc |"
-    )
-    lines.append("|---|---|---|---|---|---|---|")
+    has_calibrated = any("type_target_calibrated" in r for r in eval_reports)
+    if has_calibrated:
+        lines.append(
+            "| run | split | n_windows | pres_f1 | type_f1 | "
+            "type_f1_support_only | pres_f1_cal | type_f1_cal | "
+            "type_f1_support_only_cal | type_acc |"
+        )
+        lines.append("|---|---|---|---|---|---|---|---|---|---|")
+    else:
+        lines.append(
+            "| run | split | n_windows | pres_f1 | type_macro_f1 | "
+            "type_macro_f1_support_only | type_acc |"
+        )
+        lines.append("|---|---|---|---|---|---|---|")
+
     for r in eval_reports:
         pres = r.get("presence") or {}
         typ  = r.get("type") or {}
         per  = typ.get("per_class", {}) if typ else {}
-        f1_present = [v["f1"] for v in per.values() if v.get("support", 0) > 0]
-        macro_support_only = (sum(f1_present) / len(f1_present)) if f1_present else 0.0
-        lines.append(
-            f"| {r['run_name']} | {r['split']} | {r['n_windows']:,} | "
-            f"{pres.get('f1', 0):.4f} | "
-            f"{typ.get('macro_f1', 0):.4f} | "
-            f"{macro_support_only:.4f} | "
-            f"{typ.get('accuracy', 0):.4f} |"
-        )
+        # Prefer the field computed in eval.py; fall back to recomputation for
+        # old reports that don't have it.
+        if typ and "macro_f1_support_only" in typ:
+            macro_support_only = typ["macro_f1_support_only"]
+        else:
+            f1_present = [v["f1"] for v in per.values() if v.get("support", 0) > 0]
+            macro_support_only = (
+                sum(f1_present) / len(f1_present) if f1_present else 0.0
+            )
+        if has_calibrated:
+            pres_cal = r.get("presence_target_calibrated") or {}
+            typ_cal  = r.get("type_target_calibrated") or {}
+            lines.append(
+                f"| {r['run_name']} | {r['split']} | {r['n_windows']:,} | "
+                f"{pres.get('f1', 0):.4f} | "
+                f"{typ.get('macro_f1', 0):.4f} | "
+                f"{macro_support_only:.4f} | "
+                f"{pres_cal.get('f1', 0):.4f} | "
+                f"{typ_cal.get('macro_f1', 0):.4f} | "
+                f"{typ_cal.get('macro_f1_support_only', 0):.4f} | "
+                f"{typ.get('accuracy', 0):.4f} |"
+            )
+        else:
+            lines.append(
+                f"| {r['run_name']} | {r['split']} | {r['n_windows']:,} | "
+                f"{pres.get('f1', 0):.4f} | "
+                f"{typ.get('macro_f1', 0):.4f} | "
+                f"{macro_support_only:.4f} | "
+                f"{typ.get('accuracy', 0):.4f} |"
+            )
     lines.append("")
 
     lines.append("## Per-class type F1 on test splits\n")
@@ -683,6 +732,7 @@ def main() -> None:
         eval_batch_size=args.eval_batch_size,
         num_workers=args.num_workers,
         skip_existing=args.skip_existing,
+        recalibrate=args.recalibrate,
     )
 
     # Consolidated report

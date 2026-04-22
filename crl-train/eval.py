@@ -11,6 +11,12 @@ from torch.utils.data import DataLoader
 
 from crl_vehicle.config import CRLConfig, CATEGORY_TO_IDX
 from crl_vehicle.data.dataset import SensorDataset, collate_single
+from crl_vehicle.probe.recalibration import (
+    apply_binary_log_prior_shift,
+    apply_multiclass_log_prior_shift,
+    compute_binary_prior,
+    compute_multiclass_prior,
+)
 from training.trainer import CRLModel
 
 # Class index → display name
@@ -37,6 +43,14 @@ def parse_args() -> argparse.Namespace:
                         "Matches the 'dataset' field parsed from parquet stems. "
                         "When set, eval_report.json and confusion plots are written to "
                         "a subdirectory named by the filter.")
+    p.add_argument("--recalibrate", action="store_true",
+                   help="Also compute target-prior-calibrated metrics using the "
+                        "ground-truth class distribution of this split as the target prior. "
+                        "Adds 'presence_target_calibrated' and 'type_target_calibrated' "
+                        "keys to eval_report.json. Assumes training used class-balanced "
+                        "loss (uniform effective train prior). This is a diagnostic metric: "
+                        "deployment does not know target priors, so do not quote these as "
+                        "deployment numbers.")
     return p.parse_args()
 
 
@@ -88,19 +102,60 @@ def multiclass_metrics(
     macro_pre = sum(v["precision"] for v in per_class.values()) / n_classes
     macro_rec = sum(v["recall"]    for v in per_class.values()) / n_classes
 
+    # support_only: average only over classes present in this split.
+    # Filtered splits (focal, iobt) exclude some classes entirely; dividing by
+    # n_classes in the unfiltered macro halves the apparent F1 for no model reason.
+    present = [v for v in per_class.values() if v["support"] > 0]
+    macro_f1_support_only = (
+        sum(v["f1"] for v in present) / len(present) if present else 0.0
+    )
+
     # Confusion matrix: rows = true, cols = predicted
     cm = [[0] * n_classes for _ in range(n_classes)]
     for t, p in zip(labels.tolist(), preds.tolist()):
         cm[t][p] += 1
 
     return {
-        "accuracy":        round(acc,       4),
-        "macro_f1":        round(macro_f1,  4),
-        "macro_precision": round(macro_pre, 4),
-        "macro_recall":    round(macro_rec, 4),
-        "per_class":       per_class,
-        "confusion_matrix": cm,
+        "accuracy":              round(acc,                   4),
+        "macro_f1":              round(macro_f1,              4),
+        "macro_f1_support_only": round(macro_f1_support_only, 4),
+        "macro_precision":       round(macro_pre,             4),
+        "macro_recall":          round(macro_rec,             4),
+        "per_class":             per_class,
+        "confusion_matrix":      cm,
     }
+
+
+def recalibrated_binary_metrics(
+    logits: torch.Tensor, labels: torch.Tensor
+) -> dict:
+    """binary_metrics computed after a log-prior shift to the split's empirical prior.
+
+    Assumes class-balanced training (uniform effective train prior, p_train=0.5).
+    """
+    p_split = compute_binary_prior(labels)
+    shifted = apply_binary_log_prior_shift(logits, p_split=p_split, p_train=0.5)
+    m = binary_metrics(shifted, labels)
+    m["p_split"] = round(p_split, 6)
+    m["p_train_assumed"] = 0.5
+    return m
+
+
+def recalibrated_multiclass_metrics(
+    logits: torch.Tensor, labels: torch.Tensor, n_classes: int
+) -> dict:
+    """multiclass_metrics computed after a log-prior shift to the split's empirical prior.
+
+    Assumes class-balanced training (uniform effective train prior,
+    p_train=[1/K]*K). Classes with zero support in the split get an eps-floored
+    prior to avoid log(0); effectively they are suppressed in the argmax.
+    """
+    p_split = compute_multiclass_prior(labels, n_classes=n_classes)
+    shifted = apply_multiclass_log_prior_shift(logits, p_split=p_split)
+    m = multiclass_metrics(shifted, labels, n_classes)
+    m["p_split"] = [round(v, 6) for v in p_split.tolist()]
+    m["p_train_assumed"] = [round(1.0 / n_classes, 6)] * n_classes
+    return m
 
 
 # ---------------------------------------------------------------------------
@@ -299,6 +354,17 @@ def main() -> None:
         else None
     )
 
+    pres_cal_m = None
+    type_cal_m = None
+    if args.recalibrate:
+        pres_cal_m = recalibrated_binary_metrics(
+            outputs["pres_logits"], outputs["pres_labels"]
+        )
+        if outputs["type_logits"] is not None and outputs["type_logits"].numel() > 0:
+            type_cal_m = recalibrated_multiclass_metrics(
+                outputs["type_logits"], outputs["type_labels"], N_TYPE_CLASSES
+            )
+
     # Print summary
     print(f"\n{'=' * 55}")
     print("  PRESENCE DETECTION")
@@ -311,15 +377,29 @@ def main() -> None:
         print(f"\n{'=' * 55}")
         print("  VEHICLE TYPE CLASSIFICATION")
         print(f"{'=' * 55}")
-        print(f"  {'accuracy':<18} {type_m['accuracy']}")
-        print(f"  {'macro_f1':<18} {type_m['macro_f1']}")
-        print(f"  {'macro_precision':<18} {type_m['macro_precision']}")
-        print(f"  {'macro_recall':<18} {type_m['macro_recall']}")
+        print(f"  {'accuracy':<22} {type_m['accuracy']}")
+        print(f"  {'macro_f1':<22} {type_m['macro_f1']}")
+        print(f"  {'macro_f1_support_only':<22} {type_m['macro_f1_support_only']}")
+        print(f"  {'macro_precision':<22} {type_m['macro_precision']}")
+        print(f"  {'macro_recall':<22} {type_m['macro_recall']}")
         print(f"\n  Per-class:")
         for cls, vals in type_m["per_class"].items():
             print(f"    {cls:<14} f1={vals['f1']:.3f}  "
                   f"prec={vals['precision']:.3f}  rec={vals['recall']:.3f}  "
                   f"n={vals['support']}")
+
+    if args.recalibrate and (pres_cal_m or type_cal_m):
+        print(f"\n{'=' * 55}")
+        print("  TARGET-CALIBRATED (log-prior shift, oracle split prior)")
+        print("  Diagnostic only — deployment does not know target priors")
+        print(f"{'=' * 55}")
+        if pres_cal_m:
+            print(f"  presence macro_f1 = {pres_cal_m['f1']} "
+                  f"(p_split={pres_cal_m['p_split']})")
+        if type_cal_m:
+            print(f"  type     macro_f1 = {type_cal_m['macro_f1']} "
+                  f"(support_only={type_cal_m['macro_f1_support_only']}, "
+                  f"p_split={type_cal_m['p_split']})")
 
     # Save JSON report
     report = {
@@ -330,6 +410,9 @@ def main() -> None:
         "presence":  pres_m,
         "type":      type_m,
     }
+    if args.recalibrate:
+        report["presence_target_calibrated"] = pres_cal_m
+        report["type_target_calibrated"]     = type_cal_m
     report_path = out_dir / "eval_report.json"
     report_path.write_text(json.dumps(report, indent=2))
     print(f"\n  Report saved: {report_path}")
