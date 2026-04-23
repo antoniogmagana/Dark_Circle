@@ -1,0 +1,59 @@
+{
+  "config": {
+    "d_z": 24,
+    "d_model": 64,
+    "n_heads": 4,
+    "n_layers": 2,
+    "training_mode": "vae",
+    "prior_type": "standard",
+    "frontend_type": "morlet",
+    "fused_seq_len": 32,
+    "morlet_kernel_size": 257,
+    "multiscale_pool_stride": 16,
+    "morlet_pool_stride": 64,
+    "morlet_use_phase": false,
+    "morlet_per_sensor_params": {
+      "audio": {
+        "freq_min": 20.0,
+        "freq_max": 8000.0,
+        "out_channels_frac": 1.0,
+        "w0": 6.0
+      },
+      "seismic": {
+        "freq_min": 2.0,
+        "freq_max": 40.0,
+        "out_channels_frac": 1.0,
+        "w0": 6.0
+      }
+    },
+    "batch_size": 64,
+    "lr": 0.0003,
+    "lr_min": 0.0001,
+    "wd": 0.0001,
+    "n_epochs": 100,
+    "num_workers": 4,
+    "early_stop_patience": 25,
+    "lambda_interv": 1.0,
+    "lambda_aux_pres": 1.0,
+    "lambda_aux_type": 1.0,
+    "lambda_aux_prox": 0.1,
+    "beta_step": 0.02,
+    "kl_floor": 0.01,
+    "kl_target": 0.5,
+    "recon_min_delta": 0.0001,
+    "horizon_stride_sec": 0.7,
+    "n_partners_same_type": 1,
+    "n_partners_diff_type": 1,
+    "n_partners_cross_ds": 1,
+    "contrastive_temperature": 0.1,
+    "contrastive_d_proj": 64
+  },
+  "sensors": [
+    "audio",
+    "seismic"
+  ],
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "crl_run_dir": "/home/lvc_toolkit/project-files/Dark_Circle/crl-train/saved_crl/oneshot/2026-04-23_04-10-30/crl",
+  "ds_elapsed_min": 39.84
+}
