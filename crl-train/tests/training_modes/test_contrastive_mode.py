@@ -69,6 +69,36 @@ def cfg_morlet():
     )
 
 
+@pytest.fixture
+def cfg_morlet_fused():
+    return CRLConfig(
+        d_model=32, n_layers=1, n_heads=4,
+        frontend_type="morlet_fused", fused_seq_len=16, d_z=24,
+        training_mode="contrastive",
+        contrastive_d_proj=32, contrastive_temperature=0.1,
+    )
+
+
+@pytest.fixture
+def cfg_morlet_learnable():
+    return CRLConfig(
+        d_model=32, n_layers=1, n_heads=4,
+        frontend_type="morlet_learnable", d_z=24,
+        training_mode="contrastive",
+        contrastive_d_proj=32, contrastive_temperature=0.1,
+    )
+
+
+@pytest.fixture
+def cfg_morlet_learnable_fused():
+    return CRLConfig(
+        d_model=32, n_layers=1, n_heads=4,
+        frontend_type="morlet_learnable_fused", fused_seq_len=16, d_z=24,
+        training_mode="contrastive",
+        contrastive_d_proj=32, contrastive_temperature=0.1,
+    )
+
+
 class TestFactory:
     def test_contrastive_builds(self, cfg_ms):
         mode = build_training_mode(cfg_ms)
@@ -102,6 +132,31 @@ class TestForwardPair:
         batch = _pair_batch()
         loss, _ = mode.forward_pair(model, batch, beta=0.0, device=torch.device("cpu"))
         assert torch.isfinite(loss).item()
+
+    def test_finite_loss_morlet_fused(self, cfg_morlet_fused):
+        """morlet_fused should route through _encode_fused (same as multiscale)."""
+        model = CRLModel(cfg_morlet_fused)
+        mode  = ContrastiveTrainingMode(cfg_morlet_fused)
+        batch = _pair_batch()
+        loss, _ = mode.forward_pair(model, batch, beta=0.0, device=torch.device("cpu"))
+        assert torch.isfinite(loss).item()
+        assert model.is_fused_frontend() is True
+
+    def test_finite_loss_morlet_learnable(self, cfg_morlet_learnable):
+        model = CRLModel(cfg_morlet_learnable)
+        mode  = ContrastiveTrainingMode(cfg_morlet_learnable)
+        batch = _pair_batch()
+        loss, _ = mode.forward_pair(model, batch, beta=0.0, device=torch.device("cpu"))
+        assert torch.isfinite(loss).item()
+        assert model.is_fused_frontend() is False
+
+    def test_finite_loss_morlet_learnable_fused(self, cfg_morlet_learnable_fused):
+        model = CRLModel(cfg_morlet_learnable_fused)
+        mode  = ContrastiveTrainingMode(cfg_morlet_learnable_fused)
+        batch = _pair_batch()
+        loss, _ = mode.forward_pair(model, batch, beta=0.0, device=torch.device("cpu"))
+        assert torch.isfinite(loss).item()
+        assert model.is_fused_frontend() is True
 
     def test_gradient_reaches_encoder_and_projection(self, cfg_ms):
         model = CRLModel(cfg_ms)

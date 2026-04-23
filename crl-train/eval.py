@@ -245,7 +245,7 @@ def run_inference(
 
     with torch.no_grad():
         for batch in loader:
-            if cfg.frontend_type == "multiscale":
+            if model.is_fused_frontend():
                 avail = batch["audio_avail"].bool() & batch["seismic_avail"].bool()
                 if not avail.any():
                     continue

@@ -116,18 +116,18 @@ class TestCRLModelMorlet:
 
 class TestCRLModelShared:
 
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet"])
+    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
     def test_has_latent(self, fe):
         from crl_vehicle.models.latent import CausalLatentSpace
         model = CRLModel(CRLConfig(frontend_type=fe, d_model=32, n_layers=1))
         assert isinstance(model.latent, CausalLatentSpace)
 
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet"])
+    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
     def test_has_interv_classifier(self, fe):
         model = CRLModel(CRLConfig(frontend_type=fe, d_model=32, n_layers=1))
         assert hasattr(model, "interv_classifier")
 
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet"])
+    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
     def test_backbone_excludes_downstream_heads(self, fe):
         model = CRLModel(CRLConfig(frontend_type=fe, d_model=32, n_layers=1))
         backbone_ids = set(id(p) for p in model.backbone_parameters())
@@ -142,7 +142,7 @@ class TestCRLModelShared:
 
 class TestForwardPair:
 
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet"])
+    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
     def test_finite_loss(self, fe, tmp_path):
         cfg = CRLConfig(frontend_type=fe, d_model=32, n_layers=1, fused_seq_len=16)
         model = CRLModel(cfg)
@@ -151,7 +151,7 @@ class TestForwardPair:
         loss, metrics = trainer._forward_pair(_synthetic_batch(), beta=0.5)
         assert loss.isfinite(), f"Loss not finite: {loss.item()}"
 
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet"])
+    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
     def test_metrics_keys(self, fe, tmp_path):
         cfg = CRLConfig(frontend_type=fe, d_model=32, n_layers=1, fused_seq_len=16)
         trainer = Trainer(CRLModel(cfg), cfg, torch.device("cpu"), tmp_path)
@@ -159,7 +159,7 @@ class TestForwardPair:
         for k in ("recon", "kl", "raw_kl", "interv", "total"):
             assert k in metrics
 
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet"])
+    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
     def test_finite_grads(self, fe, tmp_path):
         cfg = CRLConfig(frontend_type=fe, d_model=32, n_layers=1, fused_seq_len=16)
         model = CRLModel(cfg)

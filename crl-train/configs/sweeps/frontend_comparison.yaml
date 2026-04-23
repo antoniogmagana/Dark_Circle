@@ -1,0 +1,47 @@
+# Sweep: compare all 5 frontend variants on identical downstream metrics.
+#
+# Scientific question: which of multiscale / morlet_per_sensor / morlet_fused /
+# morlet_learnable / morlet_learnable_fused wins on val type_f1? With phase
+# held on where available, this isolates frontend architecture as the only
+# variable. Runs 7-8 in saved_crl/oneshot/ showed some Morlet variants
+# diverging — this sweep surfaces whether fusion and learnability change that.
+#
+# Usage (from crl-train/):
+#   python run_experiments.py --sweep configs/sweeps/frontend_comparison.yaml
+#
+# Smoke test (seconds, not hours):
+#   python run_experiments.py --sweep configs/sweeps/frontend_comparison.yaml \
+#     --crl-epochs 1 --ds-epochs 1 --steps-per-epoch 2
+
+base_config:
+  n_epochs:        100
+  batch_size:      128
+  lr:              3e-4
+  morlet_use_phase: true
+
+runs:
+  - name: multiscale_baseline
+    overrides:
+      frontend_type: multiscale
+      # multiscale doesn't use phase — the base flag is ignored here.
+
+  - name: morlet_per_sensor_phase
+    overrides:
+      frontend_type: morlet_per_sensor
+
+  - name: morlet_fused_phase
+    overrides:
+      frontend_type: morlet_fused
+
+  - name: morlet_learnable_phase
+    overrides:
+      frontend_type: morlet_learnable
+
+  - name: morlet_learnable_fused_phase
+    overrides:
+      frontend_type: morlet_learnable_fused
+
+  - name: morlet_learnable_w0_phase
+    overrides:
+      frontend_type:       morlet_learnable
+      morlet_learnable_w0: true

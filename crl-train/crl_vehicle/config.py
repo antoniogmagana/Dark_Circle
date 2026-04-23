@@ -69,10 +69,20 @@ class CRLConfig:
     prior_type:    str = "standard"
 
     # Frontend
-    # "multiscale"        — shared learned conv bank (early fusion).
-    # "morlet"            — shared Morlet bank per sensor, SR-derived freq range.
-    # "morlet_per_sensor" — Morlet bank per sensor with explicit freq ranges
-    #                       from morlet_per_sensor_params (below).
+    # "multiscale"              — shared learned conv bank (early fusion).
+    # "morlet"                  — shared Morlet bank per sensor, SR-derived freq range.
+    # "morlet_per_sensor"       — Morlet bank per sensor with explicit freq ranges
+    #                             from morlet_per_sensor_params (below).
+    # "morlet_fused"            — Morlet bank per sensor (same per-sensor params
+    #                             as morlet_per_sensor), then AdaptiveAvgPool1d
+    #                             to fused_seq_len and time-concat → shared
+    #                             encoder. Requires matching out_channels_frac.
+    # "morlet_learnable"        — Late-fusion Morlet (like morlet_per_sensor)
+    #                             with learnable scales in log-space. Optionally
+    #                             learnable per-filter w0 via morlet_learnable_w0.
+    #                             Initialized identically to morlet_per_sensor.
+    # "morlet_learnable_fused"  — Early-fusion version of morlet_learnable
+    #                             (matches morlet_fused topology).
     frontend_type: str = "multiscale"
     fused_seq_len: int = 32             # per-sensor token count after AdaptiveAvgPool1d
     morlet_kernel_size: int = 257
@@ -84,6 +94,15 @@ class CRLConfig:
     # vehicle-onset discrimination depends on. Default False for backward
     # compatibility.
     morlet_use_phase: bool = False
+
+    # Learnable Morlet variants (frontend_type ∈ {morlet_learnable,
+    # morlet_learnable_fused}): scales are always learnable (parameterized
+    # in log-space for positivity); per-filter w0 is learnable only when
+    # morlet_learnable_w0=True. LR multiplier keeps the init-near-optimal
+    # filterbank from wandering — learnable-filterbank literature uses
+    # 0.1× backbone LR as the safe default.
+    morlet_learnable_w0:       bool  = False
+    morlet_learnable_lr_mult:  float = 0.1
 
     # Per-sensor Morlet frequency ranges for frontend_type="morlet_per_sensor".
     # Audio: 20 Hz–8 kHz (SR/2 band above speech; engine harmonics + tire noise).

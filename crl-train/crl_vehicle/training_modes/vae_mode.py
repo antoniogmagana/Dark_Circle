@@ -84,7 +84,7 @@ class VAETrainingMode(TrainingMode):
         beta: float,
         device: torch.device,
     ) -> tuple[torch.Tensor, dict]:
-        if self.config.frontend_type == "multiscale":
+        if model.is_fused_frontend():
             return self._forward_pair_fused(model, batch, beta, device)
         return self._forward_pair_per_sensor(model, batch, beta, device)
 

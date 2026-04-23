@@ -57,7 +57,7 @@ class ContrastiveTrainingMode(TrainingMode):
             return torch.zeros((), device=device, requires_grad=True), \
                    {"contrastive_loss": 0.0}
 
-        if self.config.frontend_type == "multiscale":
+        if model.is_fused_frontend():
             mu_t, mu_parts, is_pos = self._encode_fused(model, batch, n_partners, device)
         else:
             mu_t, mu_parts, is_pos = self._encode_per_sensor(model, batch, n_partners, device)

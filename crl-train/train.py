@@ -32,7 +32,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lr",          type=float, default=3e-4)
     p.add_argument("--num-workers", type=int,   default=4)
     p.add_argument("--save-dir",    default=None)
-    p.add_argument("--frontend",    choices=["multiscale", "morlet"], default="multiscale")
+    p.add_argument("--frontend",    choices=["multiscale", "morlet", "morlet_per_sensor",
+                                              "morlet_fused", "morlet_learnable",
+                                              "morlet_learnable_fused"],
+                   default="multiscale")
+    p.add_argument("--morlet-learnable-w0", action="store_true",
+                   help="Make per-filter w0 learnable (only applies to "
+                        "morlet_learnable / morlet_learnable_fused).")
+    p.add_argument("--morlet-learnable-lr-mult", type=float, default=0.1,
+                   help="LR multiplier for learnable Morlet params relative to "
+                        "backbone LR (default 0.1).")
     p.add_argument("--training-mode", choices=["vae", "contrastive"], default="vae",
                    help="'vae' = ELBO + aux + interv (default). 'contrastive' = "
                         "NT-Xent over stratified partners during CRL.")
@@ -57,6 +66,11 @@ def parse_args() -> argparse.Namespace:
                    help="Which CRL checkpoint to load for downstream. Options: "
                         "crl_best.pth (val_ref_elbo, default), crl_best_aux_type.pth "
                         "(val_aux_type_f1), crl_final.pth (last epoch).")
+    p.add_argument("--config-overrides-json", default=None,
+                   help="JSON dict of CRLConfig field overrides applied on top of "
+                        "the other CLI args. Used by run_experiments.py --sweep "
+                        "to pass arbitrary config fields the other flags don't "
+                        "expose. Unknown fields raise.")
     return p.parse_args()
 
 
@@ -70,7 +84,20 @@ def main() -> None:
         lr=args.lr,
         num_workers=args.num_workers,
         n_epochs=args.crl_epochs,
+        morlet_learnable_w0=args.morlet_learnable_w0,
+        morlet_learnable_lr_mult=args.morlet_learnable_lr_mult,
     )
+
+    if args.config_overrides_json is not None:
+        import json as _json
+        overrides = _json.loads(args.config_overrides_json)
+        for k, v in overrides.items():
+            if k not in CRLConfig.__dataclass_fields__:
+                raise ValueError(
+                    f"--config-overrides-json: unknown CRLConfig field {k!r}. "
+                    f"Valid: {sorted(CRLConfig.__dataclass_fields__.keys())}"
+                )
+            setattr(cfg, k, v)
 
     run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     if args.crl_run_dir is not None:

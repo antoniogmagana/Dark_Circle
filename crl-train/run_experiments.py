@@ -2,21 +2,34 @@
 """
 run_experiments.py — CRL hyperparameter sweep for disentanglement tuning.
 
-Experiments are defined as overrides of CRLConfig fields.  One SensorDataset
-(train + val) is preloaded into shared memory once and reused across all
-experiments, so the 30 GB load cost is paid only once.
+Two execution modes:
+
+1. **Hardcoded EXPERIMENTS list (in-process):** shares one preloaded
+   SensorDataset across all runs, so the 30 GB load cost is paid once.
+   Backward-compatible with the original design.
+
+2. **YAML sweep (subprocess):** each run launches `train.py` in a fresh
+   subprocess for GPU memory + crash isolation. Data is shared via the
+   on-disk cache (`cache_dir`), not in-memory sharing. Pass --sweep FILE.
 
 Usage
 -----
+    # In-process (hardcoded list):
     python run_experiments.py
     python run_experiments.py --steps-per-epoch 50
     python run_experiments.py --only baseline_multiscale high_interv
     python run_experiments.py --crl-epochs 30 --ds-epochs 20
+
+    # YAML sweep (subprocess):
+    python run_experiments.py --sweep configs/sweeps/frontend_comparison.yaml
+    python run_experiments.py --sweep <file> --steps-per-epoch 2 --crl-epochs 1
 """
 
 import argparse
 import csv
 import json
+import shlex
+import subprocess
 import sys
 import time
 from copy import deepcopy
@@ -305,6 +318,236 @@ def write_report(summaries: list[dict], report_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# YAML sweep (subprocess mode)
+# ---------------------------------------------------------------------------
+
+def load_sweep_yaml(path: Path) -> tuple[dict, list[dict]]:
+    """Load a sweep YAML into (base_config, runs).
+
+    Expected schema:
+        base_config:           # dict, applied to every run (optional)
+          n_epochs: 100
+          lr: 3e-4
+        runs:                  # list, required
+          - name: my_run_1
+            overrides:
+              frontend_type: multiscale
+          - name: my_run_2
+            overrides: {frontend_type: morlet_learnable}
+
+    Returns (base_config, runs). Raises with a clear message on missing keys.
+    """
+    try:
+        import yaml
+    except ImportError as e:
+        raise RuntimeError(
+            "YAML sweep mode requires PyYAML. Install with: pip install pyyaml"
+        ) from e
+    data = yaml.safe_load(Path(path).read_text())
+    if not isinstance(data, dict):
+        raise ValueError(f"Sweep YAML {path} must be a dict at top level.")
+    if "runs" not in data:
+        raise ValueError(f"Sweep YAML {path} missing required 'runs' list.")
+    if not isinstance(data["runs"], list) or not data["runs"]:
+        raise ValueError(f"Sweep YAML {path} 'runs' must be a non-empty list.")
+    base = data.get("base_config", {}) or {}
+    if not isinstance(base, dict):
+        raise ValueError(f"Sweep YAML {path} 'base_config' must be a dict.")
+    for i, run in enumerate(data["runs"]):
+        if not isinstance(run, dict) or "name" not in run:
+            raise ValueError(f"Sweep YAML {path} run[{i}] missing 'name'.")
+        if not isinstance(run.get("overrides", {}), dict):
+            raise ValueError(f"Sweep YAML {path} run[{i}] 'overrides' must be a dict.")
+    return base, data["runs"]
+
+
+# CRLConfig fields that have a dedicated train.py CLI flag. Everything else
+# goes through --config-overrides-json to avoid argparse pollution.
+_TRAIN_PY_FLAGS = {
+    "frontend_type":            "--frontend",
+    "training_mode":            "--training-mode",
+    "batch_size":               "--batch-size",
+    "lr":                       "--lr",
+    "num_workers":              "--num-workers",
+    "n_epochs":                 "--crl-epochs",
+    "morlet_learnable_w0":      None,  # store_true — special-cased below
+    "morlet_learnable_lr_mult": "--morlet-learnable-lr-mult",
+}
+
+
+def _build_train_argv(
+    python_exe: str,
+    train_script: Path,
+    merged_cfg: dict,
+    run_save_dir: Path,
+    extra_cli: dict,
+) -> list[str]:
+    """Translate a merged config dict into a train.py argv.
+
+    Fields with dedicated flags get their flag. Fields without a flag get
+    bundled into --config-overrides-json. Runtime-only flags (--save-dir,
+    --phase, --sensors, --steps-per-epoch, --ds-epochs) come from extra_cli.
+    """
+    argv = [python_exe, str(train_script), "--save-dir", str(run_save_dir)]
+    overrides_for_json: dict = {}
+
+    for k, v in merged_cfg.items():
+        flag = _TRAIN_PY_FLAGS.get(k, "missing")
+        if flag is None and k == "morlet_learnable_w0":
+            # store_true flag — only add when True.
+            if v:
+                argv.append("--morlet-learnable-w0")
+        elif flag == "missing":
+            overrides_for_json[k] = v
+        else:
+            argv += [flag, str(v)]
+
+    if overrides_for_json:
+        argv += ["--config-overrides-json", json.dumps(overrides_for_json)]
+
+    for flag, val in extra_cli.items():
+        if val is None:
+            continue
+        if isinstance(val, bool):
+            if val:
+                argv.append(flag)
+        else:
+            argv += [flag, str(val)]
+    return argv
+
+
+def _collect_run_metrics(run_dir: Path) -> dict:
+    """Read crl_metrics.csv + downstream_metrics.csv from a completed run
+    and return the best-of-run values. Missing files → default-zero."""
+    best_elbo, conv_epoch = _best_crl_elbo(run_dir)
+    ds_best = _best_downstream(run_dir)
+    return {
+        "best_val_ref_elbo":   round(best_elbo, 4) if best_elbo != float("inf") else None,
+        "crl_converged_epoch": conv_epoch,
+        **{k: round(v, 4) for k, v in ds_best.items()},
+    }
+
+
+def run_yaml_sweep(
+    sweep_path: Path,
+    out_dir: Path,
+    extra_cli: dict,
+    only: list[str] | None,
+    cli_base_overrides: dict | None = None,
+) -> list[dict]:
+    """Execute each YAML run as a subprocess `python train.py ...`.
+
+    Subprocess mode gives GPU memory + crash isolation — a NaN or OOM in one
+    run does not poison the next. Data is shared via on-disk cache (see
+    train.py --cache-dir), not in-memory.
+
+    Merge order (highest precedence last):
+      YAML base_config → cli_base_overrides → per-run overrides.
+    cli_base_overrides lets the top-level `run_experiments.py --crl-epochs N`
+    override what the sweep YAML specified — "user knows best" signal.
+
+    Returns a list of per-run summaries.
+    """
+    base, runs = load_sweep_yaml(sweep_path)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if only:
+        valid = {r["name"] for r in runs}
+        unknown = set(only) - valid
+        if unknown:
+            raise ValueError(f"--only: unknown names {sorted(unknown)}. "
+                             f"Valid: {sorted(valid)}")
+        runs = [r for r in runs if r["name"] in only]
+
+    python_exe = sys.executable
+    train_script = Path(__file__).parent / "train.py"
+    if not train_script.exists():
+        raise FileNotFoundError(f"train.py not found at {train_script}")
+
+    summaries: list[dict] = []
+    for run in runs:
+        name = run["name"]
+        run_dir = out_dir / name
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        merged = dict(base)
+        if cli_base_overrides:
+            merged.update(cli_base_overrides)
+        merged.update(run.get("overrides", {}))
+
+        argv = _build_train_argv(
+            python_exe=python_exe,
+            train_script=train_script,
+            merged_cfg=merged,
+            run_save_dir=run_dir,
+            extra_cli=extra_cli,
+        )
+
+        print(f"\n{'=' * 65}")
+        print(f"  {name}")
+        if run.get("overrides"):
+            print(f"  overrides: {run['overrides']}")
+        print(f"  argv: {' '.join(shlex.quote(a) for a in argv)}")
+        print("=" * 65)
+
+        t0 = time.time()
+        try:
+            result = subprocess.run(argv, check=False)
+            elapsed = time.time() - t0
+            if result.returncode != 0:
+                summaries.append({
+                    "name": name, "overrides": run.get("overrides", {}),
+                    "returncode": result.returncode,
+                    "elapsed_min": round(elapsed / 60, 2),
+                    "error": f"subprocess exited with code {result.returncode}",
+                })
+                print(f"  FAILED: returncode={result.returncode} "
+                      f"({elapsed/60:.1f} min)")
+                continue
+        except KeyboardInterrupt:
+            print(f"\n  INTERRUPTED during {name}")
+            raise
+
+        metrics = _collect_run_metrics(run_dir)
+        summary = {
+            "name":        name,
+            "overrides":   run.get("overrides", {}),
+            "elapsed_min": round(elapsed / 60, 2),
+            "returncode":  0,
+            **metrics,
+        }
+        summaries.append(summary)
+        print(f"  OK ({elapsed/60:.1f} min) — {metrics}")
+
+    write_sweep_summary(summaries, out_dir)
+    return summaries
+
+
+def write_sweep_summary(summaries: list[dict], out_dir: Path) -> None:
+    """Write sweep summary.csv and summary.json under out_dir."""
+    summary_csv  = out_dir / "summary.csv"
+    summary_json = out_dir / "summary.json"
+
+    metric_keys = [
+        "best_val_ref_elbo", "crl_converged_epoch",
+        "val_pres_f1", "val_pres_acc", "val_type_f1", "val_type_acc",
+        "val_loss", "elapsed_min", "returncode",
+    ]
+    fieldnames = ["name"] + metric_keys + ["overrides"]
+
+    with open(summary_csv, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for s in summaries:
+            row = {k: s.get(k, "") for k in fieldnames}
+            row["overrides"] = json.dumps(s.get("overrides", {}))
+            writer.writerow(row)
+
+    summary_json.write_text(json.dumps({"runs": summaries}, indent=2))
+    print(f"\nSweep summary: {summary_csv}")
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -321,11 +564,43 @@ def parse_args():
     p.add_argument("--steps-per-epoch", type=int, default=None,
                    help="Limit batches per epoch (for smoke tests)")
     p.add_argument("--only", nargs="+", default=None, metavar="NAME")
+    p.add_argument("--sweep",           default=None, metavar="YAML",
+                   help="Path to a sweep YAML. When set, each run launches "
+                        "train.py in a subprocess (GPU/crash isolation). When "
+                        "omitted, the hardcoded EXPERIMENTS list runs in-process.")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
+
+    # YAML sweep mode short-circuits before the in-memory dataset preload —
+    # subprocess children each build their own datasets from the shared cache.
+    if args.sweep is not None:
+        extra_cli = {
+            "--data-dir":        args.data_dir,
+            "--val-dir":         args.val_dir,
+            "--cache-dir":       args.cache_dir,
+            "--ds-epochs":       args.ds_epochs,
+            "--steps-per-epoch": args.steps_per_epoch,
+        }
+        cli_base: dict = {}
+        if args.crl_epochs is not None:
+            cli_base["n_epochs"] = args.crl_epochs
+        if args.batch_size is not None:
+            cli_base["batch_size"] = args.batch_size
+        if args.num_workers is not None:
+            cli_base["num_workers"] = args.num_workers
+
+        run_yaml_sweep(
+            sweep_path=Path(args.sweep),
+            out_dir=Path(args.out_dir),
+            extra_cli=extra_cli,
+            only=args.only,
+            cli_base_overrides=cli_base or None,
+        )
+        return
+
     device = get_device()
 
     base_cfg = CRLConfig()

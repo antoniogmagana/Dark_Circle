@@ -89,7 +89,9 @@ def parse_args():
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--max-files",  type=int, default=6)
     p.add_argument("--device",     default=None)
-    p.add_argument("--frontend",   type=str, default="multiscale", choices=["multiscale", "morlet"],
+    p.add_argument("--frontend",   type=str, default="multiscale",
+                   choices=["multiscale", "morlet", "morlet_per_sensor", "morlet_fused",
+                            "morlet_learnable", "morlet_learnable_fused"],
                    help="Frontend architecture to use.")
     return p.parse_args()
 

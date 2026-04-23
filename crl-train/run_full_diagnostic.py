@@ -93,11 +93,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--steps-per-epoch", type=int, default=None,
                    help="Cap batches per CRL epoch (smoke tests)")
     p.add_argument("--frontend",
-                   choices=["multiscale", "morlet", "morlet_per_sensor"],
+                   choices=["multiscale", "morlet", "morlet_per_sensor", "morlet_fused",
+                            "morlet_learnable", "morlet_learnable_fused"],
                    default="multiscale")
     p.add_argument("--morlet-use-phase", action="store_true",
                    help="Morlet variants emit [log_power, cos_phase, sin_phase] "
                         "→ 3× channels. Preserves phase/onset structure.")
+    p.add_argument("--morlet-learnable-w0", action="store_true",
+                   help="Make per-filter w0 learnable (only applies to "
+                        "morlet_learnable / morlet_learnable_fused).")
+    p.add_argument("--morlet-learnable-lr-mult", type=float, default=0.1,
+                   help="LR multiplier for learnable Morlet params relative to "
+                        "backbone LR (default 0.1).")
     p.add_argument("--prior-type", choices=["standard", "conditional"],
                    default="standard",
                    help="Prior over z. 'standard'=N(0,I); 'conditional'=iVAE "
@@ -689,6 +696,8 @@ def main() -> None:
     base_cfg = CRLConfig(
         frontend_type=args.frontend,
         morlet_use_phase=args.morlet_use_phase,
+        morlet_learnable_w0=args.morlet_learnable_w0,
+        morlet_learnable_lr_mult=args.morlet_learnable_lr_mult,
         prior_type=args.prior_type,
         training_mode=args.training_mode,
         batch_size=args.batch_size,

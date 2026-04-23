@@ -52,6 +52,25 @@ def cfg_morlet():
                      frontend_type="morlet", d_z=24)
 
 
+@pytest.fixture
+def cfg_morlet_fused():
+    return CRLConfig(d_model=32, n_layers=1, n_heads=4,
+                     frontend_type="morlet_fused", fused_seq_len=16, d_z=24)
+
+
+@pytest.fixture
+def cfg_morlet_learnable():
+    return CRLConfig(d_model=32, n_layers=1, n_heads=4,
+                     frontend_type="morlet_learnable", d_z=24)
+
+
+@pytest.fixture
+def cfg_morlet_learnable_fused():
+    return CRLConfig(d_model=32, n_layers=1, n_heads=4,
+                     frontend_type="morlet_learnable_fused",
+                     fused_seq_len=16, d_z=24)
+
+
 class TestFactory:
     def test_default_config_builds_vae_standard(self, cfg_ms):
         mode = build_training_mode(cfg_ms)
@@ -97,7 +116,7 @@ class TestForwardPairMetrics:
         "aux_type_logits", "aux_type_labels",
     }
 
-    @pytest.mark.parametrize("cfg_name", ["cfg_ms", "cfg_morlet"])
+    @pytest.mark.parametrize("cfg_name", ["cfg_ms", "cfg_morlet", "cfg_morlet_fused", "cfg_morlet_learnable", "cfg_morlet_learnable_fused"])
     def test_returns_loss_and_metrics(self, cfg_name, request):
         cfg = request.getfixturevalue(cfg_name)
         mode = build_training_mode(cfg)
@@ -109,7 +128,7 @@ class TestForwardPairMetrics:
         assert self.EXPECTED_SCALAR_KEYS.issubset(metrics.keys())
         assert self.EXPECTED_TENSOR_KEYS.issubset(metrics.keys())
 
-    @pytest.mark.parametrize("cfg_name", ["cfg_ms", "cfg_morlet"])
+    @pytest.mark.parametrize("cfg_name", ["cfg_ms", "cfg_morlet", "cfg_morlet_fused", "cfg_morlet_learnable", "cfg_morlet_learnable_fused"])
     def test_gradients_flow(self, cfg_name, request):
         cfg = request.getfixturevalue(cfg_name)
         mode = build_training_mode(cfg)
@@ -192,7 +211,7 @@ class TestConditionalPriorIntegration:
     """VAETrainingMode + ConditionalPrior: labels must reach the prior MLP
     via _kl_terms, and gradients must flow to both encoder and prior params."""
 
-    @pytest.mark.parametrize("cfg_name", ["cfg_ms", "cfg_morlet"])
+    @pytest.mark.parametrize("cfg_name", ["cfg_ms", "cfg_morlet", "cfg_morlet_fused", "cfg_morlet_learnable", "cfg_morlet_learnable_fused"])
     def test_conditional_prior_forward_pair_runs(self, cfg_name, request):
         cfg = request.getfixturevalue(cfg_name)
         cfg.prior_type = "conditional"
