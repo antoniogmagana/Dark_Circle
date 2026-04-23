@@ -142,13 +142,17 @@ def main() -> None:
             ckpt_name=args.ckpt_name,
         )
 
-    (save_dir / "meta.json").write_text(json.dumps({
+    meta: dict = {
         "config":     asdict(cfg),
         "sensors":    args.sensors,
         "probe_mode": args.probe_mode,
         "ckpt_name":  args.ckpt_name,
         "crl_run_dir": str(Path(args.crl_run_dir).resolve()) if args.crl_run_dir else None,
-    }, indent=2))
+    }
+    derived = getattr(model, "_morlet_derived_params", None)
+    if derived:
+        meta["morlet_derived_params"] = derived
+    (save_dir / "meta.json").write_text(json.dumps(meta, indent=2))
     print(f"Done. Artifacts in {save_dir}")
 
 

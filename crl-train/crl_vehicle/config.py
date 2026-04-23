@@ -92,9 +92,11 @@ class CRLConfig:
     # keep at 1.0 unless you want one sensor to dominate channel budget.
     morlet_per_sensor_params: dict = field(default_factory=lambda: {
         "audio":   {"freq_min": 20.0,  "freq_max": 8000.0,
-                    "out_channels_frac": 1.0, "w0": 6.0},
+                    "out_channels_frac": 1.0, "w0": 6.0,
+                    "target_tokens": 32, "receptive_cycles": 3.0},
         "seismic": {"freq_min": 2.0,   "freq_max": 40.0,
-                    "out_channels_frac": 1.0, "w0": 6.0},
+                    "out_channels_frac": 1.0, "w0": 6.0,
+                    "target_tokens": 32, "receptive_cycles": 3.0},
     })
 
     # Training

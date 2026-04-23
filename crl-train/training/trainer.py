@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 from pathlib import Path
 from typing import IO, Iterator
 
@@ -61,6 +62,12 @@ class CRLModel(nn.Module):
         self.frontends = nn.ModuleDict()
         self.latent = CausalLatentSpace(d_z=d_z)
         self.interv_classifier = UnknownInterventionClassifier()
+
+        # Per-sensor Morlet derivation audit trail (populated by
+        # _init_morlet_per_sensor; empty for other frontends). Persisted to
+        # meta.json by the training entry points so runs are reproducible
+        # without re-deriving from config.
+        self._morlet_derived_params: dict[str, dict] = {}
 
         if config.frontend_type == "multiscale":
             self._init_multiscale(config, d_z)
@@ -164,18 +171,18 @@ class CRLModel(nn.Module):
             )
 
     def _init_morlet_per_sensor(self, config: CRLConfig, d_z: int) -> None:
-        """Per-sensor Morlet banks with sensor-specific freq ranges.
+        """Per-sensor Morlet banks with sensor-specific freq ranges, coupled
+        pool stride, and coupled kernel size.
 
-        Audio and seismic each get a bank whose freq_min/freq_max, channel
-        count, and w0 come from config.morlet_per_sensor_params[sensor].
-        Otherwise identical plumbing to _init_morlet: late fusion, one
-        encoder/decoder per sensor.
+        Per-sensor derivation (from morlet_per_sensor_params[sensor]):
+          pool_stride = window_size // target_tokens
+          kernel_size = round(2 * receptive_cycles * w0 / (2π·freq_min) * SR),
+                        forced odd and ≥3
         """
         self.encoder = None
         self.decoder = None
         self.encoders = nn.ModuleDict()
         self.decoders = nn.ModuleDict()
-        stride = config.morlet_pool_stride
         use_phase = config.morlet_use_phase
         params_by_sensor = config.morlet_per_sensor_params
 
@@ -188,24 +195,44 @@ class CRLModel(nn.Module):
                 )
             sp = params_by_sensor[sensor]
             mc = config.modality_cfg(sensor)
-            ks = config.morlet_kernel_size
             out_channels = max(1, int(round(config.d_model * sp.get("out_channels_frac", 1.0))))
             freq_min = float(sp["freq_min"])
             freq_max = float(sp["freq_max"])
             w0 = float(sp.get("w0", 6.0))
+            target_tokens    = int(sp.get("target_tokens", 32))
+            receptive_cycles = float(sp.get("receptive_cycles", 3.0))
 
-            kernel_mb = (2 * out_channels * mc.n_channels * ks * 4) / 1e6
+            # Per-sensor coupled derivation.
+            pool_stride = max(1, mc.window_size // target_tokens)
+            ks_float    = 2 * receptive_cycles * w0 / (2 * math.pi * freq_min) * mc.sample_rate
+            kernel_size = max(3, int(round(ks_float)) | 1)  # odd, ≥3
+
+            post_pool_tokens = mc.window_size // pool_stride
+            post_pool_rate   = mc.sample_rate / pool_stride
+
+            self._morlet_derived_params[sensor] = {
+                "pool_stride":      pool_stride,
+                "kernel_size":      kernel_size,
+                "target_tokens":    target_tokens,
+                "receptive_cycles": receptive_cycles,
+                "post_pool_tokens": post_pool_tokens,
+                "post_pool_rate":   round(post_pool_rate, 3),
+            }
+
+            kernel_mb = (2 * out_channels * mc.n_channels * kernel_size * 4) / 1e6
             print(
                 f"  MorletFilterbank [{sensor}]: "
                 f"{out_channels}ch × [{freq_min:g}, {freq_max:g}] Hz, "
-                f"w0={w0}, ks={ks} = {kernel_mb:.2f} MB"
+                f"w0={w0}, ks={kernel_size} (derived, {receptive_cycles:g} cycles @ {freq_min:g} Hz), "
+                f"stride={pool_stride} (→{post_pool_tokens} tokens @ {post_pool_rate:.1f} Hz), "
+                f"= {kernel_mb:.2f} MB"
                 + (", +phase" if use_phase else "")
             )
 
             bank = MorletFilterbank(
                 in_channels=mc.n_channels,
                 out_channels=out_channels,
-                kernel_size=ks,
+                kernel_size=kernel_size,
                 sample_rate=mc.sample_rate,
                 w0=w0,
                 freq_min=freq_min,
@@ -213,10 +240,9 @@ class CRLModel(nn.Module):
                 use_phase=use_phase,
             )
             self.frontends[sensor] = nn.Sequential(
-                bank, nn.AvgPool1d(stride, stride),
+                bank, nn.AvgPool1d(pool_stride, pool_stride),
             )
             enc_in_channels = bank.total_out_channels
-            seq_len = mc.window_size // stride
             self.encoders[sensor] = TemporalEncoder(
                 in_channels=enc_in_channels,
                 d_z=d_z,
@@ -226,7 +252,7 @@ class CRLModel(nn.Module):
             )
             self.decoders[sensor] = FeatureDecoder(
                 out_channels=enc_in_channels,
-                seq_len=max(1, seq_len),
+                seq_len=max(1, post_pool_tokens),
                 d_z=d_z,
                 d_model=config.d_model,
             )

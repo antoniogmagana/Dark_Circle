@@ -245,6 +245,61 @@ class TestMorletPerSensorInModel:
         assert seismic_bank.out_channels == 32  # 32 * 1.0
 
 
+class TestMorletPerSensorDerivation:
+    """Per-sensor coupled derivation of pool_stride and kernel_size."""
+
+    @pytest.mark.parametrize(
+        "sensor,SR,W,freq_min,expected_stride,expected_ks_range",
+        [
+            ("audio",   16000, 16000, 20.0, 500, (4583, 4587)),
+            ("seismic",   200,   200,  2.0,   6, (571,  575)),
+        ],
+    )
+    def test_stride_and_kernel_derivation(
+        self, sensor, SR, W, freq_min, expected_stride, expected_ks_range
+    ):
+        from crl_vehicle.config import CRLConfig
+        from training.trainer import CRLModel
+
+        cfg = CRLConfig(
+            d_model=16, n_layers=1, n_heads=4,
+            frontend_type="morlet_per_sensor", d_z=24,
+        )
+        # Single-sensor config: only the sensor under test in the params dict.
+        cfg.morlet_per_sensor_params = {
+            sensor: {
+                "freq_min": freq_min, "freq_max": SR / 4,
+                "out_channels_frac": 1.0, "w0": 6.0,
+                "target_tokens": 32, "receptive_cycles": 3.0,
+            },
+        }
+        model = CRLModel(cfg, sensors=[sensor])
+
+        derived = model._morlet_derived_params[sensor]
+        assert derived["pool_stride"]   == expected_stride
+        lo, hi = expected_ks_range
+        assert lo <= derived["kernel_size"] <= hi
+        assert derived["kernel_size"] % 2 == 1  # odd
+        assert derived["target_tokens"]    == 32
+        assert derived["receptive_cycles"] == 3.0
+
+        # Audit-trail sanity: post_pool_tokens and post_pool_rate present.
+        assert "post_pool_tokens" in derived
+        assert "post_pool_rate"   in derived
+
+    def test_derived_params_absent_for_non_morlet_per_sensor(self):
+        """Only morlet_per_sensor populates the derivation dict."""
+        from crl_vehicle.config import CRLConfig
+        from training.trainer import CRLModel
+
+        cfg = CRLConfig(
+            d_model=16, n_layers=1, n_heads=4,
+            frontend_type="multiscale", fused_seq_len=16, d_z=24,
+        )
+        model = CRLModel(cfg)
+        assert model._morlet_derived_params == {}
+
+
 class TestEarlyFusionShapeReconciliation:
 
     def test_adaptive_pool_equalizes_tokens(self):

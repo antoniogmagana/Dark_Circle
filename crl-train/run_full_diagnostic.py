@@ -174,11 +174,15 @@ def phase_crl(
     elapsed_min = (time.time() - t0) / 60
     print(f"  CRL done in {elapsed_min:.1f} min")
 
-    meta_path.write_text(json.dumps({
+    crl_meta: dict = {
         "config":  asdict(cfg),
         "sensors": sensors,
         "crl_elapsed_min": round(elapsed_min, 2),
-    }, indent=2))
+    }
+    derived = getattr(model, "_morlet_derived_params", None)
+    if derived:
+        crl_meta["morlet_derived_params"] = derived
+    meta_path.write_text(json.dumps(crl_meta, indent=2))
     return crl_dir
 
 
