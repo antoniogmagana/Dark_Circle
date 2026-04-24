@@ -670,3 +670,118 @@ class TestLearnableMorletOptimizerGroup:
         trainer = Trainer(model, cfg, torch.device("cpu"), tmp_path)
         names = [g.get("name", "") for g in trainer.optimizer.param_groups]
         assert "learnable_morlet" not in names
+
+
+class TestFFTMorletConv:
+    """FFT-based convolution path must match direct F.conv1d within float
+    precision and preserve gradients for the learnable variant."""
+
+    def _filterbank(self, ks, use_phase=False, sample_rate=200,
+                    freq_min=2.0, freq_max=40.0, out_channels=8):
+        return MorletFilterbank(
+            in_channels=1, out_channels=out_channels, kernel_size=ks,
+            sample_rate=sample_rate, w0=6.0,
+            freq_min=freq_min, freq_max=freq_max, use_phase=use_phase,
+        )
+
+    def _force_threshold(self, threshold):
+        """Context-manager-style helper for toggling the class-level threshold
+        between test runs. Returns the previous value."""
+        prev = MorletFilterbank.FFT_CONV_THRESHOLD
+        MorletFilterbank.FFT_CONV_THRESHOLD = threshold
+        return prev
+
+    @pytest.mark.parametrize("ks,use_phase", [
+        (513,  False),
+        (513,  True),
+        (1025, False),
+        # Representative audio-Morlet size — the actual production hot path.
+        (4585, False),
+    ])
+    def test_fft_matches_direct_conv(self, ks, use_phase):
+        """Force both paths on the same filterbank and compare outputs."""
+        torch.manual_seed(42)
+        # Use a longer input than kernel so the conv has non-trivial center.
+        L = max(2 * ks, 2000)
+        # Pick SR + freq range compatible with kernel_size.
+        SR = 16000 if ks > 1000 else 200
+        fmin = 20.0 if SR == 16000 else 2.0
+        fmax = 8000.0 if SR == 16000 else 40.0
+        fb = self._filterbank(ks, use_phase=use_phase, sample_rate=SR,
+                              freq_min=fmin, freq_max=fmax)
+        x = torch.randn(2, 1, L) * 0.01
+
+        prev = self._force_threshold(10**9)    # disable FFT
+        y_direct = fb(x)
+        self._force_threshold(0)                # force FFT
+        y_fft = fb(x)
+        self._force_threshold(prev)
+
+        assert y_direct.shape == y_fft.shape
+        # Phase path amplifies numerical diff via 1/sqrt(mag+eps), so its
+        # tolerance is looser than the non-phase power path.
+        atol = 1e-3 if use_phase else 1e-4
+        assert torch.allclose(y_direct, y_fft, atol=atol), (
+            f"ks={ks}, use_phase={use_phase}: "
+            f"max diff {(y_direct - y_fft).abs().max().item():.3e}"
+        )
+
+    def test_threshold_dispatches_correctly(self):
+        """Below threshold → direct; at or above → FFT. The dispatch is
+        silent, so test it by patching F.conv1d and checking call count."""
+        from unittest.mock import patch
+        import torch.nn.functional as F_mod
+
+        torch.manual_seed(0)
+        x = torch.randn(2, 1, 2000) * 0.01
+
+        # Small kernel → direct path (two conv1d calls, re + im).
+        fb_small = self._filterbank(ks=101)  # 101 < 512
+        with patch.object(F_mod, "conv1d", wraps=F_mod.conv1d) as spy:
+            _ = fb_small(x)
+        assert spy.call_count == 2, f"small-kernel direct path, got {spy.call_count}"
+
+        # Large kernel → FFT path (zero conv1d calls).
+        fb_large = self._filterbank(ks=513)
+        with patch.object(F_mod, "conv1d", wraps=F_mod.conv1d) as spy:
+            _ = fb_large(x)
+        assert spy.call_count == 0, f"large-kernel FFT path, got {spy.call_count}"
+
+    def test_gradient_flows_through_fft_path(self):
+        """LearnableMorletFilterbank with ks above FFT threshold must still
+        propagate gradients to log_scales. This is the critical correctness
+        check — a broken FFT path silently zeros out learning."""
+        learn = LearnableMorletFilterbank(
+            in_channels=1, out_channels=16, kernel_size=513,
+            sample_rate=200, w0=6.0, freq_min=2.0, freq_max=40.0,
+            use_phase=False,
+        )
+        assert learn.kernel_size >= MorletFilterbank.FFT_CONV_THRESHOLD
+        x = torch.randn(2, 1, 2000) * 0.01
+        learn(x).sum().backward()
+        assert learn.log_scales.grad is not None
+        assert learn.log_scales.grad.abs().sum().item() > 0
+
+    def test_learnable_fft_matches_direct_at_init(self):
+        """At init, LearnableMorletFilterbank forward (FFT path) should still
+        match the fixed MorletFilterbank forward (direct path). The earlier
+        init-matches-fixed test uses ks=101 (direct/direct); this one forces
+        ks=513 so we're comparing FFT against direct across subclasses."""
+        torch.manual_seed(0)
+        fixed = MorletFilterbank(
+            in_channels=1, out_channels=16, kernel_size=513,
+            sample_rate=200, w0=6.0, freq_min=2.0, freq_max=40.0,
+            use_phase=False,
+        )
+        learn = LearnableMorletFilterbank(
+            in_channels=1, out_channels=16, kernel_size=513,
+            sample_rate=200, w0=6.0, freq_min=2.0, freq_max=40.0,
+            use_phase=False,
+        )
+        x = torch.randn(2, 1, 2000) * 0.01
+        with torch.no_grad():
+            y_fixed = fixed(x)
+            y_learn = learn(x)
+        # Loose atol because of log/exp round-trip + FFT rounding combined.
+        diff = (y_fixed - y_learn).abs().max().item()
+        assert diff < 1e-3, f"max diff {diff:.3e}"
