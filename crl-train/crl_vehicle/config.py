@@ -104,6 +104,13 @@ class CRLConfig:
     morlet_learnable_w0:       bool  = False
     morlet_learnable_lr_mult:  float = 0.1
 
+    # Two-stage training (stage 2): when train.py --init-from-run loads a
+    # converged fixed-Morlet checkpoint into a learnable model, this
+    # multiplier reduces the encoder/decoder LR so filters are the primary
+    # mover and the encoder just fine-tunes. Filter LR stays on
+    # morlet_learnable_lr_mult. Only active in stage-2 runs.
+    stage2_encoder_lr_mult:    float = 0.3
+
     # Per-sensor Morlet frequency ranges for frontend_type="morlet_per_sensor".
     # Audio: 20 Hz–8 kHz (SR/2 band above speech; engine harmonics + tire noise).
     # Seismic: 2–40 Hz (typical vehicle ground-vibration band).

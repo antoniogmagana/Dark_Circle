@@ -651,6 +651,76 @@ class CRLModel(nn.Module):
         for group in [self.pres_heads, self.type_heads, self.prox_heads]:
             yield from group.parameters()
 
+    def load_from_fixed_morlet_checkpoint(
+        self, state_dict: dict, strict: bool = True,
+    ) -> tuple[list[str], list[str]]:
+        """Load weights from a fixed-Morlet (morlet_per_sensor or morlet_fused)
+        checkpoint into this learnable model.
+
+        Used for two-stage training: stage 1 converges a fixed-scale run,
+        stage 2 loads that state here and fine-tunes scales as learnable.
+
+        Conversion per sensor frontend:
+          - kernel_re, kernel_im buffers exist on the source but not on the
+            learnable model. Dropped from state_dict.
+          - init_scales buffer is identical on both; loads directly.
+          - log_scales parameter is initialized from log(init_scales). The
+            source checkpoint has no log_scales key, so we inject one.
+          - w0_per_filter parameter (only if learnable_w0=True) is
+            initialized from the source's scalar w0 (stored on the bank
+            instance, not in state_dict).
+          - Downstream probe heads (pres_heads / type_heads / prox_heads)
+            are dropped from source so they re-init fresh in stage 2.
+
+        Returns (missing_keys, unexpected_keys) for logging. Raises if
+        strict=True and any non-expected keys remain after conversion.
+        """
+        # Work on a copy — caller keeps their state_dict.
+        source = dict(state_dict)
+
+        # Drop downstream probe heads so they re-init fresh in stage 2.
+        # aux_* heads DO carry over (they train during CRL).
+        for key in list(source.keys()):
+            if key.startswith(("pres_heads.", "type_heads.", "prox_heads.")):
+                del source[key]
+
+        # Per-sensor filterbank conversion: drop fixed kernels, inject
+        # log_scales from init_scales.
+        for sensor_name in self.frontends.keys():
+            ks_re_key = f"frontends.{sensor_name}.0.kernel_re"
+            ks_im_key = f"frontends.{sensor_name}.0.kernel_im"
+            init_key  = f"frontends.{sensor_name}.0.init_scales"
+
+            for k in (ks_re_key, ks_im_key):
+                if k in source:
+                    del source[k]
+
+            log_scales_key = f"frontends.{sensor_name}.0.log_scales"
+            if init_key in source and log_scales_key not in source:
+                init_scales = source[init_key]
+                source[log_scales_key] = torch.log(init_scales)
+
+        missing, unexpected = self.load_state_dict(source, strict=False)
+
+        # Classify the missing keys: log_scales / w0_per_filter entries for
+        # sensors missing from the source are OK (fresh init). probe head
+        # re-init is also expected (we dropped them).
+        def _is_expected_missing(k: str) -> bool:
+            return (
+                k.startswith(("pres_heads.", "type_heads.", "prox_heads."))
+                or k.endswith(".w0_per_filter")   # source had fixed w0; we init fresh
+            )
+
+        other_missing    = [k for k in missing    if not _is_expected_missing(k)]
+        other_unexpected = [k for k in unexpected]
+
+        if strict and (other_missing or other_unexpected):
+            raise RuntimeError(
+                f"Stage-2 checkpoint load mismatch. Missing: {other_missing}. "
+                f"Unexpected: {other_unexpected}."
+            )
+        return missing, unexpected
+
     def _finetune_params(self, top_n: int) -> list[nn.Parameter]:
         """Return backbone parameters to unfreeze for fine-tuning.
 
@@ -730,12 +800,14 @@ class Trainer:
         config: CRLConfig,
         device: torch.device,
         save_dir: Path,
+        stage2: bool = False,
     ) -> None:
         self.model  = model
         self.cfg    = config
         self.device = device
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
+        self.stage2 = stage2
 
         self.mode: TrainingMode = build_training_mode(config).to(device)
         self.ckpt_state = CheckpointState()
@@ -748,16 +820,29 @@ class Trainer:
         # carried by the mode (e.g. ConditionalPrior MLP at Checkpoint 2),
         # (3) learnable Morlet filterbank params — separate group at reduced
         # LR so the init-near-optimal filterbank doesn't wander.
+        #
+        # Stage 2 (user loaded a converged fixed-Morlet checkpoint via
+        # --init-from-run): the backbone was already trained, so we drop its
+        # LR to stage2_encoder_lr_mult× the base LR. Filters become the
+        # primary mover; encoder just fine-tunes.
         backbone_param_ids = {id(p) for p in model.backbone_parameters()}
         mode_params = [p for p in self.mode.parameters()
                        if id(p) not in backbone_param_ids]
         learnable_morlet_params = model.learnable_morlet_parameters()
 
+        backbone_lr = config.lr
+        if stage2:
+            backbone_lr = config.lr * config.stage2_encoder_lr_mult
+
         param_groups = [
-            {"params": model.backbone_parameters(), "weight_decay": config.wd}
+            {"params": model.backbone_parameters(), "weight_decay": config.wd,
+             "lr": backbone_lr, "name": "backbone"}
         ]
         if mode_params:
-            param_groups.append({"params": mode_params, "weight_decay": config.wd})
+            param_groups.append({
+                "params": mode_params, "weight_decay": config.wd,
+                "lr": backbone_lr, "name": "mode",
+            })
         if learnable_morlet_params:
             param_groups.append({
                 "params":       learnable_morlet_params,
@@ -766,9 +851,57 @@ class Trainer:
                 "name":         "learnable_morlet",
             })
         self.optimizer = torch.optim.AdamW(param_groups, lr=config.lr)
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=config.n_epochs, eta_min=config.lr_min
-        )
+
+        if stage2:
+            self.scheduler = self._build_stage2_scheduler(
+                total_epochs=config.n_epochs, warmup_epochs=3,
+            )
+        else:
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=config.n_epochs, eta_min=config.lr_min
+            )
+
+    def _build_stage2_scheduler(
+        self, total_epochs: int, warmup_epochs: int,
+    ) -> torch.optim.lr_scheduler.LambdaLR:
+        """Stage-2 schedule: for the learnable_morlet group, linear warmup
+        from 0 to full LR over warmup_epochs, then cosine annealing over the
+        remaining epochs. Backbone and mode groups start at their already-
+        reduced stage-2 LR and do plain cosine annealing over total_epochs.
+
+        Warmup protects the converged encoder from an immediate perturbation
+        when the filters start moving from their fixed-scale init.
+        """
+        cfg = self.cfg
+        lr_min_ratio = max(cfg.lr_min / max(cfg.lr, 1e-12), 0.0)
+
+        def _lr_multiplier_cosine(epoch: int, t_max: int) -> float:
+            if t_max <= 0:
+                return 1.0
+            progress = min(max(epoch / t_max, 0.0), 1.0)
+            cos_factor = 0.5 * (1.0 + math.cos(math.pi * progress))
+            return lr_min_ratio + (1.0 - lr_min_ratio) * cos_factor
+
+        def _lambda_for_group(group_name: str):
+            def _fn(epoch: int) -> float:
+                if group_name == "learnable_morlet" and epoch < warmup_epochs:
+                    return (epoch + 1) / max(warmup_epochs, 1)
+                # Cosine over the post-warmup window for filters, over full
+                # schedule for backbone/mode. Subtracting warmup_epochs on
+                # the filter group keeps its peak at 1.0 right after warmup.
+                if group_name == "learnable_morlet":
+                    return _lr_multiplier_cosine(
+                        epoch - warmup_epochs,
+                        max(total_epochs - warmup_epochs, 1),
+                    )
+                return _lr_multiplier_cosine(epoch, total_epochs)
+            return _fn
+
+        lambdas = [
+            _lambda_for_group(g.get("name", ""))
+            for g in self.optimizer.param_groups
+        ]
+        return torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambdas)
 
     # ------------------------------------------------------------------
     # Forward pair — delegates to the TrainingMode.

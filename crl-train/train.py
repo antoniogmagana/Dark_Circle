@@ -71,6 +71,17 @@ def parse_args() -> argparse.Namespace:
                         "the other CLI args. Used by run_experiments.py --sweep "
                         "to pass arbitrary config fields the other flags don't "
                         "expose. Unknown fields raise.")
+    p.add_argument("--init-from-run", default=None, metavar="PATH_OR_AUTO",
+                   help="Two-stage training: load the CRL backbone from a "
+                        "converged stage-1 run (morlet_per_sensor or "
+                        "morlet_fused), upgrade to the requested learnable "
+                        "variant, and fine-tune. Pass 'auto' to search "
+                        "saved_crl/oneshot/ for the most recent compatible "
+                        "run. Only valid with --frontend morlet_learnable or "
+                        "morlet_learnable_fused.")
+    p.add_argument("--init-search-root", default="saved_crl/oneshot",
+                   help="Root dir searched by --init-from-run=auto. Default: "
+                        "saved_crl/oneshot.")
     return p.parse_args()
 
 
@@ -128,7 +139,46 @@ def main() -> None:
           f"type: {[round(w, 3) for w in type_weights.tolist()]}")
 
     model   = CRLModel(cfg, sensors=args.sensors, probe_mode=args.probe_mode).to(device)
-    trainer = Trainer(model, cfg, device, save_dir)
+
+    # Two-stage training: load a converged fixed-Morlet checkpoint and
+    # upgrade to the learnable variant. Only valid for morlet_learnable*.
+    stage2 = False
+    init_from_run_resolved: Path | None = None
+    if args.init_from_run is not None:
+        from crl_vehicle.stage2 import find_compatible_run, resolve_source_checkpoint
+        if args.frontend not in ("morlet_learnable", "morlet_learnable_fused"):
+            raise ValueError(
+                f"--init-from-run requires --frontend morlet_learnable or "
+                f"morlet_learnable_fused (got {args.frontend!r})."
+            )
+        if args.init_from_run == "auto":
+            print(f"Searching {args.init_search_root} for compatible stage-1 run …")
+            init_from_run_resolved = find_compatible_run(
+                target_frontend=args.frontend,
+                target_sensors=args.sensors,
+                target_cfg=asdict(cfg),
+                search_root=Path(args.init_search_root),
+                verbose=True,
+            )
+            print(f"Auto-selected stage-1 run: {init_from_run_resolved}")
+        else:
+            init_from_run_resolved = Path(args.init_from_run)
+            if not init_from_run_resolved.exists():
+                raise FileNotFoundError(
+                    f"--init-from-run path does not exist: {init_from_run_resolved}"
+                )
+
+        ckpt_path = resolve_source_checkpoint(init_from_run_resolved)
+        print(f"Loading stage-1 checkpoint: {ckpt_path}")
+        source_state = torch.load(ckpt_path, map_location=device)
+        missing, unexpected = model.load_from_fixed_morlet_checkpoint(
+            source_state, strict=True,
+        )
+        print(f"  missing keys (expected for fresh heads / w0): {len(missing)}")
+        print(f"  unexpected keys: {len(unexpected)}")
+        stage2 = True
+
+    trainer = Trainer(model, cfg, device, save_dir, stage2=stage2)
 
     if args.phase in ("crl", "full"):
         train_pair = StratifiedPairDataset(train_ds)
@@ -175,6 +225,9 @@ def main() -> None:
         "probe_mode": args.probe_mode,
         "ckpt_name":  args.ckpt_name,
         "crl_run_dir": str(Path(args.crl_run_dir).resolve()) if args.crl_run_dir else None,
+        "stage2":       stage2,
+        "init_from_run": str(init_from_run_resolved.resolve())
+                         if init_from_run_resolved is not None else None,
     }
     derived = getattr(model, "_morlet_derived_params", None)
     if derived:
