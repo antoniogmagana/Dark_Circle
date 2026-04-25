@@ -456,3 +456,96 @@ class TestBuildManifest:
         assert manifest["schema_version"] == 1
         assert manifest["config_window_sizes"] == {"audio": 16000, "seismic": 200}
         assert "created_unix" in manifest
+
+
+from crl_vehicle.data.id_split import load_or_build_manifest
+
+
+class TestLoadOrBuildManifest:
+    def test_first_call_writes_manifest(self, tmp_path):
+        train_dir = tmp_path / "data" / "train"; train_dir.mkdir(parents=True)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
+                              n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
+                              n_samples=2_000)
+
+        cache_dir = tmp_path / "id_cache"
+        manifest = load_or_build_manifest(
+            id_root=tmp_path / "data",
+            mapping={"iobt": {"silverado": ["heavy", "pickup", "split"]}},
+            window_sizes={"audio": 16000, "seismic": 200},
+            cache_dir=cache_dir,
+        )
+        assert "iobt__silverado__rs1" in manifest["groups"]
+        # Cache file written
+        cache_files = list(cache_dir.glob("manifest_*.json"))
+        assert len(cache_files) == 1
+
+    def test_second_call_hits_cache(self, tmp_path):
+        train_dir = tmp_path / "data" / "train"; train_dir.mkdir(parents=True)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
+                              n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
+                              n_samples=2_000)
+
+        cache_dir = tmp_path / "id_cache"
+        kwargs = dict(
+            id_root=tmp_path / "data",
+            mapping={"iobt": {"silverado": ["heavy", "pickup", "split"]}},
+            window_sizes={"audio": 16000, "seismic": 200},
+            cache_dir=cache_dir,
+        )
+        m1 = load_or_build_manifest(**kwargs)
+        # Tamper with manifest to detect cache hit
+        cache_file = next(cache_dir.glob("manifest_*.json"))
+        import json as _json
+        data = _json.loads(cache_file.read_text())
+        data["sentinel"] = "i was here"
+        cache_file.write_text(_json.dumps(data))
+
+        m2 = load_or_build_manifest(**kwargs)
+        assert m2.get("sentinel") == "i was here"
+
+    def test_changed_mapping_invalidates_cache(self, tmp_path):
+        train_dir = tmp_path / "data" / "train"; train_dir.mkdir(parents=True)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
+                              n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
+                              n_samples=2_000)
+        cache_dir = tmp_path / "id_cache"
+
+        load_or_build_manifest(
+            id_root=tmp_path / "data",
+            mapping={"iobt": {"silverado": ["heavy", "pickup", "split"]}},
+            window_sizes={"audio": 16000, "seismic": 200},
+            cache_dir=cache_dir,
+        )
+        # Different mapping → new hash → new file
+        load_or_build_manifest(
+            id_root=tmp_path / "data",
+            mapping={"iobt": {"silverado": ["heavy", "pickup", "train"]}},
+            window_sizes={"audio": 16000, "seismic": 200},
+            cache_dir=cache_dir,
+        )
+        cache_files = list(cache_dir.glob("manifest_*.json"))
+        assert len(cache_files) == 2
+
+    def test_corrupt_cache_recomputes(self, tmp_path):
+        train_dir = tmp_path / "data" / "train"; train_dir.mkdir(parents=True)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
+                              n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
+                              n_samples=2_000)
+        cache_dir = tmp_path / "id_cache"
+        kwargs = dict(
+            id_root=tmp_path / "data",
+            mapping={"iobt": {"silverado": ["heavy", "pickup", "split"]}},
+            window_sizes={"audio": 16000, "seismic": 200},
+            cache_dir=cache_dir,
+        )
+        load_or_build_manifest(**kwargs)
+        cache_file = next(cache_dir.glob("manifest_*.json"))
+        cache_file.write_text("{not valid json")
+        # Should recompute, not crash
+        m = load_or_build_manifest(**kwargs)
+        assert "iobt__silverado__rs1" in m["groups"]

@@ -386,3 +386,58 @@ def build_manifest(
         "config_window_sizes": dict(window_sizes),
         "groups": groups,
     }
+
+
+def _collect_split_source_files(id_root: Path, mapping: dict) -> list[tuple[str, Path]]:
+    """List (stem, path) for every parquet whose marker is split / split_runs."""
+    out: list[tuple[str, Path]] = []
+    seen_stems: set[str] = set()
+    for parquet in sorted(Path(id_root).glob("*/*.parquet")):
+        stem = parquet.stem
+        if stem in seen_stems:
+            continue
+        seen_stems.add(stem)
+        for sensor in ("audio", "seismic"):
+            parsed = _parse_stem(stem, sensor)
+            if parsed is None:
+                continue
+            ds, vehicle, _ = parsed
+            entry = mapping.get(ds, {}).get(vehicle)
+            if entry is not None and len(entry) >= 3 and entry[2] in ("split", "split_runs"):
+                out.append((stem, parquet))
+            break
+    return out
+
+
+def load_or_build_manifest(
+    id_root: Path,
+    mapping: dict,
+    window_sizes: dict[str, int],
+    cache_dir: Path,
+) -> dict:
+    """Load manifest from cache_dir if hash matches, else build and persist.
+
+    Cache filename is `manifest_<sha256>.json`. On corrupt or missing
+    file, recompute and atomically write.
+    """
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    sources = _collect_split_source_files(id_root, mapping)
+    h = compute_manifest_hash(mapping, window_sizes, sources)
+    cache_path = cache_dir / f"manifest_{h}.json"
+
+    if cache_path.exists():
+        try:
+            return json.loads(cache_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(
+                f"id_split: cache file {cache_path.name} corrupt "
+                f"({type(e).__name__}); recomputing"
+            )
+
+    manifest = build_manifest(id_root, mapping, window_sizes)
+    tmp = cache_path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(manifest, indent=2))
+    tmp.rename(cache_path)  # atomic on POSIX
+    return manifest
