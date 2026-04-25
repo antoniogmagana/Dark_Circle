@@ -121,10 +121,19 @@ class SensorDataset(Dataset):
         config: CRLConfig,
         is_train: bool = True,
         cache_dir: Path | None = None,
+        *,
+        use_id_split: bool = False,
+        role: str = "train",
+        id_root: str | Path | None = None,
+        id_cache_dir: Path | None = None,
     ) -> None:
         self.parquet_dir = Path(parquet_dir)
         self.cfg = config
         self.is_train = is_train
+        self.use_id_split = use_id_split
+        self.role = role
+        self.id_root = Path(id_root) if id_root is not None else None
+        self.id_cache_dir = Path(id_cache_dir) if id_cache_dir is not None else None
         # metadata store: (stem, seg_key) → {path, n_windows}
         self._cache: dict[str, dict] = {"audio": {}, "seismic": {}}
         # Shared-memory tensor store: (stem, seg_key) → Tensor(N, W) in shared memory.
@@ -133,6 +142,12 @@ class SensorDataset(Dataset):
         self._index: list = []   # [(gkey, w_idx, vtype, det_label, audio_seg_id, seismic_seg_id)]
         self._groups: dict = {}  # gkey → group metadata
 
+        if self.use_id_split:
+            if self.id_root is None:
+                raise ValueError("use_id_split=True requires id_root")
+            if self.role not in ("train", "val", "test"):
+                raise ValueError(f"role must be 'train'|'val'|'test' (got {self.role!r})")
+
         self._load_data(cache_dir)
 
     # ------------------------------------------------------------------
@@ -140,9 +155,31 @@ class SensorDataset(Dataset):
     # ------------------------------------------------------------------
 
     def _load_data(self, cache_dir: Path | None) -> None:
-        parquet_files = sorted(self.parquet_dir.glob("*.parquet"))
+        if self.use_id_split:
+            from crl_vehicle.data.id_split import load_or_build_manifest
+            self._id_manifest = load_or_build_manifest(
+                id_root=self.id_root,
+                mapping=DATASET_VEHICLE_MAP,
+                window_sizes={
+                    "audio":   self.cfg.modality_cfg("audio").window_size,
+                    "seismic": self.cfg.modality_cfg("seismic").window_size,
+                },
+                cache_dir=self.id_cache_dir if self.id_cache_dir is not None
+                           else self.id_root.parent / "id_cache",
+            )
+            # Scan all subdirs of id_root, dedupe by stem
+            seen: dict[str, Path] = {}
+            for p in sorted(self.id_root.glob("*/*.parquet")):
+                seen.setdefault(p.stem, p)
+            parquet_files = sorted(seen.values())
+        else:
+            self._id_manifest = None
+            parquet_files = sorted(self.parquet_dir.glob("*.parquet"))
         if not parquet_files:
-            raise FileNotFoundError(f"No parquet files in {self.parquet_dir}")
+            raise FileNotFoundError(
+                f"No parquet files found "
+                f"({'id_root=' + str(self.id_root) if self.use_id_split else 'parquet_dir=' + str(self.parquet_dir)})"
+            )
         self._build_from_parquet(parquet_files)
         self._preload_shared(cache_dir)
 
@@ -232,12 +269,63 @@ class SensorDataset(Dataset):
                 "seismic_seg_id": seismic_seg_id,
             }
 
-            for w in range(n_windows):
+            # ID-split routing: filter the window range based on marker / role
+            if self.use_id_split:
+                window_iter = self._id_split_window_indices(
+                    ds=ds, vehicle=vehicle, rs=rs, n_windows=n_windows,
+                )
+                if window_iter is None:
+                    continue  # group not present in this role
+            else:
+                window_iter = range(n_windows)
+
+            for w in window_iter:
                 if combined_present[w]:
                     w_vtype, w_det_label = vtype, det_label
                 else:
                     w_vtype, w_det_label = LABEL_BACKGROUND, 0
                 self._index.append((gkey, w, w_vtype, w_det_label, audio_seg_id, seismic_seg_id))
+
+    def _id_split_window_indices(
+        self, ds: str, vehicle: str, rs: str, n_windows: int,
+    ) -> list[int] | None:
+        """Return window indices this group contributes to self.role, or None to skip.
+
+        - "train"/"val"/"test" markers: full range iff marker matches role.
+        - "split"/"split_runs" markers: indices from manifest's
+          split_assignments[role] for this group_key.
+        - background / unknown: routed to "train".
+        """
+        ds_map = DATASET_VEHICLE_MAP.get(ds, {})
+        entry = ds_map.get(vehicle)
+
+        # Background or unknown → train only
+        if entry is None or len(entry) < 3:
+            if self.role == "train":
+                return list(range(n_windows))
+            return None
+
+        marker = entry[2]
+        if marker in ("train", "val", "test"):
+            return list(range(n_windows)) if marker == self.role else None
+
+        if marker in ("split", "split_runs"):
+            gkey_str = f"{ds}__{vehicle}__{rs}"
+            group = self._id_manifest.get("groups", {}).get(gkey_str)
+            if group is None:
+                return None
+            intervals = group.get("split_assignments", {}).get(self.role, [])
+            indices: list[int] = []
+            for start, end in intervals:
+                indices.extend(range(int(start), min(int(end), n_windows)))
+            return indices if indices else None
+
+        # Unknown marker — skip with a warning
+        import logging
+        logging.getLogger(__name__).warning(
+            f"id_split: unknown marker {marker!r} for {ds}/{vehicle} — skipping"
+        )
+        return None
 
     def _preload_shared(self, cache_dir: Path | None) -> None:
         """Load every file into a shared-memory tensor before workers are forked.
