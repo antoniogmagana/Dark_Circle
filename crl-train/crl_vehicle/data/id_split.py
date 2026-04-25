@@ -10,11 +10,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
+import time
 from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
+
+logger = logging.getLogger(__name__)
+
+_KNOWN_DATASETS = {"focal", "iobt", "m3nvc"}
 
 
 def compute_split_intervals(n_paired: int) -> dict[str, list[tuple[int, int]]] | None:
@@ -227,3 +233,156 @@ def compute_manifest_hash(
     }
     blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
+
+
+def _parse_stem(stem: str, sensor: str) -> tuple[str, str, str] | None:
+    """Parse '{dataset}_{sensor}_{vehicle}_{rs}' → (dataset, vehicle, rs)."""
+    parts = stem.split("_")
+    if len(parts) < 4 or parts[0] not in _KNOWN_DATASETS or parts[1] != sensor:
+        return None
+    rs = parts[-1]
+    if not rs.startswith("rs"):
+        return None
+    return parts[0], "_".join(parts[2:-1]), rs
+
+
+def _group_key(dataset: str, vehicle: str, rs: str) -> str:
+    return f"{dataset}__{vehicle}__{rs}"
+
+
+def _file_n_windows(path: Path, window_size: int) -> int:
+    return pq.read_metadata(path).num_rows // window_size
+
+
+def build_manifest(
+    id_root: Path,
+    mapping: dict,
+    window_sizes: dict[str, int],
+) -> dict:
+    """Walk id_root, build per-group ID-split manifest.
+
+    Scans id_root/*/*.parquet, dedupes by stem, and for every group
+    whose marker is "split" or "split_runs", computes split intervals
+    in paired-window coordinates.
+
+    "train"/"val"/"test" markers produce no manifest entry — those
+    files are routed at index-build time, not via the manifest.
+
+    Args:
+        id_root: parent containing train/, val/, test/ subdirs.
+        mapping: DATASET_VEHICLE_MAP-shaped dict.
+        window_sizes: {"audio": int, "seismic": int}.
+
+    Returns:
+        Manifest dict matching the schema in the design spec.
+    """
+    id_root = Path(id_root)
+    # Scan all subdirs, dedupe by stem
+    all_files: dict[str, Path] = {}
+    for parquet in id_root.glob("*/*.parquet"):
+        all_files.setdefault(parquet.stem, parquet)
+
+    # Group by (dataset, vehicle, rs)
+    audio_files:   dict[tuple[str, str, str], Path] = {}
+    seismic_files: dict[tuple[str, str, str], Path] = {}
+    for stem, path in all_files.items():
+        for sensor, dest in (("audio", audio_files), ("seismic", seismic_files)):
+            parsed = _parse_stem(stem, sensor)
+            if parsed is not None:
+                dest[parsed] = path
+                break
+
+    groups: dict[str, dict] = {}
+    all_keys = set(audio_files) | set(seismic_files)
+
+    for ds, vehicle, rs in sorted(all_keys):
+        ds_map = mapping.get(ds, {})
+        entry  = ds_map.get(vehicle)
+        if entry is None or len(entry) < 3:
+            # Background or unknown — no manifest entry needed
+            continue
+        marker = entry[2]
+        if marker not in ("split", "split_runs"):
+            continue  # plain train/val/test handled at index time
+
+        gkey = _group_key(ds, vehicle, rs)
+        a_path = audio_files.get((ds, vehicle, rs))
+        s_path = seismic_files.get((ds, vehicle, rs))
+
+        if marker == "split":
+            audio_nw   = _file_n_windows(a_path, window_sizes["audio"])   if a_path else 0
+            seismic_nw = _file_n_windows(s_path, window_sizes["seismic"]) if s_path else 0
+            if audio_nw and seismic_nw:
+                n_paired = min(audio_nw, seismic_nw)
+            else:
+                n_paired = audio_nw or seismic_nw
+            intervals = compute_split_intervals(n_paired)
+            if intervals is None:
+                logger.info(
+                    f"id_split: skipping group {gkey!r} — too few windows "
+                    f"for split (n_paired={n_paired})"
+                )
+                continue
+            groups[gkey] = {
+                "dataset": ds, "vehicle": vehicle, "rs_node": rs,
+                "marker": marker,
+                "split_assignments": {
+                    k: [list(iv) for iv in v] for k, v in intervals.items()
+                },
+            }
+
+        elif marker == "split_runs":
+            if a_path is None or s_path is None:
+                logger.info(
+                    f"id_split: skipping group {gkey!r} — split_runs requires "
+                    f"both audio and seismic (have audio={a_path is not None}, "
+                    f"seismic={s_path is not None})"
+                )
+                continue
+            audio_runs   = extract_runs(a_path, window_sizes["audio"])
+            seismic_runs = extract_runs(s_path, window_sizes["seismic"])
+            paired, dropped = pair_runs(audio_runs, seismic_runs)
+            for d in dropped:
+                logger.warning(
+                    f"id_split: dropped run {d['run_key']} from group {gkey!r} "
+                    f"(reason={d['reason']})"
+                )
+            if not paired:
+                logger.info(
+                    f"id_split: skipping group {gkey!r} — no surviving "
+                    f"(scene, run) keys after pairing"
+                )
+                continue
+            assignment = partition_runs_50_25_25(paired)
+            split_assignments: dict[str, list[list[int]]] = {
+                "train": [], "val": [], "test": [],
+            }
+            run_meta: dict[str, dict] = {}
+            for run_key, split in assignment.items():
+                start, end = paired[run_key]
+                split_assignments[split].append([int(start), int(end)])
+                run_meta[f"{run_key[0]}_{run_key[1]}"] = {
+                    "split": split,
+                    "n_windows_paired": int(end - start),
+                }
+            # Sort intervals within each split for reproducibility
+            for s in split_assignments:
+                split_assignments[s].sort()
+            groups[gkey] = {
+                "dataset": ds, "vehicle": vehicle, "rs_node": rs,
+                "marker": marker,
+                "split_assignments": split_assignments,
+                "run_meta": run_meta,
+                "dropped_runs": [
+                    {"run_key": f"{d['run_key'][0]}_{d['run_key'][1]}",
+                     "reason": d["reason"]}
+                    for d in dropped
+                ],
+            }
+
+    return {
+        "schema_version": 1,
+        "created_unix": int(time.time()),
+        "config_window_sizes": dict(window_sizes),
+        "groups": groups,
+    }

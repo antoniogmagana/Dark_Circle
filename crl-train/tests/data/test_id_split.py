@@ -255,7 +255,7 @@ class TestPartitionRuns502525:
         assert "test" in splits
 
 
-from crl_vehicle.data.id_split import compute_manifest_hash
+from crl_vehicle.data.id_split import compute_manifest_hash, build_manifest
 
 
 class TestComputeManifestHash:
@@ -334,3 +334,125 @@ class TestComputeManifestHash:
         h1 = compute_manifest_hash(source_files=[("a", a), ("b", b)], **common)
         h2 = compute_manifest_hash(source_files=[("b", b), ("a", a)], **common)
         assert h1 == h2
+
+
+import logging
+
+
+def _write_simple_parquet(path: Path, n_samples: int) -> None:
+    """Write a parquet with amplitude/present (no scene_id/run_id)."""
+    df = pd.DataFrame({
+        "amplitude": np.zeros(n_samples, dtype="float32"),
+        "present":   np.ones(n_samples, dtype=bool),
+    })
+    df.to_parquet(path, index=False)
+
+
+class TestBuildManifest:
+    def test_split_marker_produces_val_test_assignments(self, tmp_path):
+        # Set up: one "split" file in iobt
+        train_dir = tmp_path / "train"
+        train_dir.mkdir()
+        # 10 windows of audio (window_size=16000) and 10 of seismic (200)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
+                              n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
+                              n_samples=2_000)
+
+        mapping = {"iobt": {"silverado": ["heavy", "pickup", "split"]}}
+        manifest = build_manifest(
+            id_root=tmp_path,
+            mapping=mapping,
+            window_sizes={"audio": 16000, "seismic": 200},
+        )
+        assert "groups" in manifest
+        gkey = "iobt__silverado__rs1"
+        assert gkey in manifest["groups"]
+        g = manifest["groups"][gkey]
+        assert g["marker"] == "split"
+        assert g["split_assignments"] == {
+            "val":  [[0, 5]],
+            "test": [[5, 10]],
+        }
+
+    def test_split_marker_only_one_sensor_uses_that_count(self, tmp_path):
+        train_dir = tmp_path / "train"
+        train_dir.mkdir()
+        # Only audio, no seismic → N = audio_n_windows = 8
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
+                              n_samples=128_000)
+        mapping = {"iobt": {"silverado": ["heavy", "pickup", "split"]}}
+        manifest = build_manifest(
+            id_root=tmp_path,
+            mapping=mapping,
+            window_sizes={"audio": 16000, "seismic": 200},
+        )
+        g = manifest["groups"]["iobt__silverado__rs1"]
+        assert g["split_assignments"] == {
+            "val":  [[0, 4]],
+            "test": [[4, 8]],
+        }
+
+    def test_split_marker_too_few_windows_skipped(self, tmp_path, caplog):
+        train_dir = tmp_path / "train"
+        train_dir.mkdir()
+        # 1 window only (16000 samples) → N_pair = 1, can't split
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
+                              n_samples=16_000)
+        mapping = {"iobt": {"silverado": ["heavy", "pickup", "split"]}}
+        with caplog.at_level(logging.INFO):
+            manifest = build_manifest(
+                id_root=tmp_path,
+                mapping=mapping,
+                window_sizes={"audio": 16000, "seismic": 200},
+            )
+        assert "iobt__silverado__rs1" not in manifest["groups"]
+        assert any("too few windows" in r.message.lower() or
+                   "skipping" in r.message.lower() for r in caplog.records)
+
+    def test_train_val_test_markers_no_routing_computation(self, tmp_path):
+        # "train" / "val" / "test" markers don't produce manifest groups —
+        # they're handled at index-build time, not at manifest time.
+        train_dir = tmp_path / "train"
+        train_dir.mkdir()
+        _write_simple_parquet(train_dir / "iobt_audio_polaris_rs1.parquet",
+                              n_samples=160_000)
+        mapping = {"iobt": {"polaris": ["light", "polaris", "train"]}}
+        manifest = build_manifest(
+            id_root=tmp_path, mapping=mapping,
+            window_sizes={"audio": 16000, "seismic": 200},
+        )
+        # No group entry needed for plain train/val/test markers
+        assert manifest["groups"] == {}
+
+    def test_dedupes_files_across_subdirs(self, tmp_path):
+        # Same file present in train/ and val/ → only one group entry
+        for sub in ("train", "val"):
+            d = tmp_path / sub
+            d.mkdir()
+            _write_simple_parquet(d / "iobt_audio_silverado_rs1.parquet",
+                                  n_samples=160_000)
+            _write_simple_parquet(d / "iobt_seismic_silverado_rs1.parquet",
+                                  n_samples=2_000)
+        mapping = {"iobt": {"silverado": ["heavy", "pickup", "split"]}}
+        manifest = build_manifest(
+            id_root=tmp_path, mapping=mapping,
+            window_sizes={"audio": 16000, "seismic": 200},
+        )
+        # Exactly one group, regardless of which subdir we picked from
+        assert len(manifest["groups"]) == 1
+
+    def test_manifest_includes_metadata(self, tmp_path):
+        train_dir = tmp_path / "train"; train_dir.mkdir()
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
+                              n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
+                              n_samples=2_000)
+        mapping = {"iobt": {"silverado": ["heavy", "pickup", "split"]}}
+        manifest = build_manifest(
+            id_root=tmp_path, mapping=mapping,
+            window_sizes={"audio": 16000, "seismic": 200},
+        )
+        assert manifest["schema_version"] == 1
+        assert manifest["config_window_sizes"] == {"audio": 16000, "seismic": 200}
+        assert "created_unix" in manifest
