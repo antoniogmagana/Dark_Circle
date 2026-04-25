@@ -161,15 +161,24 @@ hash because their routing is trivial — no computation to cache.)
 
 **Manifest schema:**
 
+The manifest is keyed by **group** (`(dataset, vehicle, rs_node)`),
+not by per-sensor stem. Because `split_assignments` are in *paired
+window* coordinates, audio and seismic share the same intervals — so
+storing them per-group eliminates duplication and the possibility of
+audio/seismic drifting out of sync from a partial edit. This matches
+the existing `gkey` structure in `_build_from_parquet`.
+
 ```json
 {
   "schema_version": 1,
   "created_unix": 1745571834,
   "config_window_sizes": {"audio": 16000, "seismic": 200},
-  "files": {
-    "m3nvc_audio_cx30_rs1": {
+  "groups": {
+    "m3nvc__cx30__rs1": {
+      "dataset": "m3nvc",
+      "vehicle": "cx30",
+      "rs_node": "rs1",
       "marker": "split_runs",
-      "sensor": "audio",
       "split_assignments": {
         "train": [[0, 181], [453, 634]],
         "val":   [[181, 245]],
@@ -177,19 +186,17 @@ hash because their routing is trivial — no computation to cache.)
       },
       "run_meta": {
         "1_6": {"split": "train", "n_windows_paired": 181},
-        "1_7": {"split": "val",   "n_windows_paired": 60},
-        "...": "..."
-      }
+        "1_7": {"split": "val",   "n_windows_paired": 60}
+      },
+      "dropped_runs": [
+        {"run_key": "3_2", "reason": "single_sensor"}
+      ]
     },
-    "m3nvc_seismic_cx30_rs1": {
-      "marker": "split_runs",
-      "sensor": "seismic",
-      "split_assignments": { "train": [[...]], "val": [[...]], "test": [[...]] },
-      "run_meta": { "...": "..." }
-    },
-    "iobt_audio_silverado0315pm_rs1": {
+    "iobt__silverado0315pm__rs1": {
+      "dataset": "iobt",
+      "vehicle": "silverado0315pm",
+      "rs_node": "rs1",
       "marker": "split",
-      "sensor": "audio",
       "split_assignments": {
         "val":  [[0, 90]],
         "test": [[90, 180]]
@@ -199,10 +206,14 @@ hash because their routing is trivial — no computation to cache.)
 }
 ```
 
+Group key format: `"{dataset}__{vehicle}__{rs_node}"` (double-underscore
+separator since vehicle names may contain single underscores).
 `split_assignments` are lists of `[w_start, w_end)` half-open intervals
-in **paired window** coordinates. The dataset enumerates only the
-windows whose index falls inside one of the intervals for the active
-role.
+in **paired window** coordinates and apply to both audio and seismic
+of the pair. The dataset enumerates only the windows whose index falls
+inside one of the intervals for the active role. Dropped runs are
+recorded in `dropped_runs` for post-hoc inspection in addition to the
+WARN log emitted at build time.
 
 ## `SensorDataset` API Changes
 
@@ -239,7 +250,8 @@ When `use_id_split=True`:
      marker matches `role`; else skip the group.
    - `"split"` / `"split_runs"`: include only the windows whose index
      falls in any `[w_start, w_end)` interval listed under
-     `manifest.files[stem].split_assignments[role]`.
+     `manifest.groups[group_key].split_assignments[role]`, where
+     `group_key = f"{dataset}__{vehicle}__{rs_node}"`.
 5. The `_index` list is populated identically to today otherwise. The
    downstream `_preload_shared`, `__getitem__`, presence-vector logic,
    and `StratifiedPairDataset` are all unchanged — they operate on the
