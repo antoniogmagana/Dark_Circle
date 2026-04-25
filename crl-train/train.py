@@ -25,6 +25,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--phase", choices=["crl", "downstream", "full"], default="full")
     p.add_argument("--data-dir",  default="../data_files/parsed/train/")
     p.add_argument("--val-dir",   default="../data_files/parsed/val/")
+    p.add_argument("--use-id-split", action="store_true",
+                   help="Use the in-distribution split schema "
+                        "(see docs/superpowers/specs/2026-04-25-id-split-schema-design.md). "
+                        "When set, train/val/test assignments come from "
+                        "DATASET_VEHICLE_MAP markers; --data-dir and --val-dir are ignored.")
+    p.add_argument("--id-root", default="../data_files/parsed/",
+                   help="Parent dir containing train/, val/, test/. "
+                        "Used only when --use-id-split is set.")
     p.add_argument("--sensors",   nargs="+", default=["audio", "seismic"])
     p.add_argument("--crl-epochs",  type=int,   default=100)
     p.add_argument("--ds-epochs",   type=int,   default=50)
@@ -131,8 +139,23 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cache_dir = Path(args.cache_dir) if args.cache_dir else None
 
-    train_ds = SensorDataset(args.data_dir, cfg, is_train=True,  cache_dir=cache_dir)
-    val_ds   = SensorDataset(args.val_dir,  cfg, is_train=False, cache_dir=cache_dir)
+    if args.use_id_split:
+        print(f"INFO: --use-id-split is set; --data-dir and --val-dir are ignored, "
+              f"reading splits from DATASET_VEHICLE_MAP under id_root={args.id_root}")
+        id_cache_dir = Path("saved_crl/id_cache")
+        train_ds = SensorDataset(
+            args.data_dir, cfg, is_train=True, cache_dir=cache_dir,
+            use_id_split=True, role="train",
+            id_root=args.id_root, id_cache_dir=id_cache_dir,
+        )
+        val_ds = SensorDataset(
+            args.val_dir, cfg, is_train=False, cache_dir=cache_dir,
+            use_id_split=True, role="val",
+            id_root=args.id_root, id_cache_dir=id_cache_dir,
+        )
+    else:
+        train_ds = SensorDataset(args.data_dir, cfg, is_train=True,  cache_dir=cache_dir)
+        val_ds   = SensorDataset(args.val_dir,  cfg, is_train=False, cache_dir=cache_dir)
 
     pres_weight, type_weights = compute_class_weights(train_ds)
     print(f"  Class weights — pres pos_weight: {pres_weight:.3f} | "

@@ -251,3 +251,24 @@ class TestIdSplitRunsMarker:
         warn_text = " ".join(r.message for r in caplog.records)
         assert "(2, 6)" in warn_text
         assert "single_sensor" in warn_text
+
+
+import sys
+
+
+class TestIdSplitCli:
+    def test_use_id_split_flag_parsed(self, monkeypatch):
+        # Import train.py's parser directly
+        sys.path.insert(0, str(Path(__file__).parents[2]))  # crl-train/
+        import train
+        monkeypatch.setattr("sys.argv", ["train.py", "--use-id-split", "--id-root", "/tmp/x"])
+        args = train.parse_args()
+        assert args.use_id_split is True
+        assert args.id_root == "/tmp/x"
+
+    def test_use_id_split_default_false(self, monkeypatch):
+        sys.path.insert(0, str(Path(__file__).parents[2]))
+        import train
+        monkeypatch.setattr("sys.argv", ["train.py"])
+        args = train.parse_args()
+        assert args.use_id_split is False
