@@ -253,3 +253,84 @@ class TestPartitionRuns502525:
         splits = set(result.values())
         assert "val"  in splits
         assert "test" in splits
+
+
+from crl_vehicle.data.id_split import compute_manifest_hash
+
+
+class TestComputeManifestHash:
+    def test_returns_64char_hex(self, tmp_path):
+        p = tmp_path / "f.parquet"
+        p.write_text("dummy")
+        h = compute_manifest_hash(
+            mapping={"iobt": {"x": ["light", "y", "split"]}},
+            window_sizes={"audio": 16000, "seismic": 200},
+            source_files=[("iobt_audio_x_rs1", p)],
+        )
+        assert len(h) == 64
+        assert all(c in "0123456789abcdef" for c in h)
+
+    def test_same_inputs_same_hash(self, tmp_path):
+        p = tmp_path / "f.parquet"
+        p.write_text("dummy")
+        kwargs = dict(
+            mapping={"iobt": {"x": ["light", "y", "split"]}},
+            window_sizes={"audio": 16000, "seismic": 200},
+            source_files=[("iobt_audio_x_rs1", p)],
+        )
+        assert compute_manifest_hash(**kwargs) == compute_manifest_hash(**kwargs)
+
+    def test_changed_mapping_changes_hash(self, tmp_path):
+        p = tmp_path / "f.parquet"
+        p.write_text("dummy")
+        common = dict(
+            window_sizes={"audio": 16000, "seismic": 200},
+            source_files=[("iobt_audio_x_rs1", p)],
+        )
+        h1 = compute_manifest_hash(
+            mapping={"iobt": {"x": ["light", "y", "split"]}}, **common,
+        )
+        h2 = compute_manifest_hash(
+            mapping={"iobt": {"x": ["light", "y", "split_runs"]}}, **common,
+        )
+        assert h1 != h2
+
+    def test_changed_window_size_changes_hash(self, tmp_path):
+        p = tmp_path / "f.parquet"
+        p.write_text("dummy")
+        common = dict(
+            mapping={"iobt": {"x": ["light", "y", "split"]}},
+            source_files=[("iobt_audio_x_rs1", p)],
+        )
+        h1 = compute_manifest_hash(
+            window_sizes={"audio": 16000, "seismic": 200}, **common,
+        )
+        h2 = compute_manifest_hash(
+            window_sizes={"audio": 16000, "seismic": 400}, **common,
+        )
+        assert h1 != h2
+
+    def test_changed_mtime_changes_hash(self, tmp_path):
+        import os, time
+        p = tmp_path / "f.parquet"
+        p.write_text("v1")
+        common = dict(
+            mapping={"iobt": {"x": ["light", "y", "split"]}},
+            window_sizes={"audio": 16000, "seismic": 200},
+        )
+        h1 = compute_manifest_hash(source_files=[("iobt_audio_x_rs1", p)], **common)
+        # Touch with a future mtime
+        os.utime(p, (time.time() + 100, time.time() + 100))
+        h2 = compute_manifest_hash(source_files=[("iobt_audio_x_rs1", p)], **common)
+        assert h1 != h2
+
+    def test_source_file_order_invariant(self, tmp_path):
+        a = tmp_path / "a.parquet"; a.write_text("a")
+        b = tmp_path / "b.parquet"; b.write_text("b")
+        common = dict(
+            mapping={"iobt": {"x": ["light", "y", "split"]}},
+            window_sizes={"audio": 16000, "seismic": 200},
+        )
+        h1 = compute_manifest_hash(source_files=[("a", a), ("b", b)], **common)
+        h2 = compute_manifest_hash(source_files=[("b", b), ("a", a)], **common)
+        assert h1 == h2

@@ -8,6 +8,8 @@ See docs/superpowers/specs/2026-04-25-id-split-schema-design.md.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from pathlib import Path
 
@@ -194,3 +196,34 @@ def partition_runs_50_25_25(
                     )
                     assignment[smallest_train] = needy
     return assignment
+
+
+def compute_manifest_hash(
+    mapping: dict,
+    window_sizes: dict[str, int],
+    source_files: list[tuple[str, Path]],
+) -> str:
+    """SHA-256 over (mapping, window sizes, sorted source-file mtimes_ns).
+
+    Args:
+        mapping: DATASET_VEHICLE_MAP (or a subset).
+        window_sizes: {"audio": int, "seismic": int}.
+        source_files: list of (stem, parquet_path) for files whose
+            routing depends on per-file computation (split / split_runs).
+
+    Returns:
+        Hex SHA-256 digest (64 chars).
+    """
+    # Sort source files by stem for order invariance
+    sources_sorted = sorted(source_files, key=lambda kv: kv[0])
+    mtimes = [
+        (stem, Path(p).stat().st_mtime_ns) for stem, p in sources_sorted
+    ]
+
+    payload = {
+        "mapping":      mapping,
+        "window_sizes": window_sizes,
+        "sources":      mtimes,
+    }
+    blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
