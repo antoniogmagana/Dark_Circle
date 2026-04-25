@@ -182,15 +182,17 @@ class DisentangledVAETrainingMode(TrainingMode):
 
         per_sensor: dict[str, dict] = {}
         for sensor in model.sensors:
-            avail = batch[f"{sensor}_avail"].bool()
-            if not avail.any():
+            avail_cpu = batch[f"{sensor}_avail"].bool()
+            if not avail_cpu.any():
                 continue
-            x = batch[f"x_{sensor}_t"][avail].to(dev)
+            x = batch[f"x_{sensor}_t"][avail_cpu].to(dev)
             features, z_t, mu_t, lv_t = model.encode(sensor, x)
             x_hat = model.decode(sensor, z_t)
             mu_signal, mu_env = self.latent.split(mu_t)
             per_sensor[sensor] = {
-                "avail": avail, "x": x, "features": features,
+                "avail":     avail_cpu.to(dev),  # device-resident for batch-level masking
+                "avail_cpu": avail_cpu,           # original CPU mask for batch[...] indexing
+                "x": x, "features": features,
                 "z_t": z_t, "mu_t": mu_t, "lv_t": lv_t,
                 "mu_signal": mu_signal, "mu_env": mu_env, "x_hat": x_hat,
             }
@@ -259,10 +261,10 @@ class DisentangledVAETrainingMode(TrainingMode):
         if n_partners > 0:
             stab_terms: list[torch.Tensor] = []
             for sensor, p in per_sensor.items():
-                x_p0 = batch[f"x_{sensor}_p0"][p["avail"]].to(dev)
+                x_p0 = batch[f"x_{sensor}_p0"][p["avail_cpu"]].to(dev)
                 _, _, mu_tn, _ = model.encode(sensor, x_p0)
                 _, mu_env_tn = self.latent.split(mu_tn)
-                strata_p0 = batch["partner_stratum_p0"][p["avail"]].to(dev)
+                strata_p0 = batch["partner_stratum_p0"][p["avail_cpu"]].to(dev)
                 consec_mask = (strata_p0 == STRATUM_CONSEC)
                 stab_terms.append(temporal_stability_loss(p["mu_env"], mu_env_tn, consec_mask))
             stab = torch.stack(stab_terms).mean() if stab_terms else stab
@@ -407,9 +409,11 @@ def _average_per_sensor(
 
     Returns shape (n_any_avail, key_dim) where n_any_avail is the count of
     samples with at least one sensor present.
+
+    Expects p["avail"] to be on `dev` (set by _forward_pair_per_sensor).
     """
     B = next(iter(per_sensor.values()))["avail"].shape[0]
-    any_avail = torch.zeros(B, dtype=torch.bool)
+    any_avail = torch.zeros(B, dtype=torch.bool, device=dev)
     for p in per_sensor.values():
         any_avail = any_avail | p["avail"]
     N = int(any_avail.sum().item())
