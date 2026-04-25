@@ -1,6 +1,7 @@
 """SensorDataset and StratifiedPairDataset for CRL training."""
 from __future__ import annotations
 
+import logging
 import random
 from pathlib import Path
 from typing import Any
@@ -147,6 +148,10 @@ class SensorDataset(Dataset):
                 raise ValueError("use_id_split=True requires id_root")
             if self.role not in ("train", "val", "test"):
                 raise ValueError(f"role must be 'train'|'val'|'test' (got {self.role!r})")
+            logging.getLogger(__name__).warning(
+                f"use_id_split=True; parquet_dir={self.parquet_dir!s} is ignored "
+                f"(splits read from DATASET_VEHICLE_MAP under id_root={self.id_root!s})"
+            )
 
         self._load_data(cache_dir)
 
@@ -303,25 +308,45 @@ class SensorDataset(Dataset):
         if entry is None or len(entry) < 3:
             if self.role == "train":
                 return list(range(n_windows))
+            logging.getLogger(__name__).info(
+                f"id_split: group {ds}/{vehicle}/{rs} has no marker triple — "
+                f"only contributes to train; skipping for role={self.role!r}"
+            )
             return None
 
         marker = entry[2]
         if marker in ("train", "val", "test"):
-            return list(range(n_windows)) if marker == self.role else None
+            if marker == self.role:
+                return list(range(n_windows))
+            logging.getLogger(__name__).info(
+                f"id_split: group {ds}/{vehicle}/{rs} marker={marker!r} "
+                f"does not match role={self.role!r}; skipping"
+            )
+            return None
 
         if marker in ("split", "split_runs"):
             gkey_str = f"{ds}__{vehicle}__{rs}"
             group = self._id_manifest.get("groups", {}).get(gkey_str)
             if group is None:
+                logging.getLogger(__name__).info(
+                    f"id_split: group {gkey_str!r} not in manifest "
+                    f"(may have been skipped at manifest-build time); "
+                    f"role={self.role!r}"
+                )
                 return None
             intervals = group.get("split_assignments", {}).get(self.role, [])
             indices: list[int] = []
             for start, end in intervals:
                 indices.extend(range(int(start), min(int(end), n_windows)))
-            return indices if indices else None
+            if not indices:
+                logging.getLogger(__name__).info(
+                    f"id_split: group {gkey_str!r} has 0 windows for "
+                    f"role={self.role!r}; skipping"
+                )
+                return None
+            return indices
 
         # Unknown marker — skip with a warning
-        import logging
         logging.getLogger(__name__).warning(
             f"id_split: unknown marker {marker!r} for {ds}/{vehicle} — skipping"
         )
