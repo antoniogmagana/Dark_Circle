@@ -142,6 +142,8 @@ class SensorDataset(Dataset):
         self._data_cache: dict[str, dict] = {"audio": {}, "seismic": {}}
         self._index: list = []   # [(gkey, w_idx, vtype, det_label, audio_seg_id, seismic_seg_id)]
         self._groups: dict = {}  # gkey → group metadata
+        # id_split skip counters: reason → count
+        self._id_skip_counts: dict[str, int] = {}
 
         if self.use_id_split:
             if self.id_root is None:
@@ -186,6 +188,13 @@ class SensorDataset(Dataset):
                 f"({'id_root=' + str(self.id_root) if self.use_id_split else 'parquet_dir=' + str(self.parquet_dir)})"
             )
         self._build_from_parquet(parquet_files)
+        if self.use_id_split and self._id_skip_counts:
+            summary = ", ".join(
+                f"{k}={v}" for k, v in sorted(self._id_skip_counts.items())
+            )
+            logging.getLogger(__name__).info(
+                f"id_split: role={self.role!r} skipped groups: {summary}"
+            )
         self._preload_shared(cache_dir)
 
     def _build_from_parquet(self, files: list[Path]) -> None:
@@ -308,9 +317,8 @@ class SensorDataset(Dataset):
         if entry is None or len(entry) < 3:
             if self.role == "train":
                 return list(range(n_windows))
-            logging.getLogger(__name__).info(
-                f"id_split: group {ds}/{vehicle}/{rs} has no marker triple — "
-                f"only contributes to train; skipping for role={self.role!r}"
+            self._id_skip_counts["no_marker_triple_role_mismatch"] = (
+                self._id_skip_counts.get("no_marker_triple_role_mismatch", 0) + 1
             )
             return None
 
@@ -318,9 +326,8 @@ class SensorDataset(Dataset):
         if marker in ("train", "val", "test"):
             if marker == self.role:
                 return list(range(n_windows))
-            logging.getLogger(__name__).info(
-                f"id_split: group {ds}/{vehicle}/{rs} marker={marker!r} "
-                f"does not match role={self.role!r}; skipping"
+            self._id_skip_counts["marker_role_mismatch"] = (
+                self._id_skip_counts.get("marker_role_mismatch", 0) + 1
             )
             return None
 
@@ -328,10 +335,8 @@ class SensorDataset(Dataset):
             gkey_str = f"{ds}__{vehicle}__{rs}"
             group = self._id_manifest.get("groups", {}).get(gkey_str)
             if group is None:
-                logging.getLogger(__name__).info(
-                    f"id_split: group {gkey_str!r} not in manifest "
-                    f"(may have been skipped at manifest-build time); "
-                    f"role={self.role!r}"
+                self._id_skip_counts["manifest_missing_group"] = (
+                    self._id_skip_counts.get("manifest_missing_group", 0) + 1
                 )
                 return None
             intervals = group.get("split_assignments", {}).get(self.role, [])
@@ -339,9 +344,8 @@ class SensorDataset(Dataset):
             for start, end in intervals:
                 indices.extend(range(int(start), min(int(end), n_windows)))
             if not indices:
-                logging.getLogger(__name__).info(
-                    f"id_split: group {gkey_str!r} has 0 windows for "
-                    f"role={self.role!r}; skipping"
+                self._id_skip_counts["zero_windows_for_role"] = (
+                    self._id_skip_counts.get("zero_windows_for_role", 0) + 1
                 )
                 return None
             return indices
