@@ -8,32 +8,32 @@ CATEGORY_TO_IDX = {"pedestrian": 0, "light": 1, "medium": 2, "heavy": 3}
 DATASET_VEHICLE_MAP = {
     "iobt": {
         "polaris0150pm":             ["light", "polaris", "train"],
-        "polaris0215pm":             ["light", "polaris", "train"],
+        "polaris0215pm":             ["light", "polaris", "val"],
         "polaris0235pm_nolineofsig": ["light", "polaris", "test"],
         "warhog1135am":              ["light", "warhog",  "train"],
-        "warhog1149am":              ["light", "warhog",  "train"],
-        "warhog_nolineofsight":      ["light", "warhog",  "val"],
+        "warhog1149am":              ["light", "warhog",  "val"],
+        "warhog_nolineofsight":      ["light", "warhog",  "test"],
         "silverado0255pm":           ["heavy", "pickup",  "train"],
-        "silverado0315pm":           ["heavy", "pickup",  "test"],
+        "silverado0315pm":           ["heavy", "pickup",  "split"],
     },
     "focal": {
         "walk":        ["pedestrian", "walk",       "train"],
-        "walk2":       ["pedestrian", "walk",       "train"],
-        "bicycle":     ["pedestrian", "bicycle",    "val"],
-        "bicycle2":    ["pedestrian", "bicycle",    "test"],
+        "walk2":       ["pedestrian", "walk",       "split"],
+        "bicycle":     ["pedestrian", "bicycle",    "train"],
+        "bicycle2":    ["pedestrian", "bicycle",    "split"],
         "motor":       ["light",      "motorcycle", "train"],
-        "motor2":      ["light",      "motorcycle", "val"],
+        "motor2":      ["light",      "motorcycle", "split"],
         "scooter":     ["light",      "scooter",    "train"],
-        "scooter2":    ["light",      "scooter",    "test"],
+        "scooter2":    ["light",      "scooter",    "split"],
         "forester":    ["medium",     "forester",   "train"],
-        "forester2":   ["medium",     "forester",   "val"],
+        "forester2":   ["medium",     "forester",   "split"],
         "mustang":     ["medium",     "mustang",    "train"],
-        "mustang2":    ["medium",     "mustang",    "train"],
+        "mustang2":    ["medium",     "mustang",    "val"],
         "mustang0528": ["medium",     "mustang",    "test"],
         "pickup":      ["heavy",      "pickup",     "train"],
-        "pickup2":     ["heavy",      "pickup",     "test"],
+        "pickup2":     ["heavy",      "pickup",     "split"],
         "tesla":       ["heavy",      "tesla",      "train"],
-        "tesla2":      ["heavy",      "tesla",      "val"],
+        "tesla2":      ["heavy",      "tesla",      "split"],
     },
     "m3nvc": {
         "background": ["background", "background"],
@@ -148,6 +148,11 @@ class CRLConfig:
 
     # Data
     horizon_stride_sec: float = 0.7
+    # ID split schema (opt-in). When True, train.py reads
+    # train/val/test assignments from DATASET_VEHICLE_MAP rather than
+    # from on-disk directory layout. See
+    # docs/superpowers/specs/2026-04-25-id-split-schema-design.md.
+    use_id_split: bool = False
 
     # Stratified partner sampling
     n_partners_same_type: int = 1
