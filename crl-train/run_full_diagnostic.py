@@ -62,6 +62,19 @@ from eval import (
 # ---------------------------------------------------------------------------
 
 PROBE_MODES = ("linear_ztype", "mlp_ztype", "linear_fullz")
+PROBE_MODES_DISENTANGLED = ("linear_signal", "linear_fullz")
+
+
+def _probe_modes_for(cfg: CRLConfig) -> tuple[str, ...]:
+    """Pick the probe set that matches the latent partition the run produced.
+
+    Disentangled runs use linear_signal (z[0:d_signal]) and linear_fullz only —
+    the legacy mlp_ztype/linear_ztype probes slice z[4:10] (CausalLatentSpace.
+    D_TYPE), which is meaningless under the 2-block partition. linear_fullz
+    is the upper bound across all dims and is partition-agnostic."""
+    if cfg.training_mode == "disentangled":
+        return PROBE_MODES_DISENTANGLED
+    return PROBE_MODES
 CKPT_NAMES  = ("crl_best.pth", "crl_best_aux_type.pth")
 EVAL_SPLITS = (
     ("full",  None),             # no filter — full test set
@@ -110,12 +123,15 @@ def parse_args() -> argparse.Namespace:
                    help="Prior over z. 'standard'=N(0,I); 'conditional'=iVAE "
                         "(label-conditioned MLP → (μ, logσ²)). Conditional "
                         "gives identifiability under label variation.")
-    p.add_argument("--training-mode", choices=["vae", "contrastive"],
+    p.add_argument("--training-mode", choices=["vae", "contrastive", "disentangled"],
                    default="vae",
                    help="'vae' (default) = ELBO + aux heads + intervention "
                         "matching. 'contrastive' = NT-Xent over stratified "
-                        "partners (no decoder/KL/aux during CRL); downstream "
-                        "probes still run post-hoc.")
+                        "partners (no decoder/KL/aux during CRL). 'disentangled' "
+                        "= ELBO + 2-block latent (signal/env) with cross-modal "
+                        "alignment, env temporal stability, and signal "
+                        "intervention invariance losses. Downstream probes "
+                        "still run post-hoc for all modes.")
     p.add_argument("--sensors", nargs="+", default=["audio", "seismic"])
     p.add_argument("--skip-existing", action="store_true",
                    help="Skip sub-runs that already have their completion marker.")
@@ -251,8 +267,9 @@ def phase_probes(
     type_weights: torch.Tensor,
     skip_existing: bool,
 ) -> list[dict]:
-    """Run 6 downstream probes (3 probe_modes × 2 ckpts). Returns per-run summaries."""
-    print(f"\n{'=' * 72}\n  PHASE 2 — downstream probes (6 runs)\n{'=' * 72}")
+    """Run downstream probes (probe_modes × 2 ckpts). Returns per-run summaries."""
+    n_probes = len(_probe_modes_for(cfg)) * len(CKPT_NAMES)
+    print(f"\n{'=' * 72}\n  PHASE 2 — downstream probes ({n_probes} runs)\n{'=' * 72}")
 
     single_train = DataLoader(
         train_ds, batch_size=cfg.batch_size, shuffle=True,
@@ -268,7 +285,8 @@ def phase_probes(
     )
 
     summaries: list[dict] = []
-    for probe_mode in PROBE_MODES:
+    probe_modes_active = _probe_modes_for(cfg)
+    for probe_mode in probe_modes_active:
         for ckpt_name in CKPT_NAMES:
             run_name = f"{probe_mode}__{Path(ckpt_name).stem}"
             out_dir  = probes_root / run_name

@@ -241,7 +241,17 @@ def run_inference(
     pres_labels: list[torch.Tensor] = []
     type_logits: list[torch.Tensor] = []
     type_labels: list[torch.Tensor] = []
-    use_fullz = getattr(model, "probe_mode", "linear_ztype") == "linear_fullz"
+    probe_mode = getattr(model, "probe_mode", "linear_ztype")
+    use_fullz  = probe_mode == "linear_fullz"
+    use_signal = probe_mode == "linear_signal"
+    d_signal   = model.cfg.d_signal
+
+    def _select_type_slice(z_full, z_type_block, mask):
+        if use_fullz:
+            return z_full[mask]
+        if use_signal:
+            return z_full[mask][..., :d_signal]
+        return z_type_block[mask]
 
     with torch.no_grad():
         for batch in loader:
@@ -259,7 +269,7 @@ def run_inference(
                 pres_labels.append(det.long())
                 valid = vtype >= 0
                 if valid.any():
-                    z_for_type = z[valid] if use_fullz else z_type[valid]
+                    z_for_type = _select_type_slice(z, z_type, valid)
                     type_logits.append(model.type_heads["fused"](z_for_type).cpu())
                     type_labels.append(vtype[valid])
             else:
@@ -276,7 +286,7 @@ def run_inference(
                     pres_labels.append(det.long())
                     valid = vtype >= 0
                     if valid.any():
-                        z_for_type = z[valid] if use_fullz else z_type[valid]
+                        z_for_type = _select_type_slice(z, z_type, valid)
                         type_logits.append(model.type_heads[sensor](z_for_type).cpu())
                         type_labels.append(vtype[valid])
 

@@ -158,6 +158,17 @@ class CRLConfig:
     contrastive_temperature: float = 0.1
     contrastive_d_proj: int = 64
 
+    # Disentangled mode (training_mode="disentangled")
+    # Two-block latent: z[0:d_signal] is the labeled "vehicle signal" subspace,
+    # z[d_signal:d_z] is environment/noise. Routing is enforced by losses
+    # (cross-modal alignment, env temporal stability, signal intervention
+    # invariance), not by per-feature dim assignment. Aux pres+type heads
+    # read the full d_signal block.
+    d_signal: int = 12
+    lambda_align:      float = 1.0   # cross-modal coherence on z_signal (per-sensor only)
+    lambda_stab:       float = 0.1   # env temporal stability on consecutive partners
+    lambda_interv_inv: float = 1.0   # z_signal invariance under noise interventions
+
     def modality_cfg(self, sensor: str) -> ModalityConfig:
         if sensor == "audio":
             return ModalityConfig(sample_rate=16000, window_size=16000, n_channels=1)

@@ -16,6 +16,7 @@ reads the config and instantiates the correct mode + prior.
 """
 from crl_vehicle.training_modes.base import CheckpointState, TrainingMode
 from crl_vehicle.training_modes.contrastive_mode import ContrastiveTrainingMode
+from crl_vehicle.training_modes.disentangled_mode import DisentangledVAETrainingMode
 from crl_vehicle.training_modes.factory import build_training_mode
 from crl_vehicle.training_modes.vae_mode import VAETrainingMode
 
@@ -23,6 +24,7 @@ __all__ = [
     "TrainingMode",
     "VAETrainingMode",
     "ContrastiveTrainingMode",
+    "DisentangledVAETrainingMode",
     "CheckpointState",
     "build_training_mode",
 ]

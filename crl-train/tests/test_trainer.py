@@ -219,3 +219,41 @@ class TestBetaAnnealing:
         trainer.ckpt_state.prev_val_recon = 1.0
         event = self._step(trainer, {"val_recon": 0.9, "val_raw_kl": 0.8})
         assert event in ("↑", "→hold", "↓collapse")
+
+
+class TestLinearSignalProbe:
+    """linear_signal builds a Linear(d_signal, 4) head; eval slices z[:d_signal]."""
+
+    def test_builds_head_sized_to_d_signal(self):
+        cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
+                        frontend_type="multiscale", fused_seq_len=16,
+                        d_z=24, d_signal=12)
+        model = CRLModel(cfg, probe_mode="linear_signal")
+        head = model.type_heads["fused"].head
+        assert head.weight.shape == (4, 12)
+
+    def test_d_signal_16_makes_16_dim_head(self):
+        cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
+                        frontend_type="multiscale", fused_seq_len=16,
+                        d_z=24, d_signal=16)
+        model = CRLModel(cfg, probe_mode="linear_signal")
+        head = model.type_heads["fused"].head
+        assert head.weight.shape == (4, 16)
+
+    def test_per_sensor_frontend_also_works(self):
+        cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
+                        frontend_type="morlet_per_sensor", fused_seq_len=16,
+                        d_z=24, d_signal=12)
+        model = CRLModel(cfg, probe_mode="linear_signal")
+        for sensor in ("audio", "seismic"):
+            head = model.type_heads[sensor].head
+            assert head.weight.shape == (4, 12)
+
+    def test_invalid_probe_mode_still_rejected(self):
+        cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
+                        frontend_type="multiscale", fused_seq_len=16, d_z=24)
+        with pytest.raises(ValueError, match="probe_mode must be one of"):
+            CRLModel(cfg, probe_mode="bogus")
+
+    def test_valid_probe_modes_includes_linear_signal(self):
+        assert "linear_signal" in CRLModel.VALID_PROBE_MODES

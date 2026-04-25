@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--morlet-learnable-lr-mult", type=float, default=0.1,
                    help="LR multiplier for learnable Morlet params relative to "
                         "backbone LR (default 0.1).")
-    p.add_argument("--training-mode", choices=["vae", "contrastive"], default="vae",
+    p.add_argument("--training-mode", choices=["vae", "contrastive", "disentangled"], default="vae",
                    help="'vae' = ELBO + aux + interv (default). 'contrastive' = "
                         "NT-Xent over stratified partners during CRL.")
     p.add_argument("--steps-per-epoch", type=int, default=None,
@@ -53,7 +53,7 @@ def parse_args() -> argparse.Namespace:
                    help="Unfreeze top N encoder transformer layers during downstream "
                         "(0 = fully frozen backbone, -1 = unfreeze all)")
     p.add_argument("--probe-mode",
-                   choices=["linear_ztype", "mlp_ztype", "linear_fullz"],
+                   choices=["linear_ztype", "mlp_ztype", "linear_fullz", "linear_signal"],
                    default="linear_ztype",
                    help="Downstream type-head architecture. linear_ztype: Linear(6,4) on "
                         "z_type (default); mlp_ztype: Linear(6,32)-ReLU-Linear(32,4) on "

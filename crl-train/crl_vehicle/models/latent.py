@@ -37,3 +37,33 @@ class CausalLatentSpace(nn.Module):
             z[..., self._slices["env"]],
             z[..., self._slices["free"]],
         )
+
+
+class SplitLatentSpace(nn.Module):
+    """Two-block latent: z_signal (vehicle-relevant) ∪ z_env (noise/environment).
+
+    Unlike CausalLatentSpace, makes no claim about which dims encode presence,
+    type, or proximity. The signal block is treated as a single labeled
+    subspace; routing is done by training losses (cross-modal alignment,
+    intervention invariance, temporal stability of env), not by dim assignment.
+    """
+
+    def __init__(self, d_z: int = 24, d_signal: int = 12) -> None:
+        super().__init__()
+        if d_signal <= 0:
+            raise ValueError(f"d_signal must be > 0, got {d_signal}")
+        if d_signal >= d_z:
+            raise ValueError(
+                f"d_signal ({d_signal}) must be < d_z ({d_z}) "
+                f"to leave room for an env block"
+            )
+        self.d_z = d_z
+        self.d_signal = d_signal
+        self.d_env = d_z - d_signal
+        self._slices = {
+            "signal": slice(0, d_signal),
+            "env":    slice(d_signal, d_z),
+        }
+
+    def split(self, z: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return z[..., self._slices["signal"]], z[..., self._slices["env"]]

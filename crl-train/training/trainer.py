@@ -43,7 +43,7 @@ class CRLModel(nn.Module):
         per-sensor TemporalEncoder → per-sensor FeatureDecoder
     """
 
-    VALID_PROBE_MODES = ("linear_ztype", "mlp_ztype", "linear_fullz")
+    VALID_PROBE_MODES = ("linear_ztype", "mlp_ztype", "linear_fullz", "linear_signal")
 
     def __init__(
         self,
@@ -114,6 +114,11 @@ class CRLModel(nn.Module):
             return MLPTypeHead()
         if self.probe_mode == "linear_fullz":
             return FullZTypeHead(d_z=d_z)
+        if self.probe_mode == "linear_signal":
+            # Reads z[0:d_signal] — the labeled subspace under the disentangled
+            # 2-block partition. Sized by config.d_signal so the probe matches
+            # the partition that produced the checkpoint.
+            return LinearTypeHead(d_in=self.cfg.d_signal)
         raise ValueError(f"Unknown probe_mode: {self.probe_mode!r}")
 
     def is_fused_frontend(self) -> bool:
@@ -1294,7 +1299,16 @@ class Trainer:
         ppw = self._pres_pos_weight
         tcw = self._type_class_weights
 
-        use_fullz = model.probe_mode == "linear_fullz"
+        use_fullz  = model.probe_mode == "linear_fullz"
+        use_signal = model.probe_mode == "linear_signal"
+        d_signal   = self.model.cfg.d_signal
+
+        def _select_type_slice(z_full, z_type_block, mask):
+            if use_fullz:
+                return z_full[mask]
+            if use_signal:
+                return z_full[mask][..., :d_signal]
+            return z_type_block[mask]
 
         if model.is_fused_frontend():
             avail = batch["audio_avail"].bool() & batch["seismic_avail"].bool()
@@ -1312,7 +1326,7 @@ class Trainer:
                 pres_labels_list.append(det.long())
                 valid = vtype >= 0
                 if valid.any():
-                    z_for_type = z[valid] if use_fullz else z_type[valid]
+                    z_for_type = _select_type_slice(z, z_type, valid)
                     type_logit = model.type_heads["fused"](z_for_type)
                     total = total + torch.nn.functional.cross_entropy(
                         type_logit, vtype[valid], weight=tcw)
@@ -1336,7 +1350,7 @@ class Trainer:
                 pres_labels_list.append(det.long())
                 valid = vtype >= 0
                 if valid.any():
-                    z_for_type = z[valid] if use_fullz else z_type[valid]
+                    z_for_type = _select_type_slice(z, z_type, valid)
                     type_logit = model.type_heads[sensor](z_for_type)
                     total = total + torch.nn.functional.cross_entropy(
                         type_logit, vtype[valid], weight=tcw)
