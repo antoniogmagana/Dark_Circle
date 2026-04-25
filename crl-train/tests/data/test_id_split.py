@@ -132,3 +132,60 @@ class TestExtractRuns:
         _write_split_runs_parquet(p, [(1, 6, 4), (1, 7, 4), (1, 6, 4)])
         with pytest.raises(ValueError, match="non-contiguous"):
             extract_runs(p, window_size=4)
+
+
+from crl_vehicle.data.id_split import pair_runs
+
+
+class TestPairRuns:
+    def test_simple_intersection(self):
+        audio   = {(1, 6): (0, 100), (1, 7): (100, 150)}
+        seismic = {(1, 6): (0, 100), (1, 7): (100, 150)}
+        paired, dropped = pair_runs(audio, seismic)
+        assert paired == {(1, 6): (0, 100), (1, 7): (100, 150)}
+        assert dropped == []
+
+    def test_intersection_smaller_than_either(self):
+        audio   = {(1, 6): (0, 100)}
+        seismic = {(1, 6): (10, 90)}
+        paired, dropped = pair_runs(audio, seismic)
+        assert paired == {(1, 6): (10, 90)}
+        assert dropped == []
+
+    def test_run_only_in_audio_dropped_with_reason(self):
+        audio   = {(1, 6): (0, 100), (1, 7): (100, 150)}
+        seismic = {(1, 6): (0, 100)}
+        paired, dropped = pair_runs(audio, seismic)
+        assert paired == {(1, 6): (0, 100)}
+        assert dropped == [{"run_key": (1, 7), "reason": "single_sensor"}]
+
+    def test_run_only_in_seismic_dropped(self):
+        audio   = {(1, 6): (0, 100)}
+        seismic = {(1, 6): (0, 100), (2, 7): (100, 200)}
+        paired, dropped = pair_runs(audio, seismic)
+        assert paired == {(1, 6): (0, 100)}
+        assert dropped == [{"run_key": (2, 7), "reason": "single_sensor"}]
+
+    def test_empty_intersection_dropped(self):
+        # Audio range [0, 50), seismic range [50, 100) → intersection empty
+        audio   = {(1, 6): (0, 50)}
+        seismic = {(1, 6): (50, 100)}
+        paired, dropped = pair_runs(audio, seismic)
+        assert paired == {}
+        assert dropped == [{"run_key": (1, 6), "reason": "empty_intersection"}]
+
+    def test_drop_does_not_cascade_across_scenes(self):
+        # run_id=6 has empty intersection in scene 1 but valid in scene 2
+        audio   = {(1, 6): (0, 50), (2, 6): (100, 200)}
+        seismic = {(1, 6): (50, 100), (2, 6): (100, 200)}
+        paired, dropped = pair_runs(audio, seismic)
+        assert paired == {(2, 6): (100, 200)}
+        assert dropped == [{"run_key": (1, 6), "reason": "empty_intersection"}]
+
+    def test_drop_does_not_cascade_across_run_ids(self):
+        # scene_id=1 has run_id=6 empty, but run_id=7 is valid
+        audio   = {(1, 6): (0, 50), (1, 7): (100, 200)}
+        seismic = {(1, 6): (50, 100), (1, 7): (100, 200)}
+        paired, dropped = pair_runs(audio, seismic)
+        assert paired == {(1, 7): (100, 200)}
+        assert dropped == [{"run_key": (1, 6), "reason": "empty_intersection"}]

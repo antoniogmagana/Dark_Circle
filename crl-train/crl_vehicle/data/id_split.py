@@ -95,3 +95,40 @@ def extract_runs(
         w_end   = e // window_size  # floor of e
         out[key] = (w_start, w_end)
     return out
+
+
+def pair_runs(
+    audio_runs:   dict[tuple[int, int], tuple[int, int]],
+    seismic_runs: dict[tuple[int, int], tuple[int, int]],
+) -> tuple[
+    dict[tuple[int, int], tuple[int, int]],
+    list[dict],
+]:
+    """Intersect per-sensor run ranges per (scene, run) key.
+
+    Returns:
+        (paired, dropped):
+          paired:  {(scene, run): (start_w, end_w)} for keys present in both
+                   sensors with non-empty intersection.
+          dropped: [{"run_key": (scene, run), "reason": str}, ...]
+
+    Drops are per-(scene, run) only — never cascade across scenes or run_ids.
+    Dropped list is sorted deterministically by run_key for reproducibility.
+    """
+    paired: dict[tuple[int, int], tuple[int, int]] = {}
+    dropped: list[dict] = []
+
+    all_keys = set(audio_runs) | set(seismic_runs)
+    for key in sorted(all_keys):
+        a = audio_runs.get(key)
+        s = seismic_runs.get(key)
+        if a is None or s is None:
+            dropped.append({"run_key": key, "reason": "single_sensor"})
+            continue
+        start = max(a[0], s[0])
+        end   = min(a[1], s[1])
+        if start >= end:
+            dropped.append({"run_key": key, "reason": "empty_intersection"})
+            continue
+        paired[key] = (start, end)
+    return paired, dropped
