@@ -1,0 +1,82 @@
+{
+  "run_name": "linear_fullz__crl_best_aux_type",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "split": "focal",
+  "include_datasets": [
+    "focal"
+  ],
+  "n_windows": 14534,
+  "presence": {
+    "accuracy": 0.7343,
+    "precision": 0.9304,
+    "recall": 0.6797,
+    "specificity": 0.8718,
+    "f1": 0.7856,
+    "balanced_accuracy": 0.7758,
+    "mcc": 0.4979,
+    "tp": 7074,
+    "fp": 529,
+    "fn": 3333,
+    "tn": 3598
+  },
+  "type": {
+    "accuracy": 0.3284,
+    "macro_f1": 0.306,
+    "macro_f1_support_only": 0.306,
+    "macro_precision": 0.4465,
+    "macro_recall": 0.3466,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.2451,
+        "recall": 0.2888,
+        "f1": 0.2651,
+        "support": 3051
+      },
+      "light": {
+        "precision": 0.3019,
+        "recall": 0.7524,
+        "f1": 0.431,
+        "support": 2080
+      },
+      "medium": {
+        "precision": 0.9552,
+        "recall": 0.2108,
+        "f1": 0.3453,
+        "support": 3440
+      },
+      "heavy": {
+        "precision": 0.2839,
+        "recall": 0.1345,
+        "f1": 0.1826,
+        "support": 1836
+      }
+    },
+    "confusion_matrix": [
+      [
+        881,
+        1807,
+        4,
+        359
+      ],
+      [
+        360,
+        1565,
+        9,
+        146
+      ],
+      [
+        2062,
+        535,
+        725,
+        118
+      ],
+      [
+        292,
+        1276,
+        21,
+        247
+      ]
+    ]
+  }
+}

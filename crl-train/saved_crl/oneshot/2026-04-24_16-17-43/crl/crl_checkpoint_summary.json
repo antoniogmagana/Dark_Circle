@@ -1,0 +1,8 @@
+{
+  "best_contrastive_loss": 5.082277,
+  "best_epoch": 9,
+  "checkpoints": {
+    "crl_best.pth": "selected by val_contrastive_loss (lower = better)",
+    "crl_final.pth": "last epoch (may be post-early-stop)"
+  }
+}
