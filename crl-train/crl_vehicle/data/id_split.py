@@ -132,3 +132,65 @@ def pair_runs(
             continue
         paired[key] = (start, end)
     return paired, dropped
+
+
+_TARGET_RATIOS = {"train": 0.50, "val": 0.25, "test": 0.25}
+_TIE_ORDER = ("train", "val", "test")
+
+
+def partition_runs_50_25_25(
+    paired_runs: dict[tuple[int, int], tuple[int, int]],
+) -> dict[tuple[int, int], str]:
+    """Greedy 50/25/25 partition of paired runs over window counts.
+
+    Args:
+        paired_runs: {(scene, run): (start_w, end_w)} from pair_runs().
+
+    Returns:
+        {(scene, run): "train" | "val" | "test"}.
+
+    Algorithm:
+      - Sort runs by descending paired-window-count, ties by (scene, run).
+      - For each run, assign to the bucket whose deficit (target - current)
+        is largest. Ties resolved by _TIE_ORDER (train > val > test).
+      - Floor: if ≥3 surviving runs, val and test each receive ≥1 (swap
+        the smallest train run into the empty bucket if needed).
+    """
+    if not paired_runs:
+        return {}
+
+    # Descending by length, then ascending by key for determinism
+    items = sorted(
+        paired_runs.items(),
+        key=lambda kv: (-(kv[1][1] - kv[1][0]), kv[0]),
+    )
+    total = sum(e - s for _, (s, e) in items)
+
+    assignment: dict[tuple[int, int], str] = {}
+    bucket_totals = {"train": 0, "val": 0, "test": 0}
+
+    for key, (s, e) in items:
+        n = e - s
+        # Pick bucket with largest deficit; break ties by _TIE_ORDER
+        deficits = {
+            b: _TARGET_RATIOS[b] * total - bucket_totals[b]
+            for b in _TIE_ORDER
+        }
+        max_deficit = max(deficits.values())
+        choice = next(b for b in _TIE_ORDER if deficits[b] == max_deficit)
+        assignment[key] = choice
+        bucket_totals[choice] += n
+
+    # Floor: with ≥3 runs, val and test must each have ≥1
+    if len(items) >= 3:
+        for needy in ("val", "test"):
+            if not any(v == needy for v in assignment.values()):
+                # Swap the smallest train run (by paired-window count) into needy
+                train_keys = [k for k, v in assignment.items() if v == "train"]
+                if train_keys:
+                    smallest_train = min(
+                        train_keys,
+                        key=lambda k: paired_runs[k][1] - paired_runs[k][0],
+                    )
+                    assignment[smallest_train] = needy
+    return assignment

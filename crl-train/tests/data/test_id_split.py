@@ -189,3 +189,67 @@ class TestPairRuns:
         paired, dropped = pair_runs(audio, seismic)
         assert paired == {(1, 7): (100, 200)}
         assert dropped == [{"run_key": (1, 6), "reason": "empty_intersection"}]
+
+
+from crl_vehicle.data.id_split import partition_runs_50_25_25
+
+
+class TestPartitionRuns502525:
+    def test_no_runs_returns_empty(self):
+        assert partition_runs_50_25_25({}) == {}
+
+    def test_one_run_goes_to_train(self):
+        result = partition_runs_50_25_25({(1, 6): (0, 100)})
+        assert result == {(1, 6): "train"}
+
+    def test_two_runs_train_val(self):
+        # Largest first → train; next → val
+        result = partition_runs_50_25_25({(1, 6): (0, 100), (1, 7): (100, 160)})
+        assert result == {(1, 6): "train", (1, 7): "val"}
+
+    def test_three_equal_runs_floor_enforced(self):
+        # 3 runs of 100 each. Greedy: train, val, test (floor satisfied).
+        runs = {(1, 6): (0, 100), (1, 7): (100, 200), (2, 6): (200, 300)}
+        result = partition_runs_50_25_25(runs)
+        assert set(result.values()) == {"train", "val", "test"}
+
+    def test_eight_uneven_runs_close_to_50_25_25(self):
+        # Emulates the inspected cx30_rs1: 8 runs of varied size.
+        runs = {
+            (1, 6): (0, 181),
+            (1, 7): (181, 241),
+            (2, 2): (241, 422),
+            (2, 3): (422, 485),
+            (4, 6): (485, 575),
+            (4, 7): (575, 773),
+            (5, 6): (773, 957),
+            (5, 7): (957, 1019),
+        }
+        result = partition_runs_50_25_25(runs)
+        # Total paired windows: 1019. Targets: train=509, val=255, test=255.
+        totals = {"train": 0, "val": 0, "test": 0}
+        for key, split in result.items():
+            s, e = runs[key]
+            totals[split] += e - s
+        # Within ±15% of target ratios is fine.
+        assert 0.40 <= totals["train"] / 1019 <= 0.60
+        assert 0.15 <= totals["val"]   / 1019 <= 0.35
+        assert 0.15 <= totals["test"]  / 1019 <= 0.35
+        # All three buckets must be non-empty (floor)
+        assert totals["val"]  > 0
+        assert totals["test"] > 0
+
+    def test_deterministic_across_calls(self):
+        runs = {(1, 6): (0, 100), (1, 7): (100, 200), (2, 6): (200, 300)}
+        a = partition_runs_50_25_25(runs)
+        b = partition_runs_50_25_25(runs)
+        assert a == b
+
+    def test_floor_when_greedy_would_starve_val(self):
+        # 3 runs but one is enormous. Without floor, greedy might give
+        # train both small ones. With floor, val and test each get ≥1.
+        runs = {(1, 6): (0, 1000), (1, 7): (1000, 1010), (2, 6): (1010, 1020)}
+        result = partition_runs_50_25_25(runs)
+        splits = set(result.values())
+        assert "val"  in splits
+        assert "test" in splits
