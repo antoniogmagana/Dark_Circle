@@ -8,6 +8,12 @@ See docs/superpowers/specs/2026-04-25-id-split-schema-design.md.
 """
 from __future__ import annotations
 
+import math
+from pathlib import Path
+
+import numpy as np
+import pyarrow.parquet as pq
+
 
 def compute_split_intervals(n_paired: int) -> dict[str, list[tuple[int, int]]] | None:
     """Half/half split on paired window count for "split" marker.
@@ -25,3 +31,67 @@ def compute_split_intervals(n_paired: int) -> dict[str, list[tuple[int, int]]] |
         "val":  [(0, half)],
         "test": [(half, n_paired)],
     }
+
+
+def extract_runs(
+    parquet_path: Path,
+    window_size: int,
+) -> dict[tuple[int, int], tuple[int, int]]:
+    """Extract per-run window ranges from a parquet with scene_id/run_id.
+
+    Args:
+        parquet_path: parquet with columns 'scene_id' (int64), 'run_id' (int64).
+        window_size: samples per window (e.g. 16000 for audio, 200 for seismic).
+
+    Returns:
+        {(scene_id, run_id): (start_window, end_window)} where ranges are
+        half-open [start, end) and use ceil(start_sample / W),
+        floor(end_sample / W) to drop windows that straddle a run boundary.
+
+    Raises:
+        ValueError: if scene_id or run_id columns are missing, or if any
+            (scene, run) key is non-contiguous in the file.
+    """
+    parquet_path = Path(parquet_path)
+    # Check schema before reading to raise a clear ValueError on missing columns.
+    schema_cols = set(pq.read_schema(parquet_path).names)
+    for col in ("scene_id", "run_id"):
+        if col not in schema_cols:
+            raise ValueError(
+                f"{parquet_path.name}: missing required column {col!r} "
+                f"for split_runs marker"
+            )
+    table = pq.read_table(parquet_path, columns=["scene_id", "run_id"])
+    cols = set(table.column_names)
+
+    scene = table.column("scene_id").to_numpy()
+    run   = table.column("run_id").to_numpy()
+    n     = len(scene)
+    if n == 0:
+        return {}
+
+    # Find block boundaries: positions where (scene, run) changes.
+    key_changed = (scene[1:] != scene[:-1]) | (run[1:] != run[:-1])
+    boundaries  = np.flatnonzero(key_changed) + 1  # start indices of new blocks
+    block_starts = np.concatenate(([0], boundaries))
+    block_ends   = np.concatenate((boundaries, [n]))
+
+    # Verify contiguity: each (scene, run) appears in exactly one block
+    seen: dict[tuple[int, int], tuple[int, int]] = {}
+    for s, e in zip(block_starts, block_ends):
+        key = (int(scene[s]), int(run[s]))
+        if key in seen:
+            raise ValueError(
+                f"{parquet_path.name}: (scene_id={key[0]}, run_id={key[1]}) "
+                f"appears in non-contiguous blocks (sample ranges "
+                f"[{seen[key][0]},{seen[key][1]}) and [{s},{e}))"
+            )
+        seen[key] = (int(s), int(e))
+
+    # Convert sample ranges to window ranges with ceil/floor
+    out: dict[tuple[int, int], tuple[int, int]] = {}
+    for key, (s, e) in seen.items():
+        w_start = math.ceil(s / window_size)
+        w_end   = e // window_size  # floor of e
+        out[key] = (w_start, w_end)
+    return out
