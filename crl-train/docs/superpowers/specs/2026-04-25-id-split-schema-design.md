@@ -84,16 +84,25 @@ sensor-specific count.
 
 - For `"split"`: val = `[0, N_pair // 2)`, test = `[N_pair // 2, N_pair)`.
   Both sensors use the same window indices.
-- For `"split_runs"`: per-run window ranges are computed separately for
-  audio and seismic from each parquet's `(scene_id, run_id)` columns,
-  then **intersected**: `paired_range = [max(start_a, start_s), min(end_a, end_s))`.
-  - If the paired range is empty, the run is dropped from the partition
-    entirely.
-  - If a run appears in only one sensor's parquet, the run is dropped.
-  - Dropped runs are logged with the run key and the reason
-    (`empty_intersection` or `single_sensor`).
+- For `"split_runs"`: a "run" is uniquely identified by the **pair**
+  `(scene_id, run_id)` — the same `run_id` value occurring under
+  different `scene_id`s denotes different runs and is treated as fully
+  independent. Per-run window ranges are computed separately for audio
+  and seismic from each parquet's `(scene_id, run_id)` columns, then
+  **intersected per `(scene, run)` key**:
+  `paired_range = [max(start_a, start_s), min(end_a, end_s))`.
+  - If the paired range for a particular `(scene, run)` is empty, only
+    that one `(scene, run)` is dropped. Other runs sharing the same
+    `run_id` under different `scene_id`s are unaffected. Same for
+    other runs sharing the same `scene_id` under different `run_id`s.
+  - If a particular `(scene, run)` appears in only one sensor's parquet,
+    only that one `(scene, run)` is dropped. The same independence rule
+    applies — drops never cascade across scenes or runs.
+  - Dropped pairs are logged with the full `(scene_id, run_id)` key
+    and the reason (`empty_intersection` or `single_sensor`).
 
-The 50/25/25 greedy operates only on the surviving paired runs.
+The 50/25/25 greedy operates only on the surviving paired
+`(scene, run)` keys.
 
 ## Run-Aware Splitting (`"split_runs"`)
 
@@ -102,34 +111,40 @@ the contiguous block of samples sharing a `(scene_id, run_id)` key. Per
 on-disk inspection, these blocks are perfectly contiguous — no
 interleaving — so detection is a single pass.
 
-**Algorithm (per `"split_runs"` file pair):**
+**Algorithm (per `"split_runs"` group, i.e. per `(dataset, vehicle, rs_node)`):**
+
+A "run" below always means one unique `(scene_id, run_id)` pair. The
+same `run_id` value under a different `scene_id` is a different run and
+is processed independently at every step.
 
 1. Read `scene_id`, `run_id` columns from the audio parquet. Verify each
    `(scene, run)` key occupies one contiguous sample range; abort
    manifest build with an explicit error if not (so silent reordering is
    impossible).
 2. Repeat for the seismic parquet.
-3. Convert each run's sample range to a window range using the sensor's
-   window size. Use `start_window = ceil(start_sample / W)` and
-   `end_window = floor(end_sample / W)` so any windows that straddle a
-   run boundary are excluded — runs are clean at the window level, no
+3. Convert each `(scene, run)`'s sample range to a window range using
+   the sensor's window size. Use `start_window = ceil(start_sample / W)`
+   and `end_window = floor(end_sample / W)` so any windows that straddle
+   a run boundary are excluded — runs are clean at the window level, no
    leakage.
 4. For each `(scene, run)` key present in both sensors, compute the
    paired window range
    `[max(w_start_a, w_start_s), min(w_end_a, w_end_s))`.
-   Drop runs that fail the pairing test (logged at WARNING).
-5. Sort surviving runs deterministically by `(scene_id, run_id)` to
-   guarantee reproducibility.
-6. **Greedy 50/25/25 partition over paired window counts.** Process runs
-   in descending paired-window-count order; assign each to whichever
-   bucket (train, val, test) is currently furthest below its target
-   ratio. Break ties in favor of train, then val.
-7. **Floor:** if there are ≥3 surviving runs, val and test must each
-   receive at least one run. The greedy already produces this in
-   practice; if not, swap the smallest train run with whichever bucket
-   is empty.
-8. Record per-file `{run_key: split}` in the manifest along with the
-   paired window ranges.
+   Drop **only that specific `(scene, run)`** if it fails the pairing
+   test (logged at WARNING with the full key). Other surviving keys —
+   including ones that share the same `scene_id` or the same `run_id`
+   — are unaffected.
+5. Sort surviving `(scene, run)` keys deterministically by
+   `(scene_id, run_id)` to guarantee reproducibility.
+6. **Greedy 50/25/25 partition over paired window counts.** Process
+   `(scene, run)` keys in descending paired-window-count order; assign
+   each to whichever bucket (train, val, test) is currently furthest
+   below its target ratio. Break ties in favor of train, then val.
+7. **Floor:** if there are ≥3 surviving keys, val and test must each
+   receive at least one. The greedy already produces this in practice;
+   if not, swap the smallest train key with whichever bucket is empty.
+8. Record per-group `{(scene, run): split}` in the manifest along with
+   the paired window ranges.
 
 Per-run window counts are typically tens to hundreds (the sample file
 inspected had 8 runs of 60–200 s each), so the greedy is cheap and the
@@ -287,10 +302,10 @@ under the new schema.
 | Manifest hash present, file missing or corrupt | Recompute, overwrite atomically. |
 | `(scene, run)` block non-contiguous in a `"split_runs"` parquet | Abort manifest build with explicit error naming the file and key. (Silent ordering bugs are far worse than a hard stop.) |
 | `"split_runs"` parquet has no `scene_id` or `run_id` column | Abort manifest build with explicit error. |
-| `"split_runs"` run appears in only one sensor | Drop the run, WARN with `(stem_pair, run_key, reason="single_sensor")`. |
-| `"split_runs"` paired window range empty | Drop the run, WARN with reason `"empty_intersection"`. |
+| A particular `(scene_id, run_id)` appears in only one sensor of a group | Drop only that `(scene, run)`, WARN with `(group_key, scene_id, run_id, reason="single_sensor")`. Other `(scene, run)`s in the same group are unaffected, including ones that share that `scene_id` or `run_id`. |
+| A particular `(scene_id, run_id)` has an empty paired window range | Drop only that `(scene, run)`, WARN with reason `"empty_intersection"`. Independence rule above applies. |
 | Group has 0 paired windows for the active role | Skip group, INFO log. |
-| Surviving run count < 3 for a `"split_runs"` file | Apply 50/25/25 best-effort: 1 run → train; 2 runs → train+val; ≥3 runs → enforce val and test each receive ≥1. |
+| Surviving `(scene, run)` count < 3 for a `"split_runs"` group | Apply 50/25/25 best-effort: 1 → train; 2 → train+val; ≥3 → enforce val and test each receive ≥1. |
 | Marker is `"split"` and `N_pair < 2` | Skip the group, INFO log. (Cannot split a 1-window file in half.) |
 
 ## Testing
