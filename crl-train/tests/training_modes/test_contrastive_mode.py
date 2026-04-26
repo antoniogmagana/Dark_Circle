@@ -26,7 +26,7 @@ from crl_vehicle.training_modes import (
 from training.trainer import CRLModel, Trainer
 
 
-def _pair_batch(B=4, n_partners=4, audio_W=16000, seismic_W=200,
+def _pair_batch(B=4, n_partners=4, audio_W=16000, seismic_W=100,
                 strata=None):
     """Synthetic pair batch matching StratifiedPairDataset output schema."""
     if strata is None:
@@ -232,13 +232,12 @@ class _SingleLoader:
         for _ in range(self.n):
             yield {
                 "x_audio":         torch.randn(B, 1, 16000) * 0.01,
-                "x_seismic":       torch.randn(B, 1, 200) * 0.01,
+                "x_seismic":       torch.randn(B, 1, 100) * 0.01,
                 "audio_avail":     torch.ones(B, dtype=torch.bool),
                 "seismic_avail":   torch.ones(B, dtype=torch.bool),
                 "detection_label": torch.randint(0, 2, (B,)),
                 "vehicle_type":    torch.randint(0, 4, (B,)),
                 "segment_id":      torch.zeros(B, dtype=torch.long),
-                "interv_idx":      torch.zeros(B, dtype=torch.long),
             }
 
 

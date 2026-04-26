@@ -14,7 +14,7 @@ from torch.utils.data import Dataset
 from crl_vehicle.config import (
     CRLConfig, LABEL_BACKGROUND, LABEL_MULTI, CATEGORY_TO_IDX, DATASET_VEHICLE_MAP
 )
-from crl_vehicle.data.transforms import remove_dc, apply_intervention, N_INTERVENTIONS
+from crl_vehicle.data.transforms import remove_dc
 
 # Stratum identifiers for partner sampling
 STRATUM_CONSEC    = 0
@@ -461,8 +461,10 @@ class SensorDataset(Dataset):
     # ------------------------------------------------------------------
 
     def _get_window(
-        self, sensor: str, stem: str, seg_key: Any, w: int, interv_idx: int
+        self, sensor: str, stem: str, seg_key: Any, w: int,
     ) -> torch.Tensor:
+        """Return a clean (1, W) window. Interventions are applied later on the
+        GPU side in the training step — see apply_intervention_batch."""
         mc = self.cfg.modality_cfg(sensor)
         cache_key = (stem, seg_key)
         data_dict = self._data_cache[sensor].get(cache_key)
@@ -472,8 +474,6 @@ class SensorDataset(Dataset):
 
         x = data_dict["amplitude"][w].unsqueeze(0).clone()  # clone: don't write into shared pages
         x = remove_dc(x)
-        if interv_idx > 0:
-            x = apply_intervention(x, interv_idx, mc.sample_rate)
         return x
 
     # ------------------------------------------------------------------
@@ -487,14 +487,12 @@ class SensorDataset(Dataset):
         gkey, w, vtype, det_label, audio_seg_id, seismic_seg_id = self._index[idx]
         g = self._groups[gkey]
 
-        interv_idx = random.randint(0, N_INTERVENTIONS) if self.is_train else 0
-
         audio_avail   = g["audio_stem"]   is not None
         seismic_avail = g["seismic_stem"] is not None
 
-        x_audio = (self._get_window("audio", g["audio_stem"], g["seg_key"], w, interv_idx)
+        x_audio = (self._get_window("audio", g["audio_stem"], g["seg_key"], w)
                    if audio_avail else torch.zeros(1, self.cfg.modality_cfg("audio").window_size))
-        x_seismic = (self._get_window("seismic", g["seismic_stem"], g["seg_key"], w, interv_idx)
+        x_seismic = (self._get_window("seismic", g["seismic_stem"], g["seg_key"], w)
                      if seismic_avail else torch.zeros(1, self.cfg.modality_cfg("seismic").window_size))
 
         return {
@@ -606,14 +604,13 @@ class StratifiedPairDataset(Dataset):
         """Fetch a single window item from the underlying SensorDataset."""
         gkey, w, vtype, det, a_seg, s_seg = self.ds._index[idx]
         g = self.ds._groups[gkey]
-        interv_idx = 0  # no intervention on partners
         audio_avail   = g["audio_stem"]   is not None
         seismic_avail = g["seismic_stem"] is not None
         mc_a = self.ds.cfg.modality_cfg("audio")
         mc_s = self.ds.cfg.modality_cfg("seismic")
-        x_audio = (self.ds._get_window("audio", g["audio_stem"], g["seg_key"], w, interv_idx)
+        x_audio = (self.ds._get_window("audio", g["audio_stem"], g["seg_key"], w)
                    if audio_avail else torch.zeros(1, mc_a.window_size))
-        x_seismic = (self.ds._get_window("seismic", g["seismic_stem"], g["seg_key"], w, interv_idx)
+        x_seismic = (self.ds._get_window("seismic", g["seismic_stem"], g["seg_key"], w)
                      if seismic_avail else torch.zeros(1, mc_s.window_size))
         return {
             "x_audio": x_audio, "x_seismic": x_seismic,

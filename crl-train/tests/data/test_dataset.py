@@ -44,8 +44,8 @@ def _make_mock_sensor_ds(cfg=None):
     ds._groups = groups
     ds.is_train = True
 
-    def _get_window(sensor, stem, seg_key, w, interv_idx):
-        size = 16000 if sensor == "audio" else 200
+    def _get_window(sensor, stem, seg_key, w):
+        size = 16000 if sensor == "audio" else 100
         return torch.zeros(1, size)
 
     ds._get_window = _get_window

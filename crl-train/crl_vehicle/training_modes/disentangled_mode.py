@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from crl_vehicle.data.dataset import STRATUM_CONSEC
-from crl_vehicle.data.transforms import N_INTERVENTIONS, apply_intervention
+from crl_vehicle.data.transforms import apply_intervention_batch
 from crl_vehicle.losses.crl_loss import kl_divergence, reconstruction_loss
 from crl_vehicle.losses.disentanglement import (
     cross_modal_alignment_loss,
@@ -383,16 +383,16 @@ class DisentangledVAETrainingMode(TrainingMode):
 # ---------------------------------------------------------------------------
 
 def _apply_intervention_batch(x: torch.Tensor, sample_rate: int) -> torch.Tensor:
-    """Apply a random intervention (1..N) to each sample in the batch.
+    """Apply a random NON-noop intervention (1..N) to each sample in the batch.
 
-    x: (B, C, W). Returns (B, C, W). Detached input + new noise → autograd
-    flows through the encoder applied to the intervened input.
+    Thin wrapper over crl_vehicle.data.transforms.apply_intervention_batch that
+    forces every sample to receive an intervention (id 0 = no-op excluded).
+    Stays on the input device — no host↔device bounces.
     """
-    out = torch.empty_like(x)
-    for b in range(x.shape[0]):
-        interv_id = int(torch.randint(1, N_INTERVENTIONS + 1, (1,)).item())
-        out[b] = apply_intervention(x[b].detach().cpu(), interv_id, sample_rate).to(x.device)
-    return out
+    from crl_vehicle.data.transforms import N_INTERVENTIONS
+    B = x.shape[0]
+    interv_ids = torch.randint(1, N_INTERVENTIONS + 1, (B,), device=x.device)
+    return apply_intervention_batch(x.detach(), sample_rate, interv_ids=interv_ids)
 
 
 def _remap_to_compressed(

@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from crl_vehicle.data.dataset import (
     STRATUM_CONSEC, STRATUM_CROSS_DS, STRATUM_DIFF_TYPE, STRATUM_SAME_TYPE,
 )
+from crl_vehicle.data.transforms import apply_intervention_batch
 from crl_vehicle.losses.contrastive import nt_xent_loss
 from crl_vehicle.training_modes.base import CheckpointState, TrainingMode
 
@@ -81,6 +82,10 @@ class ContrastiveTrainingMode(TrainingMode):
             return None, None, None
         x_a = batch["x_audio_t"][avail].to(dev)
         x_s = batch["x_seismic_t"][avail].to(dev)
+        if model.training:
+            cfg = self.config
+            x_a = apply_intervention_batch(x_a, sample_rate=cfg.modality_cfg("audio").sample_rate)
+            x_s = apply_intervention_batch(x_s, sample_rate=cfg.modality_cfg("seismic").sample_rate)
         _, _, mu_t, _ = model.encode_fused(x_a, x_s)
 
         mu_parts = []
@@ -115,6 +120,10 @@ class ContrastiveTrainingMode(TrainingMode):
                 continue
             any_avail = any_avail | avail
             x = batch[f"x_{sensor}_t"][avail].to(dev)
+            if model.training:
+                x = apply_intervention_batch(
+                    x, sample_rate=self.config.modality_cfg(sensor).sample_rate
+                )
             _, _, mu_t, _ = model.encode(sensor, x)
             per_sensor_mu_a[sensor] = (avail, mu_t)
 

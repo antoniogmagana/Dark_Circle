@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from crl_vehicle.data.transforms import apply_intervention_batch
 from crl_vehicle.losses.crl_loss import (
     intervention_matching_loss,
     kl_divergence,
@@ -100,6 +101,12 @@ class VAETrainingMode(TrainingMode):
         x_a = batch["x_audio_t"][avail].to(dev)
         x_s = batch["x_seismic_t"][avail].to(dev)
 
+        # GPU-side intervention augmentation (was previously per-window CPU
+        # FFTs in the worker, the dominant CPU bottleneck). Train mode only.
+        if model.training:
+            x_a = apply_intervention_batch(x_a, sample_rate=cfg.modality_cfg("audio").sample_rate)
+            x_s = apply_intervention_batch(x_s, sample_rate=cfg.modality_cfg("seismic").sample_rate)
+
         features, z_t, mu_t, lv_t = model.encode_fused(x_a, x_s)
         x_hat = model.decode_fused(z_t)
 
@@ -174,6 +181,8 @@ class VAETrainingMode(TrainingMode):
                 continue
 
             x = batch[f"x_{sensor}_t"][avail].to(dev)
+            if model.training:
+                x = apply_intervention_batch(x, sample_rate=cfg.modality_cfg(sensor).sample_rate)
             features, z_t, mu_t, lv_t = model.encode(sensor, x)
             x_hat = model.decode(sensor, z_t)
 
