@@ -138,6 +138,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--recalibrate", action="store_true",
                    help="Write target-prior-calibrated metrics alongside raw metrics "
                         "in each phase_evals report (diagnostic only).")
+    p.add_argument("--use-id-split", action="store_true",
+                   help="Use the in-distribution split schema (DATASET_VEHICLE_MAP "
+                        "markers under id_root). When set, --data-dir/--val-dir/"
+                        "--test-dir are ignored and Phase 2/3 read from the same "
+                        "split as Phase 1.")
+    p.add_argument("--id-root", default="../data_files/parsed/",
+                   help="Parent dir containing train/, val/, test/. Used only "
+                        "when --use-id-split is set.")
     return p.parse_args()
 
 
@@ -735,18 +743,53 @@ def main() -> None:
         # Preserve runtime-only overrides.
         cfg.num_workers = args.num_workers
         cfg.batch_size  = args.batch_size
+        # Split-mismatch guard. Older runs trained via train.py do NOT write
+        # use_id_split into meta even when ID-split was used (train.py wires the
+        # flag into SensorDataset directly), so a False meta value can be a
+        # false negative. Trust --use-id-split and only block the explicit
+        # mismatch where the meta affirmatively says True.
+        if saved_cfg.get("use_id_split") is True and not args.use_id_split:
+            raise ValueError(
+                f"--crl-run-dir was trained with use_id_split=True but "
+                f"--use-id-split is not set. Phase 2/3 would read the "
+                f"file-based split. Pass --use-id-split --id-root <path>."
+            )
         print(f"  Reusing CRL run: {crl_dir}")
     else:
         cfg = base_cfg
         sensors = args.sensors
         crl_dir = out_root / "crl"
 
+    # Honour the CLI flag on cfg so downstream meta.json reflects reality.
+    if args.use_id_split:
+        cfg.use_id_split = True
+
     # Preload datasets once.
     print("\nPreloading datasets into shared memory …")
     t_load = time.time()
-    train_ds = SensorDataset(args.data_dir, cfg, is_train=True,  cache_dir=cache_dir)
-    val_ds   = SensorDataset(args.val_dir,  cfg, is_train=False, cache_dir=cache_dir)
-    test_ds  = SensorDataset(args.test_dir, cfg, is_train=False, cache_dir=cache_dir)
+    if args.use_id_split:
+        print(f"  --use-id-split set; reading splits from "
+              f"DATASET_VEHICLE_MAP under id_root={args.id_root}")
+        id_cache_dir = Path("saved_crl/id_cache")
+        train_ds = SensorDataset(
+            args.data_dir, cfg, is_train=True, cache_dir=cache_dir,
+            use_id_split=True, role="train",
+            id_root=args.id_root, id_cache_dir=id_cache_dir,
+        )
+        val_ds = SensorDataset(
+            args.val_dir, cfg, is_train=False, cache_dir=cache_dir,
+            use_id_split=True, role="val",
+            id_root=args.id_root, id_cache_dir=id_cache_dir,
+        )
+        test_ds = SensorDataset(
+            args.test_dir, cfg, is_train=False, cache_dir=cache_dir,
+            use_id_split=True, role="test",
+            id_root=args.id_root, id_cache_dir=id_cache_dir,
+        )
+    else:
+        train_ds = SensorDataset(args.data_dir, cfg, is_train=True,  cache_dir=cache_dir)
+        val_ds   = SensorDataset(args.val_dir,  cfg, is_train=False, cache_dir=cache_dir)
+        test_ds  = SensorDataset(args.test_dir, cfg, is_train=False, cache_dir=cache_dir)
     print(f"  Done in {(time.time()-t_load)/60:.1f} min  "
           f"({len(train_ds):,} train / {len(val_ds):,} val / "
           f"{len(test_ds):,} test windows)")
