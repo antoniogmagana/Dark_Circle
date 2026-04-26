@@ -13,6 +13,23 @@ TEST_AUDIO_W   = 16
 TEST_SEISMIC_W = 4
 
 
+@pytest.fixture(autouse=True)
+def _patch_source_rates(monkeypatch):
+    """Override _SOURCE_RATES (in both dataset.py and id_split.py) to match the
+    tiny test window sizes. Without this, the loader would look up the real
+    iobt source rate (16000 audio / 100 seismic) and try to reshape tiny test
+    parquets at the wrong rate."""
+    from crl_vehicle.data import dataset as ds_mod
+    from crl_vehicle.data import id_split as id_mod
+    fake_rates = {
+        "iobt":  {"audio": TEST_AUDIO_W, "seismic": TEST_SEISMIC_W},
+        "focal": {"audio": TEST_AUDIO_W, "seismic": TEST_SEISMIC_W},
+        "m3nvc": {"audio": TEST_AUDIO_W, "seismic": TEST_SEISMIC_W},
+    }
+    monkeypatch.setattr(ds_mod, "_SOURCE_RATES", fake_rates)
+    monkeypatch.setattr(id_mod, "_SOURCE_RATES", fake_rates)
+
+
 @pytest.fixture
 def small_cfg():
     """CRLConfig with tiny window sizes so fixtures are fast."""

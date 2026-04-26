@@ -18,9 +18,14 @@ def cfg_morlet():
 
 
 def _synthetic_batch(B=4, n_partners=4):
+    # Window sizes track CRLConfig.modality_cfg targets so canonical-rate
+    # changes flow through automatically.
+    cfg = CRLConfig()
+    W_a = cfg.modality_cfg("audio").window_size
+    W_s = cfg.modality_cfg("seismic").window_size
     batch = {
-        "x_audio_t":         torch.randn(B, 1, 16000) * 0.01,
-        "x_seismic_t":       torch.randn(B, 1, 200) * 0.01,
+        "x_audio_t":         torch.randn(B, 1, W_a) * 0.01,
+        "x_seismic_t":       torch.randn(B, 1, W_s) * 0.01,
         "audio_avail":       torch.ones(B, dtype=torch.bool),
         "seismic_avail":     torch.ones(B, dtype=torch.bool),
         "detection_label_t": torch.randint(0, 2, (B,)),
@@ -28,8 +33,8 @@ def _synthetic_batch(B=4, n_partners=4):
         "n_partners": n_partners,
     }
     for p in range(n_partners):
-        batch[f"x_audio_p{p}"]         = torch.randn(B, 1, 16000) * 0.01
-        batch[f"x_seismic_p{p}"]       = torch.randn(B, 1, 200) * 0.01
+        batch[f"x_audio_p{p}"]         = torch.randn(B, 1, W_a) * 0.01
+        batch[f"x_seismic_p{p}"]       = torch.randn(B, 1, W_s) * 0.01
         batch[f"detection_label_p{p}"] = torch.randint(0, 2, (B,))
         batch[f"vehicle_type_p{p}"]    = torch.randint(0, 4, (B,))
         batch[f"partner_stratum_p{p}"] = torch.full((B,), p % 4)
@@ -105,8 +110,9 @@ class TestCRLModelMorlet:
     def test_encode_seismic_shape(self, cfg_morlet):
         model = CRLModel(cfg_morlet)
         model.eval()
+        W_s = cfg_morlet.modality_cfg("seismic").window_size
         with torch.no_grad():
-            _, z, _, _ = model.encode("seismic", torch.zeros(4, 1, 200))
+            _, z, _, _ = model.encode("seismic", torch.zeros(4, 1, W_s))
         assert z.shape == (4, 24)
 
     def test_no_shared_encoder(self, cfg_morlet):

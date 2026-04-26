@@ -31,7 +31,7 @@ def test_read_parquet_numpy_shape(tmp_path):
     n_windows, window_size = 5, 8
     amp = np.arange(n_windows * window_size, dtype="float32")
     _write_parquet(p, amp, np.ones(len(amp), dtype=bool))
-    arr = _read_parquet_numpy(p, window_size)
+    arr = _read_parquet_numpy(p, window_size, source_rate=window_size, target_rate=window_size)
     assert arr.shape == (n_windows, window_size)
     assert arr.dtype == np.float32
 
@@ -41,7 +41,7 @@ def test_read_parquet_numpy_truncates_remainder(tmp_path):
     window_size = 4
     amp = np.arange(11, dtype="float32")  # 2 full windows + 3 leftover
     _write_parquet(p, amp, np.ones(len(amp), dtype=bool))
-    arr = _read_parquet_numpy(p, window_size)
+    arr = _read_parquet_numpy(p, window_size, source_rate=window_size, target_rate=window_size)
     assert arr.shape == (2, window_size)
 
 
@@ -50,7 +50,7 @@ def test_read_parquet_numpy_values(tmp_path):
     window_size = 4
     amp = np.arange(8, dtype="float32")
     _write_parquet(p, amp, np.ones(len(amp), dtype=bool))
-    arr = _read_parquet_numpy(p, window_size)
+    arr = _read_parquet_numpy(p, window_size, source_rate=window_size, target_rate=window_size)
     np.testing.assert_array_equal(arr[0], [0, 1, 2, 3])
     np.testing.assert_array_equal(arr[1], [4, 5, 6, 7])
 
@@ -65,7 +65,7 @@ def test_read_parquet_present_shape(tmp_path):
     amp = np.zeros(12, dtype="float32")
     pres = np.ones(12, dtype=bool)
     _write_parquet(p, amp, pres)
-    arr = _read_parquet_present(p, window_size)
+    arr = _read_parquet_present(p, source_rate=window_size)
     assert arr.shape == (3,)
     assert arr.dtype == bool
 
@@ -74,7 +74,7 @@ def test_read_parquet_present_all_true(tmp_path):
     p = tmp_path / "test.parquet"
     window_size = 4
     _write_parquet(p, np.zeros(8, dtype="float32"), np.ones(8, dtype=bool))
-    arr = _read_parquet_present(p, window_size)
+    arr = _read_parquet_present(p, source_rate=window_size)
     assert arr.all()
 
 
@@ -82,7 +82,7 @@ def test_read_parquet_present_all_false(tmp_path):
     p = tmp_path / "test.parquet"
     window_size = 4
     _write_parquet(p, np.zeros(8, dtype="float32"), np.zeros(8, dtype=bool))
-    arr = _read_parquet_present(p, window_size)
+    arr = _read_parquet_present(p, source_rate=window_size)
     assert not arr.any()
 
 
@@ -94,7 +94,7 @@ def test_read_parquet_present_majority_strict(tmp_path):
     # Window 1: [T, T, T, F] → mean=0.75, >0.5 → True
     pres = np.array([True, True, False, False, True, True, True, False])
     _write_parquet(p, np.zeros(8, dtype="float32"), pres)
-    arr = _read_parquet_present(p, window_size)
+    arr = _read_parquet_present(p, source_rate=window_size)
     assert arr.shape == (2,)
     assert arr[0] == False
     assert arr[1] == True
@@ -105,7 +105,7 @@ def test_read_parquet_present_truncates_remainder(tmp_path):
     window_size = 4
     pres = np.ones(11, dtype=bool)  # 2 full windows + 3 leftover
     _write_parquet(p, np.zeros(11, dtype="float32"), pres)
-    arr = _read_parquet_present(p, window_size)
+    arr = _read_parquet_present(p, source_rate=window_size)
     assert arr.shape == (2,)
 
 
@@ -118,8 +118,8 @@ def test_numpy_and_present_window_counts_match(tmp_path):
     window_size = 5
     n_samples = 23  # 4 complete windows, 3 leftover
     _write_parquet(p, np.zeros(n_samples, dtype="float32"), np.ones(n_samples, dtype=bool))
-    amp_arr  = _read_parquet_numpy(p, window_size)
-    pres_arr = _read_parquet_present(p, window_size)
+    amp_arr  = _read_parquet_numpy(p, window_size, source_rate=window_size, target_rate=window_size)
+    pres_arr = _read_parquet_present(p, source_rate=window_size)
     assert amp_arr.shape[0] == pres_arr.shape[0]
 
 
@@ -127,12 +127,16 @@ def test_numpy_and_present_window_counts_match(tmp_path):
 # _preload_shared: old bare-tensor cache is auto-detected and regenerated
 # ---------------------------------------------------------------------------
 
-def test_old_format_cache_regenerated(tmp_path):
-    """A bare Tensor .pt written by the old code is replaced with a dict on load."""
+def test_old_format_cache_ignored_after_rename(tmp_path):
+    """Old-style bare Tensor .pt files (under the old `{stem}.pt` name) are
+    NOT touched after the cache-key rename to `{stem}_sr{rate}.pt`. Instead,
+    the new loader writes a fresh dict-format file under the new name. Old
+    files become inert; users are expected to delete them manually."""
     import crl_vehicle.data.dataset as ds_mod
     from crl_vehicle.config import CRLConfig
 
     cfg = CRLConfig()
+    target_sr = cfg.modality_cfg("audio").sample_rate
     W_a = cfg.modality_cfg("audio").window_size
     n_windows = 3
 
@@ -146,20 +150,22 @@ def test_old_format_cache_regenerated(tmp_path):
     pq_path = parquet_dir / "focal_audio_mustang_rs1.parquet"
     _write_parquet(pq_path, amp, pres)
 
-    # Write old-format bare tensor cache (simulate pre-fix cache file)
-    stem    = "focal_audio_mustang_rs1"
-    pt_path = cache_dir / f"{stem}.pt"
-    old_tensor = torch.zeros(n_windows, W_a)
-    torch.save(old_tensor, pt_path)
-    # Make it appear newer than the parquet so mtime check passes
-    import os
-    os.utime(pt_path, (pq_path.stat().st_mtime + 10,) * 2)
+    # Write old-format bare-tensor cache under the OLD filename pattern
+    stem            = "focal_audio_mustang_rs1"
+    old_pt_path     = cache_dir / f"{stem}.pt"
+    new_pt_path     = cache_dir / f"{stem}_sr{target_sr}.pt"
+    old_tensor      = torch.zeros(n_windows, W_a)
+    torch.save(old_tensor, old_pt_path)
 
-    ds = ds_mod.SensorDataset(str(parquet_dir), cfg, cache_dir=cache_dir)
+    ds_mod.SensorDataset(str(parquet_dir), cfg, cache_dir=cache_dir)
 
-    # The cache should have been regenerated as a dict
-    new_loaded = torch.load(pt_path, weights_only=True)
-    assert isinstance(new_loaded, dict), "old bare-tensor cache was not regenerated as dict"
+    # Old cache file is left untouched; new cache file is written
+    assert old_pt_path.exists(), "old cache file should not be deleted"
+    old_loaded = torch.load(old_pt_path, weights_only=True)
+    assert isinstance(old_loaded, torch.Tensor), "old cache file should be unchanged"
+    assert new_pt_path.exists(), "new-format cache file should be written"
+    new_loaded = torch.load(new_pt_path, weights_only=True)
+    assert isinstance(new_loaded, dict)
     assert "amplitude" in new_loaded
     assert "present"   in new_loaded
 
@@ -170,6 +176,7 @@ def test_new_format_cache_loaded(tmp_path):
     from crl_vehicle.config import CRLConfig
 
     cfg = CRLConfig()
+    target_sr = cfg.modality_cfg("audio").sample_rate
     W_a = cfg.modality_cfg("audio").window_size
     n_windows = 2
 
@@ -186,7 +193,7 @@ def test_new_format_cache_loaded(tmp_path):
     # First instantiation writes the new-format cache
     ds_mod.SensorDataset(str(parquet_dir), cfg, cache_dir=cache_dir)
 
-    pt_path = cache_dir / "focal_audio_mustang_rs1.pt"
+    pt_path = cache_dir / f"focal_audio_mustang_rs1_sr{target_sr}.pt"
     assert pt_path.exists()
     loaded = torch.load(pt_path, weights_only=True)
     assert isinstance(loaded, dict)

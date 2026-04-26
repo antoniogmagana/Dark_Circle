@@ -142,8 +142,13 @@ class DisentangledVAETrainingMode(TrainingMode):
             stab = temporal_stability_loss(mu_env, mu_env_tn, consec_mask)
 
         # Intervention invariance: re-encode anchor with random noise applied.
-        x_a_int = _apply_intervention_batch(x_a, sample_rate=16000)
-        x_s_int = _apply_intervention_batch(x_s, sample_rate=200)
+        # Sample rates come from config so they track _SOURCE_RATES targets.
+        x_a_int = _apply_intervention_batch(
+            x_a, sample_rate=cfg.modality_cfg("audio").sample_rate
+        )
+        x_s_int = _apply_intervention_batch(
+            x_s, sample_rate=cfg.modality_cfg("seismic").sample_rate
+        )
         _, _, mu_int, _ = model.encode_fused(x_a_int, x_s_int)
         mu_signal_int, _ = self.latent.split(mu_int)
         interv_inv = intervention_invariance_loss(mu_signal, mu_signal_int)
@@ -178,7 +183,8 @@ class DisentangledVAETrainingMode(TrainingMode):
         self, model, batch, beta, dev
     ) -> tuple[torch.Tensor, dict]:
         cfg = self.config
-        sample_rates = {"audio": 16000, "seismic": 200}
+        # Per-sensor sample rates from config so canonical-rate changes flow through.
+        sample_rates = {s: cfg.modality_cfg(s).sample_rate for s in model.sensors}
 
         per_sensor: dict[str, dict] = {}
         for sensor in model.sensors:

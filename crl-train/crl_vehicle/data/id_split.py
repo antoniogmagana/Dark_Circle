@@ -22,6 +22,26 @@ logger = logging.getLogger(__name__)
 
 _KNOWN_DATASETS = {"focal", "iobt", "m3nvc"}
 
+# Per-dataset source sample rates. Mirror of crl_vehicle/data/dataset.py
+# (kept here to avoid a cross-module import cycle). The id-split manifest
+# always thinks in 1-second windows, so window math uses *source* rate
+# (the on-disk samples-per-second), which makes audio and seismic ranges
+# directly comparable in seconds regardless of post-load resampling.
+_SOURCE_RATES = {
+    "focal": {"audio": 16000, "seismic": 100},
+    "iobt":  {"audio": 16000, "seismic": 100},
+    "m3nvc": {"audio": 1600,  "seismic": 200},
+}
+
+
+def _source_rate_for_stem(stem: str, sensor: str) -> int:
+    dataset = stem.split("_", 1)[0]
+    rates = _SOURCE_RATES.get(dataset)
+    if rates is None:
+        raise ValueError(f"Unknown dataset prefix in stem {stem!r}; "
+                         f"expected one of {sorted(_SOURCE_RATES)}")
+    return rates[sensor]
+
 
 def compute_split_intervals(n_paired: int) -> dict[str, list[tuple[int, int]]] | None:
     """Half/half split on paired window count for "split" marker.
@@ -49,7 +69,11 @@ def extract_runs(
 
     Args:
         parquet_path: parquet with columns 'scene_id' (int64), 'run_id' (int64).
-        window_size: samples per window (e.g. 16000 for audio, 200 for seismic).
+        window_size: source samples per 1-second window (i.e. the source
+            sample rate of the parquet on disk — 16000 for focal/iobt audio,
+            1600 for m3nvc audio, 100 for focal/iobt seismic, 200 for m3nvc
+            seismic). Window indices are computed in 1-second units so audio
+            and seismic ranges become directly comparable.
 
     Returns:
         {(scene_id, run_id): (start_window, end_window)} where ranges are
@@ -96,7 +120,7 @@ def extract_runs(
             )
         seen[key] = (int(s), int(e))
 
-    # Convert sample ranges to window ranges with ceil/floor
+    # Convert sample ranges to window ranges (1 window = 1 second of source).
     out: dict[tuple[int, int], tuple[int, int]] = {}
     for key, (s, e) in seen.items():
         w_start = math.ceil(s / window_size)
@@ -227,9 +251,11 @@ def compute_manifest_hash(
     ]
 
     payload = {
-        "mapping":      mapping,
-        "window_sizes": window_sizes,
-        "sources":      mtimes,
+        "mapping":       mapping,
+        "window_sizes":  window_sizes,
+        "sources":       mtimes,
+        "source_rates":  _SOURCE_RATES,  # invalidates cache when rates change
+        "schema_version": 2,
     }
     blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
@@ -251,6 +277,12 @@ def _group_key(dataset: str, vehicle: str, rs: str) -> str:
 
 
 def _file_n_windows(path: Path, window_size: int) -> int:
+    """Number of complete 1-second windows in the parquet.
+
+    `window_size` here is samples-per-second at the parquet's source rate
+    (i.e. for a 16 kHz audio parquet, pass 16000; for 100 Hz seismic, pass
+    100). The function divides total rows by that to get 1-second windows.
+    """
     return pq.read_metadata(path).num_rows // window_size
 
 
@@ -271,7 +303,11 @@ def build_manifest(
     Args:
         id_root: parent containing train/, val/, test/ subdirs.
         mapping: DATASET_VEHICLE_MAP-shaped dict.
-        window_sizes: {"audio": int, "seismic": int}.
+        window_sizes: kept for backward-compat; IGNORED. Per-file source
+            rates are looked up from the dataset prefix via _SOURCE_RATES.
+            Pass any value (e.g. {"audio": 16000, "seismic": 200}); it
+            still flows into the manifest hash so caches invalidate when
+            the caller's notion of canonical sizes changes.
 
     Returns:
         Manifest dict matching the schema in the design spec.
@@ -310,8 +346,14 @@ def build_manifest(
         s_path = seismic_files.get((ds, vehicle, rs))
 
         if marker == "split":
-            audio_nw   = _file_n_windows(a_path, window_sizes["audio"])   if a_path else 0
-            seismic_nw = _file_n_windows(s_path, window_sizes["seismic"]) if s_path else 0
+            audio_nw = (
+                _file_n_windows(a_path, _source_rate_for_stem(a_path.stem, "audio"))
+                if a_path else 0
+            )
+            seismic_nw = (
+                _file_n_windows(s_path, _source_rate_for_stem(s_path.stem, "seismic"))
+                if s_path else 0
+            )
             if audio_nw and seismic_nw:
                 n_paired = min(audio_nw, seismic_nw)
             else:
@@ -339,8 +381,8 @@ def build_manifest(
                     f"seismic={s_path is not None})"
                 )
                 continue
-            audio_runs   = extract_runs(a_path, window_sizes["audio"])
-            seismic_runs = extract_runs(s_path, window_sizes["seismic"])
+            audio_runs   = extract_runs(a_path, _source_rate_for_stem(a_path.stem, "audio"))
+            seismic_runs = extract_runs(s_path, _source_rate_for_stem(s_path.stem, "seismic"))
             paired, dropped = pair_runs(audio_runs, seismic_runs)
             for d in dropped:
                 logger.warning(
@@ -381,9 +423,10 @@ def build_manifest(
             }
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,  # bumped: window math now uses source rates per stem
         "created_unix": int(time.time()),
         "config_window_sizes": dict(window_sizes),
+        "source_rates": _SOURCE_RATES,
         "groups": groups,
     }
 

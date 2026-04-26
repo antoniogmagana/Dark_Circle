@@ -307,6 +307,26 @@ def main() -> None:
     by_vehicle = aggregate(keys, preds, labels, group_by="vehicle")
     by_rs      = aggregate(keys, preds, labels, group_by="vehicle_rs")
 
+    # Coverage report: which vehicles in DATASET_VEHICLE_MAP produced zero
+    # test windows? Tells you up front when the test partition is missing
+    # whole datasets (e.g. m3nvc under id-split + split_runs partitioner).
+    seen_vehicles = {(ds, v) for (ds, v) in by_vehicle.keys()}
+    expected_vehicles = {
+        (ds, v) for ds, vmap in DATASET_VEHICLE_MAP.items()
+        for v, entry in vmap.items()
+        if v != "background" and not (ds == "m3nvc" and "_" in v)
+    }
+    missing = sorted(expected_vehicles - seen_vehicles)
+    if missing:
+        print(f"\n*** {len(missing)} vehicles in DATASET_VEHICLE_MAP have ZERO test windows: ***")
+        by_ds = defaultdict(list)
+        for ds, v in missing:
+            by_ds[ds].append(v)
+        for ds in sorted(by_ds):
+            print(f"  {ds}: {', '.join(by_ds[ds])}")
+        print("    (under id-split, missing vehicles are routed to other roles by")
+        print("     plain markers or by the split_runs partitioner)")
+
     rows_v  = write_csv(out_dir / "per_vehicle_confusion.csv", by_vehicle,
                         "vehicle", args.reclass_threshold)
     rows_rs = write_csv(out_dir / "per_vehicle_per_rs.csv", by_rs,

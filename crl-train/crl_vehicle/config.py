@@ -46,8 +46,12 @@ DATASET_VEHICLE_MAP = {
 
 @dataclass
 class ModalityConfig:
-    sample_rate: int = 200
-    window_size: int = 200
+    # Defaults match the canonical seismic target (post-resample). The actual
+    # values per-modality come from CRLConfig.modality_cfg(sensor) and override
+    # these defaults; the dataclass defaults only matter if ModalityConfig() is
+    # constructed without args (mostly in tests).
+    sample_rate: int = 100
+    window_size: int = 100
     n_channels: int = 1
 
 
@@ -175,8 +179,23 @@ class CRLConfig:
     lambda_interv_inv: float = 1.0   # z_signal invariance under noise interventions
 
     def modality_cfg(self, sensor: str) -> ModalityConfig:
+        """Canonical (post-resample) sample rate and window size per sensor.
+
+        Targets chosen to match expected production hardware:
+          - audio   = 16000 Hz (focal/iobt native; m3nvc upsampled 1600→16000)
+          - seismic = 100 Hz   (focal/iobt native; m3nvc downsampled 200→100)
+
+        The dataset loader resamples every file to these canonical rates before
+        windowing — see crl_vehicle/data/dataset.py:_SOURCE_RATES and
+        _resample_to_target. Frontends and Morlet bands assume these canonical
+        rates, so do not change them without retraining.
+
+        m3nvc seismic downsample is safe (torchaudio.resample anti-aliases) and
+        loses only the 50-100 Hz band, well above the 2-40 Hz Morlet seismic
+        range in morlet_per_sensor_params.
+        """
         if sensor == "audio":
             return ModalityConfig(sample_rate=16000, window_size=16000, n_channels=1)
         elif sensor == "seismic":
-            return ModalityConfig(sample_rate=200, window_size=200, n_channels=1)
+            return ModalityConfig(sample_rate=100, window_size=100, n_channels=1)
         raise ValueError(f"Unknown modality: {sensor!r}")

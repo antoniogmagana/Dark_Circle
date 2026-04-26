@@ -25,6 +25,40 @@ STRATUM_CROSS_DS  = 3
 # Known dataset names
 _KNOWN_DATASETS = {"iobt", "focal", "m3nvc"}
 
+# Per-dataset source sample rates. Mirrors server-load/sample_parse.py:22-23.
+# Hardcoded because parquets carry no rate metadata; recordings were captured at
+# different rates per dataset and resampled to canonical rates at load time.
+_SOURCE_RATES = {
+    "focal": {"audio": 16000, "seismic": 100},
+    "iobt":  {"audio": 16000, "seismic": 100},
+    "m3nvc": {"audio": 1600,  "seismic": 200},
+}
+
+
+def _source_sample_rate(stem: str, sensor: str) -> int:
+    """Return the source (on-disk) sample rate for a parquet, by dataset prefix."""
+    dataset = stem.split("_", 1)[0]
+    rates = _SOURCE_RATES.get(dataset)
+    if rates is None:
+        raise ValueError(f"Unknown dataset prefix in stem {stem!r}; "
+                         f"expected one of {sorted(_SOURCE_RATES)}")
+    return rates[sensor]
+
+
+def _resample_to_target(arr: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
+    """Resample a 1-D float32 signal from source_rate to target_rate.
+
+    No-op if rates match. Uses torchaudio.functional.resample with the default
+    Kaiser window. Returns float32 numpy array.
+    """
+    if source_rate == target_rate:
+        return arr
+    import torchaudio.functional as AF
+    t = torch.from_numpy(arr).float().unsqueeze(0)  # (1, N)
+    out = AF.resample(t, orig_freq=source_rate, new_freq=target_rate)
+    return out.squeeze(0).numpy().astype(np.float32, copy=False)
+
+
 # Vehicle name → (vehicle_type_idx, is_valid)
 # vehicle_type_idx follows CATEGORY_TO_IDX; background/multi use LABEL_* constants
 def _vehicle_to_labels(dataset: str, vehicle: str) -> tuple[int, bool]:
@@ -52,29 +86,37 @@ def _vehicle_to_labels(dataset: str, vehicle: str) -> tuple[int, bool]:
     return CATEGORY_TO_IDX[entry[0]], True
 
 
-def _read_parquet_numpy(path: Path, window_size: int) -> np.ndarray:
-    """Read a flat time-series parquet → float32 array (N_windows, window_size).
+def _read_parquet_numpy(
+    path: Path, target_window_size: int, source_rate: int, target_rate: int,
+) -> np.ndarray:
+    """Read a flat time-series parquet → float32 array (N_windows, target_window_size).
 
-    Expects an 'amplitude' signal column. Trailing samples that don't fill a
-    complete window are discarded.
+    Expects an 'amplitude' signal column at source_rate. Resamples to target_rate
+    if they differ, then reshapes into 1-second windows (target_window_size = target_rate).
+    Trailing samples that don't fill a complete window are discarded.
     """
     col = pq.read_table(path, columns=["amplitude"], use_threads=True)
     arr = col.column("amplitude").to_numpy().astype(np.float32)
-    n_windows = len(arr) // window_size
-    return arr[: n_windows * window_size].reshape(n_windows, window_size)
+    arr = _resample_to_target(arr, source_rate, target_rate)
+    n_windows = len(arr) // target_window_size
+    return arr[: n_windows * target_window_size].reshape(n_windows, target_window_size)
 
 
-def _read_parquet_present(path: Path, window_size: int) -> np.ndarray:
+def _read_parquet_present(
+    path: Path, source_rate: int,
+) -> np.ndarray:
     """Read the 'present' boolean column → per-window majority vote.
 
-    Returns bool array of shape (N_windows,). A window is True iff strictly
-    more than 50% of its samples have present=True. Same truncation contract
-    as _read_parquet_numpy so indices are always aligned.
+    Returns bool array of shape (N_windows,) where each entry corresponds to a
+    1-second window. A window is True iff strictly more than 50% of its source
+    samples have present=True. Computed at source_rate (no resampling needed for
+    bools): a 1-second window contains source_rate samples on disk regardless of
+    the target rate the amplitude is resampled to.
     """
     col = pq.read_table(path, columns=["present"], use_threads=True)
     arr = col.column("present").to_numpy()
-    n_windows = len(arr) // window_size
-    arr = arr[: n_windows * window_size].reshape(n_windows, window_size)
+    n_windows = len(arr) // source_rate
+    arr = arr[: n_windows * source_rate].reshape(n_windows, source_rate)
     return arr.mean(axis=1) > 0.5
 
 
@@ -237,24 +279,25 @@ class SensorDataset(Dataset):
             seismic_present_per_window: np.ndarray | None = None
 
             if a_file:
-                W_a = self.cfg.modality_cfg("audio").window_size
-                audio_nw = pq.read_metadata(a_file).num_rows // W_a
+                # Window count comes from source rate (1 window = 1 second of source).
+                src_sr_a = _source_sample_rate(audio_stem, "audio")
+                audio_nw = pq.read_metadata(a_file).num_rows // src_sr_a
                 self._cache["audio"][(audio_stem, None)] = {
                     "path": a_file, "n_windows": audio_nw
                 }
                 seg_id += 1
                 audio_seg_id = seg_id
-                audio_present_per_window = _read_parquet_present(a_file, W_a)
+                audio_present_per_window = _read_parquet_present(a_file, src_sr_a)
 
             if s_file:
-                W_s = self.cfg.modality_cfg("seismic").window_size
-                seismic_nw = pq.read_metadata(s_file).num_rows // W_s
+                src_sr_s = _source_sample_rate(seismic_stem, "seismic")
+                seismic_nw = pq.read_metadata(s_file).num_rows // src_sr_s
                 self._cache["seismic"][(seismic_stem, None)] = {
                     "path": s_file, "n_windows": seismic_nw
                 }
                 seg_id += 1
                 seismic_seg_id = seg_id
-                seismic_present_per_window = _read_parquet_present(s_file, W_s)
+                seismic_present_per_window = _read_parquet_present(s_file, src_sr_s)
 
             n_windows = min(audio_nw, seismic_nw) if audio_nw and seismic_nw else (audio_nw or seismic_nw)
             if n_windows == 0:
@@ -370,11 +413,17 @@ class SensorDataset(Dataset):
 
         for sensor in ("audio", "seismic"):
             mc = self.cfg.modality_cfg(sensor)
-            W  = mc.window_size
+            W  = mc.window_size                # canonical (target) window size
+            target_sr = mc.sample_rate         # canonical (target) sample rate
             for cache_key, entry in self._cache[sensor].items():
                 stem    = cache_key[0]
                 src     = entry["path"]
-                pt_path = (cache_dir / f"{stem}.pt") if cache_dir else None
+                source_sr = _source_sample_rate(stem, sensor)
+                # Cache filename embeds target rate so old (pre-resample) caches
+                # don't get mistakenly loaded after this schema change.
+                pt_path = (
+                    cache_dir / f"{stem}_sr{target_sr}.pt"
+                ) if cache_dir else None
 
                 data_dict: dict | None = None
 
@@ -387,8 +436,13 @@ class SensorDataset(Dataset):
                         data_dict = loaded
 
                 if data_dict is None:
-                    arr = _read_parquet_numpy(src, W)
-                    pres_arr = _read_parquet_present(src, W)
+                    arr = _read_parquet_numpy(src, W, source_sr, target_sr)
+                    pres_arr = _read_parquet_present(src, source_sr)
+                    if source_sr != target_sr:
+                        logging.getLogger(__name__).info(
+                            f"Loaded {stem}: resampled {source_sr}→{target_sr} Hz, "
+                            f"{len(arr)} windows"
+                        )
                     data_dict = {
                         "amplitude": torch.from_numpy(arr.copy()),
                         "present":   torch.from_numpy(pres_arr.copy()),

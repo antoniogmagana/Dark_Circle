@@ -71,12 +71,15 @@ class _ContrastiveStub(TrainingMode):
 
 
 def _dummy_loader(n_batches: int = 2, B: int = 2):
+    cfg = CRLConfig()
+    W_a = cfg.modality_cfg("audio").window_size
+    W_s = cfg.modality_cfg("seismic").window_size
     class _L:
         def __iter__(self):
             for _ in range(n_batches):
                 yield {
-                    "x_audio_t":         torch.randn(B, 1, 16000) * 0.01,
-                    "x_seismic_t":       torch.randn(B, 1, 200) * 0.01,
+                    "x_audio_t":         torch.randn(B, 1, W_a) * 0.01,
+                    "x_seismic_t":       torch.randn(B, 1, W_s) * 0.01,
                     "audio_avail":       torch.ones(B, dtype=torch.bool),
                     "seismic_avail":     torch.ones(B, dtype=torch.bool),
                     "detection_label_t": torch.zeros(B, dtype=torch.long),

@@ -200,9 +200,11 @@ class TestMorletPerSensorInModel:
             morlet_kernel_size=101,
         )
         model = CRLModel(cfg)
+        W_a = cfg.modality_cfg("audio").window_size
+        W_s = cfg.modality_cfg("seismic").window_size
         with torch.no_grad():
-            _, z_a, _, _ = model.encode("audio",   torch.randn(2, 1, 16000) * 0.01)
-            _, z_s, _, _ = model.encode("seismic", torch.randn(2, 1, 200) * 0.01)
+            _, z_a, _, _ = model.encode("audio",   torch.randn(2, 1, W_a) * 0.01)
+            _, z_s, _, _ = model.encode("seismic", torch.randn(2, 1, W_s) * 0.01)
         assert z_a.shape == (2, 24)
         assert z_s.shape == (2, 24)
 
@@ -357,10 +359,12 @@ class TestMorletFusedInModel:
 
         cfg = self._base_cfg()
         model = CRLModel(cfg)
+        W_a = cfg.modality_cfg("audio").window_size
+        W_s = cfg.modality_cfg("seismic").window_size
         with torch.no_grad():
             features, z, _, _ = model.encode_fused(
-                torch.randn(2, 1, 16000) * 0.01,
-                torch.randn(2, 1, 200)   * 0.01,
+                torch.randn(2, 1, W_a) * 0.01,
+                torch.randn(2, 1, W_s) * 0.01,
             )
         # Shared encoder sees (B, C, 2 * T) after time-concat.
         assert features.ndim == 3
@@ -538,10 +542,13 @@ class TestMorletLearnableInModel:
 
     def test_forward_runs(self):
         from training.trainer import CRLModel
-        model = CRLModel(self._base_cfg())
+        cfg = self._base_cfg()
+        model = CRLModel(cfg)
+        W_a = cfg.modality_cfg("audio").window_size
+        W_s = cfg.modality_cfg("seismic").window_size
         with torch.no_grad():
-            _, z_a, _, _ = model.encode("audio",   torch.randn(2, 1, 16000) * 0.01)
-            _, z_s, _, _ = model.encode("seismic", torch.randn(2, 1, 200)   * 0.01)
+            _, z_a, _, _ = model.encode("audio",   torch.randn(2, 1, W_a) * 0.01)
+            _, z_s, _, _ = model.encode("seismic", torch.randn(2, 1, W_s) * 0.01)
         assert z_a.shape == (2, 24)
         assert z_s.shape == (2, 24)
 
@@ -587,10 +594,12 @@ class TestMorletLearnableFusedInModel:
         from training.trainer import CRLModel
         cfg = self._base_cfg()
         model = CRLModel(cfg)
+        W_a = cfg.modality_cfg("audio").window_size
+        W_s = cfg.modality_cfg("seismic").window_size
         with torch.no_grad():
             features, z, _, _ = model.encode_fused(
-                torch.randn(2, 1, 16000) * 0.01,
-                torch.randn(2, 1, 200)   * 0.01,
+                torch.randn(2, 1, W_a) * 0.01,
+                torch.randn(2, 1, W_s) * 0.01,
             )
         assert features.shape[0] == 2
         assert features.shape[2] == 2 * cfg.fused_seq_len
