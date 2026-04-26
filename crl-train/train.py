@@ -118,6 +118,12 @@ def main() -> None:
                 )
             setattr(cfg, k, v)
 
+    # Mirror the CLI flag onto cfg so the saved meta.json honestly reflects
+    # which split this run consumed. Otherwise meta lies and downstream tools
+    # (run_full_diagnostic.py --crl-run-dir) can't tell ID-split runs apart
+    # from file-split runs.
+    cfg.use_id_split = args.use_id_split
+
     run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     if args.crl_run_dir is not None:
         crl_run_dir = Path(args.crl_run_dir)
