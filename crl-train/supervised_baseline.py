@@ -66,10 +66,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--morlet-use-phase", action="store_true")
     p.add_argument("--sensors", nargs="+", default=["audio", "seismic"])
     p.add_argument("--epochs",     type=int,   default=30)
-    p.add_argument("--batch-size", type=int,   default=64)
+    p.add_argument("--batch-size", type=int,   default=128)
     p.add_argument("--lr",         type=float, default=3e-4)
     p.add_argument("--wd",         type=float, default=1e-4)
-    p.add_argument("--num-workers", type=int,  default=4)
+    p.add_argument("--num-workers", type=int,  default=8)
     p.add_argument("--head-hidden", type=int,  default=64,
                    help="MLP head hidden dim. Set 0 for a single Linear.")
     return p.parse_args()

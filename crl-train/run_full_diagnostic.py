@@ -100,8 +100,8 @@ def parse_args() -> argparse.Namespace:
                         "meta.json and at least one of {crl_best.pth, crl_best_aux_type.pth}.")
     p.add_argument("--crl-epochs", type=int, default=100)
     p.add_argument("--ds-epochs",  type=int, default=50)
-    p.add_argument("--batch-size", type=int, default=64)
-    p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--batch-size", type=int, default=128)
+    p.add_argument("--num-workers", type=int, default=8)
     p.add_argument("--eval-batch-size", type=int, default=256)
     p.add_argument("--steps-per-epoch", type=int, default=None,
                    help="Cap batches per CRL epoch (smoke tests)")

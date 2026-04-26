@@ -73,7 +73,7 @@ def parse_args() -> argparse.Namespace:
                    help="Eval against the ID-split test partition.")
     p.add_argument("--id-root",    default="../data_files/parsed/")
     p.add_argument("--batch-size", type=int, default=256)
-    p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--num-workers", type=int, default=8)
     p.add_argument("--reclass-threshold", type=float, default=0.50,
                    help="Flag a vehicle for reclassification when its predicted "
                         "majority class differs from its labeled class AND the "

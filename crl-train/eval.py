@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--test-dir",   default="../data_files/parsed/test/")
     p.add_argument("--cache-dir",  default="./saved_crl/cache")
     p.add_argument("--batch-size", type=int, default=256)
-    p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument("--num-workers", type=int, default=8)
     p.add_argument("--out-dir",    default=None,
                    help="Where to write outputs (defaults to --save-dir)")
     p.add_argument("--include-datasets", nargs="+", default=None,

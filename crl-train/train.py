@@ -36,9 +36,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--sensors",   nargs="+", default=["audio", "seismic"])
     p.add_argument("--crl-epochs",  type=int,   default=100)
     p.add_argument("--ds-epochs",   type=int,   default=50)
-    p.add_argument("--batch-size",  type=int,   default=64)
+    p.add_argument("--batch-size",  type=int,   default=128)
     p.add_argument("--lr",          type=float, default=3e-4)
-    p.add_argument("--num-workers", type=int,   default=4)
+    p.add_argument("--num-workers", type=int,   default=8)
     p.add_argument("--save-dir",    default=None)
     p.add_argument("--frontend",    choices=["multiscale", "morlet", "morlet_per_sensor",
                                               "morlet_fused", "morlet_learnable",
