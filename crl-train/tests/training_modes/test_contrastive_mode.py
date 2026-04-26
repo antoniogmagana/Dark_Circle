@@ -40,12 +40,15 @@ def _pair_batch(B=4, n_partners=4, audio_W=16000, seismic_W=100,
         "vehicle_type_t":    torch.randint(0, 4, (B,)),
         "n_partners":        n_partners,
     }
-    for p in range(n_partners):
-        batch[f"x_audio_p{p}"]         = torch.randn(B, 1, audio_W) * 0.01
-        batch[f"x_seismic_p{p}"]       = torch.randn(B, 1, seismic_W) * 0.01
-        batch[f"detection_label_p{p}"] = torch.randint(0, 2, (B,))
-        batch[f"vehicle_type_p{p}"]    = torch.randint(0, 4, (B,))
-        batch[f"partner_stratum_p{p}"] = torch.full((B,), strata[p % len(strata)])
+    if n_partners > 0:
+        batch["x_audio_partners"]   = torch.randn(B, n_partners, 1, audio_W) * 0.01
+        batch["x_seismic_partners"] = torch.randn(B, n_partners, 1, seismic_W) * 0.01
+        batch["detection_label_partners"] = torch.randint(0, 2, (B, n_partners))
+        batch["vehicle_type_partners"]    = torch.randint(0, 4, (B, n_partners))
+        batch["partner_stratum_partners"] = torch.stack(
+            [torch.full((B,), strata[p % len(strata)]) for p in range(n_partners)],
+            dim=1,
+        )
     return batch
 
 

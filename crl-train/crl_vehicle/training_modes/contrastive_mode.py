@@ -88,17 +88,17 @@ class ContrastiveTrainingMode(TrainingMode):
             x_s = apply_intervention_batch(x_s, sample_rate=cfg.modality_cfg("seismic").sample_rate)
         _, _, mu_t, _ = model.encode_fused(x_a, x_s)
 
+        # Partners come stacked from collate as (B, P, ...). Slice per-p.
+        x_audio_p_all   = batch["x_audio_partners"][avail].to(dev)    # (Nav, P, 1, W_a)
+        x_seismic_p_all = batch["x_seismic_partners"][avail].to(dev)  # (Nav, P, 1, W_s)
+        strata_all      = batch["partner_stratum_partners"][avail].to(dev)  # (Nav, P)
+
         mu_parts = []
-        strata   = []
         for p in range(n_partners):
-            xa = batch[f"x_audio_p{p}"][avail].to(dev)
-            xs = batch[f"x_seismic_p{p}"][avail].to(dev)
-            _, _, mu_p, _ = model.encode_fused(xa, xs)
+            _, _, mu_p, _ = model.encode_fused(x_audio_p_all[:, p], x_seismic_p_all[:, p])
             mu_parts.append(mu_p)
-            strata.append(batch[f"partner_stratum_p{p}"][avail].to(dev))
         mu_parts = torch.stack(mu_parts, dim=1)     # (B, P, d_z)
-        strata_t = torch.stack(strata, dim=1)        # (B, P)
-        is_pos = self._positive_mask(strata_t)
+        is_pos = self._positive_mask(strata_all)
         return mu_t, mu_parts, is_pos
 
     def _encode_per_sensor(self, model, batch, n_partners, dev):
@@ -127,10 +127,10 @@ class ContrastiveTrainingMode(TrainingMode):
             _, _, mu_t, _ = model.encode(sensor, x)
             per_sensor_mu_a[sensor] = (avail, mu_t)
 
+            x_partners = batch[f"x_{sensor}_partners"][avail].to(dev)  # (Nav, P, 1, W)
             partner_mus = []
             for p in range(n_partners):
-                xp = batch[f"x_{sensor}_p{p}"][avail].to(dev)
-                _, _, mu_p, _ = model.encode(sensor, xp)
+                _, _, mu_p, _ = model.encode(sensor, x_partners[:, p])
                 partner_mus.append(mu_p)
             per_sensor_mu_p[sensor] = partner_mus
 
@@ -161,11 +161,7 @@ class ContrastiveTrainingMode(TrainingMode):
 
         # Strata are per-sample (not per-sensor). Use the mask of samples with
         # at least one sensor.
-        strata = torch.stack(
-            [batch[f"partner_stratum_p{p}"][any_avail].to(dev)
-             for p in range(n_partners)],
-            dim=1,
-        )
+        strata = batch["partner_stratum_partners"][any_avail].to(dev)  # (N, P)
         is_pos = self._positive_mask(strata)
         return mu_t, mu_parts, is_pos
 

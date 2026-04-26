@@ -133,12 +133,13 @@ class VAETrainingMode(TrainingMode):
         n_partners = batch["n_partners"]
         interv = torch.tensor(0.0, device=dev)
         if n_partners > 0:
-            x_a_p0 = batch["x_audio_p0"][avail].to(dev)
-            x_s_p0 = batch["x_seismic_p0"][avail].to(dev)
+            # p0 is the consec partner; slice it off the stacked (B, P, ...) tensors.
+            x_a_p0 = batch["x_audio_partners"][:, 0][avail].to(dev)
+            x_s_p0 = batch["x_seismic_partners"][:, 0][avail].to(dev)
             _, z_tn, _, _ = model.encode_fused(x_a_p0, x_s_p0)
             _, _, _, z_env_tn, _ = model.latent.split(z_tn)
-            det_tn  = batch["detection_label_p0"][avail].to(dev)
-            type_tn = batch["vehicle_type_p0"][avail].to(dev)
+            det_tn  = batch["detection_label_partners"][:, 0][avail].to(dev)
+            type_tn = batch["vehicle_type_partners"][:, 0][avail].to(dev)
             targets = label_change_target(det_t.long(), det_tn, type_t, type_tn).to(dev)
             logits  = model.interv_classifier(z_env, z_env_tn)
             interv  = intervention_matching_loss(logits, targets)
@@ -211,11 +212,11 @@ class VAETrainingMode(TrainingMode):
             interv = torch.tensor(0.0, device=dev)
             n_partners = batch["n_partners"]
             if n_partners > 0:
-                x_p0 = batch[f"x_{sensor}_p0"][avail].to(dev)
+                x_p0 = batch[f"x_{sensor}_partners"][:, 0][avail].to(dev)
                 _, z_tn, _, _ = model.encode(sensor, x_p0)
                 _, _, _, z_env_tn, _ = model.latent.split(z_tn)
-                det_tn  = batch["detection_label_p0"][avail].to(dev)
-                type_tn = batch["vehicle_type_p0"][avail].to(dev)
+                det_tn  = batch["detection_label_partners"][:, 0][avail].to(dev)
+                type_tn = batch["vehicle_type_partners"][:, 0][avail].to(dev)
                 targets = label_change_target(det_t.long(), det_tn, type_t, type_tn).to(dev)
                 logits  = model.interv_classifier(z_env, z_env_tn)
                 interv  = intervention_matching_loss(logits, targets)
