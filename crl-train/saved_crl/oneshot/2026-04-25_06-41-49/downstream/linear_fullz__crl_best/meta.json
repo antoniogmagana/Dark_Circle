@@ -61,5 +61,6 @@
   ],
   "probe_mode": "linear_fullz",
   "ckpt_name": "crl_best.pth",
-  "crl_run_dir": "/home/lvc_toolkit/project-files/Dark_Circle/crl-train/saved_crl/morlet_learnable/2026-04-24_23-35-45"
+  "crl_run_dir": "/home/lvc_toolkit/project-files/Dark_Circle/crl-train/saved_crl/morlet_learnable/2026-04-24_23-35-45",
+  "ds_elapsed_min": 23.83
 }

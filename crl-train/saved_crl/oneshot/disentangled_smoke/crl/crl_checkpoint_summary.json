@@ -1,0 +1,10 @@
+{
+  "best_ref_elbo": 105.376139,
+  "best_aux_type_f1": 0.1492,
+  "best_aux_type_epoch": 1,
+  "checkpoints": {
+    "crl_best.pth": "selected by val_ref_elbo (recon + raw_kl at beta=1)",
+    "crl_best_aux_type.pth": "selected by val_aux_type_f1 (downstream-proxy signal)",
+    "crl_final.pth": "last epoch (may be post-early-stop)"
+  }
+}
