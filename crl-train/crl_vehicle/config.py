@@ -44,6 +44,7 @@ DATASET_VEHICLE_MAP = {
     },
 }
 
+
 @dataclass
 class ModalityConfig:
     # Defaults match the canonical seismic target (post-resample). The actual
@@ -129,6 +130,37 @@ class CRLConfig:
                     "target_tokens": 32, "receptive_cycles": 3.0},
     })
 
+    # Per-sensor kernel-size lists for frontend_type="multiscale".
+    #
+    # Each Conv1D branch sees roughly one cycle of frequency f when its kernel
+    # size ≈ SR / f. Sensors NOT in this dict fall through to
+    # MultiScale1DFrontend's built-in default of [9, 19, 39] — i.e. omit a
+    # sensor to keep the existing behavior unchanged.
+    #
+    # Audio default below adds ks=159 to the standard ladder so the audio
+    # branch can see ~one cycle at ~100 Hz (engine-fundamental band) at
+    # SR=16000. The previous max kernel of 39 only reached ~400 Hz.
+    #
+    # Constraints (validated in __post_init__):
+    #   - Every kernel size MUST be odd (Conv1D padding=ks//2 is symmetric
+    #     only for odd ks; even ks gives an off-by-one shift).
+    #   - Every kernel size MUST be ≤ window_size for that sensor. A kernel
+    #     longer than the input is a degenerate global filter.
+    #
+    # Maximum viable kernel (one-cycle frequency floor) at default SR/window:
+    #   sensor    SR (Hz)   window   ks_max   one-cycle freq @ ks_max
+    #   ----------------------------------------------------------------
+    #   audio     16000     16000    15999     ~1.0 Hz
+    #   seismic     100       100       99     ~1.0 Hz
+    # Practically, kernels approaching window size give no localization;
+    # treat ks ≈ window/2 as the soft ceiling for keeping multiple
+    # receptive fields per token.
+    multiscale_kernel_sizes: dict = field(default_factory=lambda: {
+        "audio": [9, 19, 39, 159],
+        # seismic intentionally absent → uses [9, 19, 39] default,
+        # which already covers ~2.5 Hz–11 Hz at SR=100.
+    })
+
     # Training
     batch_size: int = 128
     lr: float = 3e-4
@@ -177,6 +209,22 @@ class CRLConfig:
     lambda_align:      float = 1.0   # cross-modal coherence on z_signal (per-sensor only)
     lambda_stab:       float = 0.1   # env temporal stability on consecutive partners
     lambda_interv_inv: float = 1.0   # z_signal invariance under noise interventions
+
+    def __post_init__(self) -> None:
+        for sensor, ks_list in self.multiscale_kernel_sizes.items():
+            window = self.modality_cfg(sensor).window_size
+            for ks in ks_list:
+                if ks % 2 != 1:
+                    raise ValueError(
+                        f"multiscale_kernel_sizes[{sensor!r}] contains even "
+                        f"kernel {ks}; Conv1D padding=ks//2 requires odd ks."
+                    )
+                if ks > window:
+                    raise ValueError(
+                        f"multiscale_kernel_sizes[{sensor!r}] kernel {ks} "
+                        f"exceeds {sensor} window_size {window}; "
+                        f"max viable is {window if window % 2 == 1 else window - 1}."
+                    )
 
     def modality_cfg(self, sensor: str) -> ModalityConfig:
         """Canonical (post-resample) sample rate and window size per sensor.

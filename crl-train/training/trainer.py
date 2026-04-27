@@ -147,7 +147,10 @@ class CRLModel(nn.Module):
         for sensor in self.sensors:
             mc = config.modality_cfg(sensor)
             self.frontends[sensor] = nn.Sequential(
-                MultiScale1DFrontend(mc.n_channels, config.d_model),
+                MultiScale1DFrontend(
+                    mc.n_channels, config.d_model,
+                    kernel_sizes=config.multiscale_kernel_sizes.get(sensor),
+                ),
                 nn.AvgPool1d(stride, stride),
                 nn.AdaptiveAvgPool1d(T),
             )
