@@ -133,12 +133,11 @@ class DisentangledVAETrainingMode(TrainingMode):
         stab = torch.tensor(0.0, device=dev)
         n_partners = batch["n_partners"]
         if n_partners > 0:
-            # p0 is the consec partner; slice off stacked (B, P, ...) tensors.
-            x_a_p0 = batch["x_audio_partners"][:, 0][avail].to(dev)
-            x_s_p0 = batch["x_seismic_partners"][:, 0][avail].to(dev)
+            x_a_p0 = batch["x_audio_p0"][avail].to(dev)
+            x_s_p0 = batch["x_seismic_p0"][avail].to(dev)
             _, _, mu_tn, _ = model.encode_fused(x_a_p0, x_s_p0)
             _, mu_env_tn = self.latent.split(mu_tn)
-            strata_p0 = batch["partner_stratum_partners"][:, 0][avail].to(dev)
+            strata_p0 = batch["partner_stratum_p0"][avail].to(dev)
             consec_mask = (strata_p0 == STRATUM_CONSEC)
             stab = temporal_stability_loss(mu_env, mu_env_tn, consec_mask)
 
@@ -268,10 +267,10 @@ class DisentangledVAETrainingMode(TrainingMode):
         if n_partners > 0:
             stab_terms: list[torch.Tensor] = []
             for sensor, p in per_sensor.items():
-                x_p0 = batch[f"x_{sensor}_partners"][:, 0][p["avail_cpu"]].to(dev)
+                x_p0 = batch[f"x_{sensor}_p0"][p["avail_cpu"]].to(dev)
                 _, _, mu_tn, _ = model.encode(sensor, x_p0)
                 _, mu_env_tn = self.latent.split(mu_tn)
-                strata_p0 = batch["partner_stratum_partners"][:, 0][p["avail_cpu"]].to(dev)
+                strata_p0 = batch["partner_stratum_p0"][p["avail_cpu"]].to(dev)
                 consec_mask = (strata_p0 == STRATUM_CONSEC)
                 stab_terms.append(temporal_stability_loss(p["mu_env"], mu_env_tn, consec_mask))
             stab = torch.stack(stab_terms).mean() if stab_terms else stab

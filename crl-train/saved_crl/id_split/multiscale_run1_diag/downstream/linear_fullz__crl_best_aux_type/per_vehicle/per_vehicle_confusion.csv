@@ -1,0 +1,12 @@
+dataset,vehicle,rs_node,true_class,n_windows,n_rs_nodes,pred_pedestrian,pred_light,pred_medium,pred_heavy,pred_majority,majority_frac,accuracy,reclass_recommendation
+focal,bicycle2,,pedestrian,1434,4,0.1172,0.1346,0.1185,0.6297,heavy,0.6297,0.1172,consider reclassifying as heavy (63% of windows predicted that)
+focal,forester2,,medium,1191,4,0.021,0.1646,0.6348,0.1797,medium,0.6348,0.6348,
+focal,motor2,,light,1226,4,0.0604,0.8051,0.0351,0.0995,light,0.8051,0.8051,
+focal,mustang0528,,medium,3440,4,0.5291,0.1311,0.2299,0.1099,pedestrian,0.5291,0.2299,consider reclassifying as pedestrian (53% of windows predicted that)
+focal,pickup2,,heavy,942,4,0.0446,0.2718,0.3047,0.379,heavy,0.379,0.379,
+focal,scooter2,,light,987,4,0.0213,0.1753,0.6677,0.1358,medium,0.6677,0.1753,consider reclassifying as medium (67% of windows predicted that)
+focal,tesla2,,heavy,879,4,0.0671,0.0671,0.2082,0.6576,heavy,0.6576,0.6576,
+focal,walk2,,pedestrian,1159,4,0.9448,0.0276,0.0095,0.0181,pedestrian,0.9448,0.9448,
+iobt,polaris0235pm_nolineofsig,,light,336,1,0.0863,0.3839,0.0387,0.4911,heavy,0.4911,0.3839,
+iobt,silverado0315pm,,heavy,140,1,0.0,0.0286,0.0,0.9714,heavy,0.9714,0.9714,
+iobt,warhog_nolineofsight,,light,68,1,0.3971,0.2941,0.0294,0.2794,pedestrian,0.3971,0.2941,

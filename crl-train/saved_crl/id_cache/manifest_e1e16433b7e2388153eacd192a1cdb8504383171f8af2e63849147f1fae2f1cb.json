@@ -1,0 +1,2764 @@
+{
+  "schema_version": 2,
+  "created_unix": 1777196081,
+  "config_window_sizes": {
+    "audio": 16000,
+    "seismic": 100
+  },
+  "source_rates": {
+    "focal": {
+      "audio": 16000,
+      "seismic": 100
+    },
+    "iobt": {
+      "audio": 16000,
+      "seismic": 100
+    },
+    "m3nvc": {
+      "audio": 1600,
+      "seismic": 200
+    }
+  },
+  "groups": {
+    "focal__bicycle2__rs1": {
+      "dataset": "focal",
+      "vehicle": "bicycle2",
+      "rs_node": "rs1",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            1061
+          ]
+        ],
+        "test": [
+          [
+            1061,
+            2123
+          ]
+        ]
+      }
+    },
+    "focal__bicycle2__rs2": {
+      "dataset": "focal",
+      "vehicle": "bicycle2",
+      "rs_node": "rs2",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            1048
+          ]
+        ],
+        "test": [
+          [
+            1048,
+            2096
+          ]
+        ]
+      }
+    },
+    "focal__bicycle2__rs3": {
+      "dataset": "focal",
+      "vehicle": "bicycle2",
+      "rs_node": "rs3",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            1024
+          ]
+        ],
+        "test": [
+          [
+            1024,
+            2049
+          ]
+        ]
+      }
+    },
+    "focal__bicycle2__rs7": {
+      "dataset": "focal",
+      "vehicle": "bicycle2",
+      "rs_node": "rs7",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            775
+          ]
+        ],
+        "test": [
+          [
+            775,
+            1551
+          ]
+        ]
+      }
+    },
+    "focal__forester2__rs1": {
+      "dataset": "focal",
+      "vehicle": "forester2",
+      "rs_node": "rs1",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            748
+          ]
+        ],
+        "test": [
+          [
+            748,
+            1496
+          ]
+        ]
+      }
+    },
+    "focal__forester2__rs2": {
+      "dataset": "focal",
+      "vehicle": "forester2",
+      "rs_node": "rs2",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            745
+          ]
+        ],
+        "test": [
+          [
+            745,
+            1490
+          ]
+        ]
+      }
+    },
+    "focal__forester2__rs3": {
+      "dataset": "focal",
+      "vehicle": "forester2",
+      "rs_node": "rs3",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            745
+          ]
+        ],
+        "test": [
+          [
+            745,
+            1491
+          ]
+        ]
+      }
+    },
+    "focal__forester2__rs7": {
+      "dataset": "focal",
+      "vehicle": "forester2",
+      "rs_node": "rs7",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            735
+          ]
+        ],
+        "test": [
+          [
+            735,
+            1471
+          ]
+        ]
+      }
+    },
+    "focal__motor2__rs1": {
+      "dataset": "focal",
+      "vehicle": "motor2",
+      "rs_node": "rs1",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            685
+          ]
+        ],
+        "test": [
+          [
+            685,
+            1370
+          ]
+        ]
+      }
+    },
+    "focal__motor2__rs2": {
+      "dataset": "focal",
+      "vehicle": "motor2",
+      "rs_node": "rs2",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            683
+          ]
+        ],
+        "test": [
+          [
+            683,
+            1366
+          ]
+        ]
+      }
+    },
+    "focal__motor2__rs3": {
+      "dataset": "focal",
+      "vehicle": "motor2",
+      "rs_node": "rs3",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            688
+          ]
+        ],
+        "test": [
+          [
+            688,
+            1377
+          ]
+        ]
+      }
+    },
+    "focal__motor2__rs7": {
+      "dataset": "focal",
+      "vehicle": "motor2",
+      "rs_node": "rs7",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            676
+          ]
+        ],
+        "test": [
+          [
+            676,
+            1353
+          ]
+        ]
+      }
+    },
+    "focal__pickup2__rs1": {
+      "dataset": "focal",
+      "vehicle": "pickup2",
+      "rs_node": "rs1",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            703
+          ]
+        ],
+        "test": [
+          [
+            703,
+            1406
+          ]
+        ]
+      }
+    },
+    "focal__pickup2__rs2": {
+      "dataset": "focal",
+      "vehicle": "pickup2",
+      "rs_node": "rs2",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            703
+          ]
+        ],
+        "test": [
+          [
+            703,
+            1407
+          ]
+        ]
+      }
+    },
+    "focal__pickup2__rs3": {
+      "dataset": "focal",
+      "vehicle": "pickup2",
+      "rs_node": "rs3",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            698
+          ]
+        ],
+        "test": [
+          [
+            698,
+            1396
+          ]
+        ]
+      }
+    },
+    "focal__pickup2__rs7": {
+      "dataset": "focal",
+      "vehicle": "pickup2",
+      "rs_node": "rs7",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            442
+          ]
+        ],
+        "test": [
+          [
+            442,
+            885
+          ]
+        ]
+      }
+    },
+    "focal__scooter2__rs1": {
+      "dataset": "focal",
+      "vehicle": "scooter2",
+      "rs_node": "rs1",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            692
+          ]
+        ],
+        "test": [
+          [
+            692,
+            1385
+          ]
+        ]
+      }
+    },
+    "focal__scooter2__rs2": {
+      "dataset": "focal",
+      "vehicle": "scooter2",
+      "rs_node": "rs2",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            690
+          ]
+        ],
+        "test": [
+          [
+            690,
+            1381
+          ]
+        ]
+      }
+    },
+    "focal__scooter2__rs3": {
+      "dataset": "focal",
+      "vehicle": "scooter2",
+      "rs_node": "rs3",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            685
+          ]
+        ],
+        "test": [
+          [
+            685,
+            1370
+          ]
+        ]
+      }
+    },
+    "focal__scooter2__rs7": {
+      "dataset": "focal",
+      "vehicle": "scooter2",
+      "rs_node": "rs7",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            693
+          ]
+        ],
+        "test": [
+          [
+            693,
+            1386
+          ]
+        ]
+      }
+    },
+    "focal__tesla2__rs1": {
+      "dataset": "focal",
+      "vehicle": "tesla2",
+      "rs_node": "rs1",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            667
+          ]
+        ],
+        "test": [
+          [
+            667,
+            1334
+          ]
+        ]
+      }
+    },
+    "focal__tesla2__rs2": {
+      "dataset": "focal",
+      "vehicle": "tesla2",
+      "rs_node": "rs2",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            680
+          ]
+        ],
+        "test": [
+          [
+            680,
+            1360
+          ]
+        ]
+      }
+    },
+    "focal__tesla2__rs3": {
+      "dataset": "focal",
+      "vehicle": "tesla2",
+      "rs_node": "rs3",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            686
+          ]
+        ],
+        "test": [
+          [
+            686,
+            1373
+          ]
+        ]
+      }
+    },
+    "focal__tesla2__rs7": {
+      "dataset": "focal",
+      "vehicle": "tesla2",
+      "rs_node": "rs7",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            659
+          ]
+        ],
+        "test": [
+          [
+            659,
+            1319
+          ]
+        ]
+      }
+    },
+    "focal__walk2__rs1": {
+      "dataset": "focal",
+      "vehicle": "walk2",
+      "rs_node": "rs1",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            1103
+          ]
+        ],
+        "test": [
+          [
+            1103,
+            2207
+          ]
+        ]
+      }
+    },
+    "focal__walk2__rs2": {
+      "dataset": "focal",
+      "vehicle": "walk2",
+      "rs_node": "rs2",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            1101
+          ]
+        ],
+        "test": [
+          [
+            1101,
+            2202
+          ]
+        ]
+      }
+    },
+    "focal__walk2__rs3": {
+      "dataset": "focal",
+      "vehicle": "walk2",
+      "rs_node": "rs3",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            1102
+          ]
+        ],
+        "test": [
+          [
+            1102,
+            2205
+          ]
+        ]
+      }
+    },
+    "focal__walk2__rs7": {
+      "dataset": "focal",
+      "vehicle": "walk2",
+      "rs_node": "rs7",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            1099
+          ]
+        ],
+        "test": [
+          [
+            1099,
+            2198
+          ]
+        ]
+      }
+    },
+    "iobt__silverado0315pm__rs1": {
+      "dataset": "iobt",
+      "vehicle": "silverado0315pm",
+      "rs_node": "rs1",
+      "marker": "split",
+      "split_assignments": {
+        "val": [
+          [
+            0,
+            489
+          ]
+        ],
+        "test": [
+          [
+            489,
+            979
+          ]
+        ]
+      }
+    },
+    "m3nvc__cx30__rs1": {
+      "dataset": "m3nvc",
+      "vehicle": "cx30",
+      "rs_node": "rs1",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            0,
+            1795
+          ],
+          [
+            4868,
+            5695
+          ],
+          [
+            5767,
+            7750
+          ],
+          [
+            9746,
+            10214
+          ]
+        ],
+        "val": [
+          [
+            1812,
+            2393
+          ],
+          [
+            2416,
+            4190
+          ]
+        ],
+        "test": [
+          [
+            4232,
+            4820
+          ],
+          [
+            7913,
+            9596
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_7": {
+          "split": "train",
+          "n_windows_paired": 1983
+        },
+        "1_6": {
+          "split": "train",
+          "n_windows_paired": 1795
+        },
+        "2_2": {
+          "split": "val",
+          "n_windows_paired": 1774
+        },
+        "5_6": {
+          "split": "test",
+          "n_windows_paired": 1683
+        },
+        "4_6": {
+          "split": "train",
+          "n_windows_paired": 827
+        },
+        "2_3": {
+          "split": "test",
+          "n_windows_paired": 588
+        },
+        "1_7": {
+          "split": "val",
+          "n_windows_paired": 581
+        },
+        "5_7": {
+          "split": "train",
+          "n_windows_paired": 468
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__cx30__rs10": {
+      "dataset": "m3nvc",
+      "vehicle": "cx30",
+      "rs_node": "rs10",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            900,
+            3688
+          ]
+        ],
+        "val": [
+          [
+            0,
+            900
+          ]
+        ],
+        "test": []
+      },
+      "run_meta": {
+        "4_7": {
+          "split": "train",
+          "n_windows_paired": 2788
+        },
+        "4_6": {
+          "split": "val",
+          "n_windows_paired": 900
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__cx30__rs2": {
+      "dataset": "m3nvc",
+      "vehicle": "cx30",
+      "rs_node": "rs2",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            0,
+            1813
+          ],
+          [
+            2417,
+            4234
+          ]
+        ],
+        "val": [
+          [
+            1813,
+            2417
+          ],
+          [
+            5770,
+            7097
+          ]
+        ],
+        "test": [
+          [
+            4234,
+            4870
+          ],
+          [
+            4870,
+            5453
+          ],
+          [
+            8198,
+            8943
+          ]
+        ]
+      },
+      "run_meta": {
+        "2_2": {
+          "split": "train",
+          "n_windows_paired": 1817
+        },
+        "1_6": {
+          "split": "train",
+          "n_windows_paired": 1813
+        },
+        "4_7": {
+          "split": "val",
+          "n_windows_paired": 1327
+        },
+        "5_6": {
+          "split": "test",
+          "n_windows_paired": 745
+        },
+        "2_3": {
+          "split": "test",
+          "n_windows_paired": 636
+        },
+        "1_7": {
+          "split": "val",
+          "n_windows_paired": 604
+        },
+        "4_6": {
+          "split": "test",
+          "n_windows_paired": 583
+        }
+      },
+      "dropped_runs": [
+        {
+          "run_key": "5_7",
+          "reason": "empty_intersection"
+        }
+      ]
+    },
+    "m3nvc__cx30__rs3": {
+      "dataset": "m3nvc",
+      "vehicle": "cx30",
+      "rs_node": "rs3",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            899,
+            3404
+          ]
+        ],
+        "val": [
+          [
+            0,
+            880
+          ]
+        ],
+        "test": []
+      },
+      "run_meta": {
+        "4_7": {
+          "split": "train",
+          "n_windows_paired": 2505
+        },
+        "4_6": {
+          "split": "val",
+          "n_windows_paired": 880
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__cx30__rs5": {
+      "dataset": "m3nvc",
+      "vehicle": "cx30",
+      "rs_node": "rs5",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            4232,
+            4803
+          ],
+          [
+            4868,
+            5691
+          ],
+          [
+            5768,
+            8448
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1785
+          ]
+        ],
+        "test": [
+          [
+            1812,
+            2381
+          ],
+          [
+            2416,
+            4173
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_7": {
+          "split": "train",
+          "n_windows_paired": 2680
+        },
+        "1_6": {
+          "split": "val",
+          "n_windows_paired": 1785
+        },
+        "2_2": {
+          "split": "test",
+          "n_windows_paired": 1757
+        },
+        "4_6": {
+          "split": "train",
+          "n_windows_paired": 823
+        },
+        "2_3": {
+          "split": "train",
+          "n_windows_paired": 571
+        },
+        "1_7": {
+          "split": "test",
+          "n_windows_paired": 569
+        }
+      },
+      "dropped_runs": [
+        {
+          "run_key": "5_6",
+          "reason": "single_sensor"
+        },
+        {
+          "run_key": "5_7",
+          "reason": "single_sensor"
+        }
+      ]
+    },
+    "m3nvc__cx30__rs6": {
+      "dataset": "m3nvc",
+      "vehicle": "cx30",
+      "rs_node": "rs6",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            4870,
+            5452
+          ],
+          [
+            5542,
+            8210
+          ],
+          [
+            8262,
+            10056
+          ]
+        ],
+        "val": [
+          [
+            1813,
+            2417
+          ],
+          [
+            2417,
+            4234
+          ],
+          [
+            10108,
+            10674
+          ]
+        ],
+        "test": [
+          [
+            0,
+            1813
+          ],
+          [
+            4234,
+            4870
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_7": {
+          "split": "train",
+          "n_windows_paired": 2668
+        },
+        "2_2": {
+          "split": "val",
+          "n_windows_paired": 1817
+        },
+        "1_6": {
+          "split": "test",
+          "n_windows_paired": 1813
+        },
+        "5_6": {
+          "split": "train",
+          "n_windows_paired": 1794
+        },
+        "2_3": {
+          "split": "test",
+          "n_windows_paired": 636
+        },
+        "1_7": {
+          "split": "val",
+          "n_windows_paired": 604
+        },
+        "4_6": {
+          "split": "train",
+          "n_windows_paired": 582
+        },
+        "5_7": {
+          "split": "val",
+          "n_windows_paired": 566
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__cx30__rs7": {
+      "dataset": "m3nvc",
+      "vehicle": "cx30",
+      "rs_node": "rs7",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            0,
+            1786
+          ],
+          [
+            4234,
+            4814
+          ],
+          [
+            4870,
+            5286
+          ],
+          [
+            5388,
+            7641
+          ]
+        ],
+        "val": [
+          [
+            2417,
+            4184
+          ],
+          [
+            9581,
+            10104
+          ]
+        ],
+        "test": [
+          [
+            1813,
+            2381
+          ],
+          [
+            7761,
+            9486
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_7": {
+          "split": "train",
+          "n_windows_paired": 2253
+        },
+        "1_6": {
+          "split": "train",
+          "n_windows_paired": 1786
+        },
+        "2_2": {
+          "split": "val",
+          "n_windows_paired": 1767
+        },
+        "5_6": {
+          "split": "test",
+          "n_windows_paired": 1725
+        },
+        "2_3": {
+          "split": "train",
+          "n_windows_paired": 580
+        },
+        "1_7": {
+          "split": "test",
+          "n_windows_paired": 568
+        },
+        "5_7": {
+          "split": "val",
+          "n_windows_paired": 523
+        },
+        "4_6": {
+          "split": "train",
+          "n_windows_paired": 416
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__cx30__rs8": {
+      "dataset": "m3nvc",
+      "vehicle": "cx30",
+      "rs_node": "rs8",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            0,
+            1813
+          ],
+          [
+            1813,
+            2417
+          ],
+          [
+            5770,
+            8558
+          ],
+          [
+            10406,
+            11022
+          ]
+        ],
+        "val": [
+          [
+            4234,
+            4870
+          ],
+          [
+            8560,
+            10404
+          ]
+        ],
+        "test": [
+          [
+            2417,
+            4234
+          ],
+          [
+            4870,
+            5770
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_7": {
+          "split": "train",
+          "n_windows_paired": 2788
+        },
+        "5_6": {
+          "split": "val",
+          "n_windows_paired": 1844
+        },
+        "2_2": {
+          "split": "test",
+          "n_windows_paired": 1817
+        },
+        "1_6": {
+          "split": "train",
+          "n_windows_paired": 1813
+        },
+        "4_6": {
+          "split": "test",
+          "n_windows_paired": 900
+        },
+        "2_3": {
+          "split": "val",
+          "n_windows_paired": 636
+        },
+        "5_7": {
+          "split": "train",
+          "n_windows_paired": 616
+        },
+        "1_7": {
+          "split": "train",
+          "n_windows_paired": 604
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__gle350__rs1": {
+      "dataset": "m3nvc",
+      "vehicle": "gle350",
+      "rs_node": "rs1",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            0,
+            1851
+          ],
+          [
+            5113,
+            5953
+          ],
+          [
+            6013,
+            8307
+          ],
+          [
+            10330,
+            10918
+          ]
+        ],
+        "val": [
+          [
+            2580,
+            4352
+          ],
+          [
+            4395,
+            5065
+          ]
+        ],
+        "test": [
+          [
+            1871,
+            2553
+          ],
+          [
+            8435,
+            10189
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_5": {
+          "split": "train",
+          "n_windows_paired": 2294
+        },
+        "1_0": {
+          "split": "train",
+          "n_windows_paired": 1851
+        },
+        "2_0": {
+          "split": "val",
+          "n_windows_paired": 1772
+        },
+        "5_0": {
+          "split": "test",
+          "n_windows_paired": 1754
+        },
+        "4_4": {
+          "split": "train",
+          "n_windows_paired": 840
+        },
+        "1_1": {
+          "split": "test",
+          "n_windows_paired": 682
+        },
+        "2_1": {
+          "split": "val",
+          "n_windows_paired": 670
+        },
+        "5_1": {
+          "split": "train",
+          "n_windows_paired": 588
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__gle350__rs10": {
+      "dataset": "m3nvc",
+      "vehicle": "gle350",
+      "rs_node": "rs10",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            900,
+            3577
+          ]
+        ],
+        "val": [
+          [
+            0,
+            899
+          ]
+        ],
+        "test": []
+      },
+      "run_meta": {
+        "4_5": {
+          "split": "train",
+          "n_windows_paired": 2677
+        },
+        "4_4": {
+          "split": "val",
+          "n_windows_paired": 899
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__gle350__rs2": {
+      "dataset": "m3nvc",
+      "vehicle": "gle350",
+      "rs_node": "rs2",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            0,
+            1871
+          ],
+          [
+            1871,
+            2581
+          ],
+          [
+            8044,
+            8495
+          ]
+        ],
+        "val": [
+          [
+            2581,
+            4396
+          ]
+        ],
+        "test": [
+          [
+            4396,
+            5114
+          ],
+          [
+            5114,
+            5481
+          ],
+          [
+            6014,
+            6600
+          ]
+        ]
+      },
+      "run_meta": {
+        "1_0": {
+          "split": "train",
+          "n_windows_paired": 1871
+        },
+        "2_0": {
+          "split": "val",
+          "n_windows_paired": 1815
+        },
+        "2_1": {
+          "split": "test",
+          "n_windows_paired": 718
+        },
+        "1_1": {
+          "split": "train",
+          "n_windows_paired": 710
+        },
+        "4_5": {
+          "split": "test",
+          "n_windows_paired": 586
+        },
+        "5_0": {
+          "split": "train",
+          "n_windows_paired": 451
+        },
+        "4_4": {
+          "split": "test",
+          "n_windows_paired": 367
+        }
+      },
+      "dropped_runs": [
+        {
+          "run_key": "5_1",
+          "reason": "empty_intersection"
+        }
+      ]
+    },
+    "m3nvc__gle350__rs3": {
+      "dataset": "m3nvc",
+      "vehicle": "gle350",
+      "rs_node": "rs3",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            899,
+            3251
+          ]
+        ],
+        "val": [
+          [
+            0,
+            851
+          ]
+        ],
+        "test": []
+      },
+      "run_meta": {
+        "4_5": {
+          "split": "train",
+          "n_windows_paired": 2352
+        },
+        "4_4": {
+          "split": "val",
+          "n_windows_paired": 851
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__gle350__rs5": {
+      "dataset": "m3nvc",
+      "vehicle": "gle350",
+      "rs_node": "rs5",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            1870,
+            2545
+          ],
+          [
+            5113,
+            5938
+          ],
+          [
+            6013,
+            8579
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1846
+          ],
+          [
+            8691,
+            9034
+          ]
+        ],
+        "test": [
+          [
+            2580,
+            4338
+          ],
+          [
+            4395,
+            5047
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_5": {
+          "split": "train",
+          "n_windows_paired": 2566
+        },
+        "1_0": {
+          "split": "val",
+          "n_windows_paired": 1846
+        },
+        "2_0": {
+          "split": "test",
+          "n_windows_paired": 1758
+        },
+        "4_4": {
+          "split": "train",
+          "n_windows_paired": 825
+        },
+        "1_1": {
+          "split": "train",
+          "n_windows_paired": 675
+        },
+        "2_1": {
+          "split": "test",
+          "n_windows_paired": 652
+        },
+        "5_0": {
+          "split": "val",
+          "n_windows_paired": 343
+        }
+      },
+      "dropped_runs": [
+        {
+          "run_key": "5_1",
+          "reason": "single_sensor"
+        }
+      ]
+    },
+    "m3nvc__gle350__rs6": {
+      "dataset": "m3nvc",
+      "vehicle": "gle350",
+      "rs_node": "rs6",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            0,
+            1870
+          ],
+          [
+            5114,
+            5997
+          ],
+          [
+            6014,
+            8642
+          ]
+        ],
+        "val": [
+          [
+            1871,
+            2580
+          ],
+          [
+            8692,
+            10537
+          ]
+        ],
+        "test": [
+          [
+            2581,
+            4395
+          ],
+          [
+            4396,
+            5113
+          ],
+          [
+            10587,
+            11271
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_5": {
+          "split": "train",
+          "n_windows_paired": 2628
+        },
+        "1_0": {
+          "split": "train",
+          "n_windows_paired": 1870
+        },
+        "5_0": {
+          "split": "val",
+          "n_windows_paired": 1845
+        },
+        "2_0": {
+          "split": "test",
+          "n_windows_paired": 1814
+        },
+        "4_4": {
+          "split": "train",
+          "n_windows_paired": 883
+        },
+        "2_1": {
+          "split": "test",
+          "n_windows_paired": 717
+        },
+        "1_1": {
+          "split": "val",
+          "n_windows_paired": 709
+        },
+        "5_1": {
+          "split": "test",
+          "n_windows_paired": 684
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__gle350__rs7": {
+      "dataset": "m3nvc",
+      "vehicle": "gle350",
+      "rs_node": "rs7",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            0,
+            1848
+          ],
+          [
+            1871,
+            2548
+          ],
+          [
+            5112,
+            5252
+          ],
+          [
+            5379,
+            7172
+          ]
+        ],
+        "val": [
+          [
+            2580,
+            4348
+          ],
+          [
+            9272,
+            9800
+          ]
+        ],
+        "test": [
+          [
+            4394,
+            5057
+          ],
+          [
+            7401,
+            9066
+          ]
+        ]
+      },
+      "run_meta": {
+        "1_0": {
+          "split": "train",
+          "n_windows_paired": 1848
+        },
+        "4_5": {
+          "split": "train",
+          "n_windows_paired": 1793
+        },
+        "2_0": {
+          "split": "val",
+          "n_windows_paired": 1768
+        },
+        "5_0": {
+          "split": "test",
+          "n_windows_paired": 1665
+        },
+        "1_1": {
+          "split": "train",
+          "n_windows_paired": 677
+        },
+        "2_1": {
+          "split": "test",
+          "n_windows_paired": 663
+        },
+        "5_1": {
+          "split": "val",
+          "n_windows_paired": 528
+        },
+        "4_4": {
+          "split": "train",
+          "n_windows_paired": 140
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__gle350__rs8": {
+      "dataset": "m3nvc",
+      "vehicle": "gle350",
+      "rs_node": "rs8",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            5114,
+            6013
+          ],
+          [
+            6014,
+            8691
+          ],
+          [
+            8693,
+            10586
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1871
+          ],
+          [
+            4396,
+            5114
+          ]
+        ],
+        "test": [
+          [
+            1871,
+            2581
+          ],
+          [
+            2581,
+            4396
+          ],
+          [
+            10588,
+            11320
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_5": {
+          "split": "train",
+          "n_windows_paired": 2677
+        },
+        "5_0": {
+          "split": "train",
+          "n_windows_paired": 1893
+        },
+        "1_0": {
+          "split": "val",
+          "n_windows_paired": 1871
+        },
+        "2_0": {
+          "split": "test",
+          "n_windows_paired": 1815
+        },
+        "4_4": {
+          "split": "train",
+          "n_windows_paired": 899
+        },
+        "5_1": {
+          "split": "test",
+          "n_windows_paired": 732
+        },
+        "2_1": {
+          "split": "val",
+          "n_windows_paired": 718
+        },
+        "1_1": {
+          "split": "test",
+          "n_windows_paired": 710
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__miata__rs1": {
+      "dataset": "m3nvc",
+      "vehicle": "miata",
+      "rs_node": "rs1",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            4318,
+            4882
+          ],
+          [
+            5588,
+            8512
+          ],
+          [
+            8598,
+            10335
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1817
+          ],
+          [
+            1835,
+            2457
+          ]
+        ],
+        "test": [
+          [
+            2481,
+            4275
+          ],
+          [
+            4932,
+            5572
+          ],
+          [
+            10436,
+            10959
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_3": {
+          "split": "train",
+          "n_windows_paired": 2924
+        },
+        "1_4": {
+          "split": "val",
+          "n_windows_paired": 1817
+        },
+        "2_6": {
+          "split": "test",
+          "n_windows_paired": 1794
+        },
+        "5_4": {
+          "split": "train",
+          "n_windows_paired": 1737
+        },
+        "4_2": {
+          "split": "test",
+          "n_windows_paired": 640
+        },
+        "1_5": {
+          "split": "val",
+          "n_windows_paired": 622
+        },
+        "2_7": {
+          "split": "train",
+          "n_windows_paired": 564
+        },
+        "5_5": {
+          "split": "test",
+          "n_windows_paired": 523
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__miata__rs10": {
+      "dataset": "m3nvc",
+      "vehicle": "miata",
+      "rs_node": "rs10",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            900,
+            3909
+          ]
+        ],
+        "val": [
+          [
+            0,
+            900
+          ]
+        ],
+        "test": []
+      },
+      "run_meta": {
+        "4_3": {
+          "split": "train",
+          "n_windows_paired": 3009
+        },
+        "4_2": {
+          "split": "val",
+          "n_windows_paired": 900
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__miata__rs2": {
+      "dataset": "m3nvc",
+      "vehicle": "miata",
+      "rs_node": "rs2",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            2482,
+            4319
+          ],
+          [
+            4319,
+            4934
+          ],
+          [
+            5834,
+            6273
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1836
+          ]
+        ],
+        "test": [
+          [
+            1836,
+            2482
+          ],
+          [
+            4934,
+            5380
+          ]
+        ]
+      },
+      "run_meta": {
+        "2_6": {
+          "split": "train",
+          "n_windows_paired": 1837
+        },
+        "1_4": {
+          "split": "val",
+          "n_windows_paired": 1836
+        },
+        "1_5": {
+          "split": "test",
+          "n_windows_paired": 646
+        },
+        "2_7": {
+          "split": "train",
+          "n_windows_paired": 615
+        },
+        "4_2": {
+          "split": "test",
+          "n_windows_paired": 446
+        },
+        "4_3": {
+          "split": "train",
+          "n_windows_paired": 439
+        }
+      },
+      "dropped_runs": [
+        {
+          "run_key": "5_4",
+          "reason": "empty_intersection"
+        },
+        {
+          "run_key": "5_5",
+          "reason": "empty_intersection"
+        }
+      ]
+    },
+    "m3nvc__miata__rs3": {
+      "dataset": "m3nvc",
+      "vehicle": "miata",
+      "rs_node": "rs3",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            899,
+            3715
+          ]
+        ],
+        "val": [
+          [
+            0,
+            832
+          ]
+        ],
+        "test": []
+      },
+      "run_meta": {
+        "4_3": {
+          "split": "train",
+          "n_windows_paired": 2816
+        },
+        "4_2": {
+          "split": "val",
+          "n_windows_paired": 832
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__miata__rs5": {
+      "dataset": "m3nvc",
+      "vehicle": "miata",
+      "rs_node": "rs5",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            1836,
+            2444
+          ],
+          [
+            4318,
+            4868
+          ],
+          [
+            4933,
+            5436
+          ],
+          [
+            5446,
+            7768
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1809
+          ]
+        ],
+        "test": [
+          [
+            2481,
+            4261
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_3": {
+          "split": "train",
+          "n_windows_paired": 2322
+        },
+        "1_4": {
+          "split": "val",
+          "n_windows_paired": 1809
+        },
+        "2_6": {
+          "split": "test",
+          "n_windows_paired": 1780
+        },
+        "1_5": {
+          "split": "train",
+          "n_windows_paired": 608
+        },
+        "2_7": {
+          "split": "train",
+          "n_windows_paired": 550
+        },
+        "4_2": {
+          "split": "train",
+          "n_windows_paired": 503
+        }
+      },
+      "dropped_runs": [
+        {
+          "run_key": "5_4",
+          "reason": "single_sensor"
+        },
+        {
+          "run_key": "5_5",
+          "reason": "single_sensor"
+        }
+      ]
+    },
+    "m3nvc__miata__rs6": {
+      "dataset": "m3nvc",
+      "vehicle": "miata",
+      "rs_node": "rs6",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            5457,
+            8213
+          ],
+          [
+            8237,
+            10051
+          ],
+          [
+            10075,
+            10680
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1836
+          ],
+          [
+            1836,
+            2322
+          ],
+          [
+            4161,
+            4773
+          ]
+        ],
+        "test": [
+          [
+            2324,
+            4159
+          ],
+          [
+            4776,
+            5417
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_3": {
+          "split": "train",
+          "n_windows_paired": 2756
+        },
+        "1_4": {
+          "split": "val",
+          "n_windows_paired": 1836
+        },
+        "2_6": {
+          "split": "test",
+          "n_windows_paired": 1835
+        },
+        "5_4": {
+          "split": "train",
+          "n_windows_paired": 1814
+        },
+        "4_2": {
+          "split": "test",
+          "n_windows_paired": 641
+        },
+        "2_7": {
+          "split": "val",
+          "n_windows_paired": 612
+        },
+        "5_5": {
+          "split": "train",
+          "n_windows_paired": 605
+        },
+        "1_5": {
+          "split": "val",
+          "n_windows_paired": 486
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__miata__rs7": {
+      "dataset": "m3nvc",
+      "vehicle": "miata",
+      "rs_node": "rs7",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            4934,
+            5275
+          ],
+          [
+            5280,
+            7911
+          ],
+          [
+            8083,
+            9723
+          ],
+          [
+            9920,
+            10343
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1812
+          ],
+          [
+            4319,
+            4876
+          ]
+        ],
+        "test": [
+          [
+            1836,
+            2451
+          ],
+          [
+            2482,
+            4267
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_3": {
+          "split": "train",
+          "n_windows_paired": 2631
+        },
+        "1_4": {
+          "split": "val",
+          "n_windows_paired": 1812
+        },
+        "2_6": {
+          "split": "test",
+          "n_windows_paired": 1785
+        },
+        "5_4": {
+          "split": "train",
+          "n_windows_paired": 1640
+        },
+        "1_5": {
+          "split": "test",
+          "n_windows_paired": 615
+        },
+        "2_7": {
+          "split": "val",
+          "n_windows_paired": 557
+        },
+        "5_5": {
+          "split": "train",
+          "n_windows_paired": 423
+        },
+        "4_2": {
+          "split": "train",
+          "n_windows_paired": 341
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__miata__rs8": {
+      "dataset": "m3nvc",
+      "vehicle": "miata",
+      "rs_node": "rs8",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            5834,
+            8843
+          ],
+          [
+            8845,
+            10681
+          ],
+          [
+            10683,
+            11310
+          ]
+        ],
+        "val": [
+          [
+            1836,
+            2482
+          ],
+          [
+            2482,
+            4319
+          ],
+          [
+            4319,
+            4934
+          ]
+        ],
+        "test": [
+          [
+            0,
+            1836
+          ],
+          [
+            4934,
+            5834
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_3": {
+          "split": "train",
+          "n_windows_paired": 3009
+        },
+        "2_6": {
+          "split": "val",
+          "n_windows_paired": 1837
+        },
+        "1_4": {
+          "split": "test",
+          "n_windows_paired": 1836
+        },
+        "5_4": {
+          "split": "train",
+          "n_windows_paired": 1836
+        },
+        "4_2": {
+          "split": "test",
+          "n_windows_paired": 900
+        },
+        "1_5": {
+          "split": "val",
+          "n_windows_paired": 646
+        },
+        "5_5": {
+          "split": "train",
+          "n_windows_paired": 627
+        },
+        "2_7": {
+          "split": "val",
+          "n_windows_paired": 615
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__mustang__rs1": {
+      "dataset": "m3nvc",
+      "vehicle": "mustang",
+      "rs_node": "rs1",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            2492,
+            4336
+          ],
+          [
+            4375,
+            4940
+          ],
+          [
+            4986,
+            5826
+          ],
+          [
+            5886,
+            8043
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1841
+          ],
+          [
+            1858,
+            2469
+          ]
+        ],
+        "test": [
+          [
+            8044,
+            9841
+          ],
+          [
+            9857,
+            10470
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_1": {
+          "split": "train",
+          "n_windows_paired": 2157
+        },
+        "2_4": {
+          "split": "train",
+          "n_windows_paired": 1844
+        },
+        "1_2": {
+          "split": "val",
+          "n_windows_paired": 1841
+        },
+        "5_2": {
+          "split": "test",
+          "n_windows_paired": 1797
+        },
+        "4_0": {
+          "split": "train",
+          "n_windows_paired": 840
+        },
+        "5_3": {
+          "split": "test",
+          "n_windows_paired": 613
+        },
+        "1_3": {
+          "split": "val",
+          "n_windows_paired": 611
+        },
+        "2_5": {
+          "split": "train",
+          "n_windows_paired": 565
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__mustang__rs10": {
+      "dataset": "m3nvc",
+      "vehicle": "mustang",
+      "rs_node": "rs10",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            900,
+            3707
+          ]
+        ],
+        "val": [
+          [
+            0,
+            900
+          ]
+        ],
+        "test": []
+      },
+      "run_meta": {
+        "4_1": {
+          "split": "train",
+          "n_windows_paired": 2807
+        },
+        "4_0": {
+          "split": "val",
+          "n_windows_paired": 900
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__mustang__rs2": {
+      "dataset": "m3nvc",
+      "vehicle": "mustang",
+      "rs_node": "rs2",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            1858,
+            2491
+          ],
+          [
+            2492,
+            4375
+          ],
+          [
+            4376,
+            4986
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1857
+          ]
+        ],
+        "test": [
+          [
+            4987,
+            5386
+          ],
+          [
+            5623,
+            6634
+          ],
+          [
+            8430,
+            8448
+          ]
+        ]
+      },
+      "run_meta": {
+        "2_4": {
+          "split": "train",
+          "n_windows_paired": 1883
+        },
+        "1_2": {
+          "split": "val",
+          "n_windows_paired": 1857
+        },
+        "4_1": {
+          "split": "test",
+          "n_windows_paired": 1011
+        },
+        "1_3": {
+          "split": "train",
+          "n_windows_paired": 633
+        },
+        "2_5": {
+          "split": "train",
+          "n_windows_paired": 610
+        },
+        "4_0": {
+          "split": "test",
+          "n_windows_paired": 399
+        },
+        "5_2": {
+          "split": "test",
+          "n_windows_paired": 18
+        }
+      },
+      "dropped_runs": [
+        {
+          "run_key": "5_3",
+          "reason": "empty_intersection"
+        }
+      ]
+    },
+    "m3nvc__mustang__rs3": {
+      "dataset": "m3nvc",
+      "vehicle": "mustang",
+      "rs_node": "rs3",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            677,
+            2860
+          ]
+        ],
+        "val": [
+          [
+            0,
+            598
+          ]
+        ],
+        "test": []
+      },
+      "run_meta": {
+        "4_1": {
+          "split": "train",
+          "n_windows_paired": 2183
+        },
+        "4_0": {
+          "split": "val",
+          "n_windows_paired": 598
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__mustang__rs5": {
+      "dataset": "m3nvc",
+      "vehicle": "mustang",
+      "rs_node": "rs5",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            1857,
+            2460
+          ],
+          [
+            4985,
+            5806
+          ],
+          [
+            5885,
+            8303
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1835
+          ]
+        ],
+        "test": [
+          [
+            2491,
+            4319
+          ],
+          [
+            4375,
+            4923
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_1": {
+          "split": "train",
+          "n_windows_paired": 2418
+        },
+        "1_2": {
+          "split": "val",
+          "n_windows_paired": 1835
+        },
+        "2_4": {
+          "split": "test",
+          "n_windows_paired": 1828
+        },
+        "4_0": {
+          "split": "train",
+          "n_windows_paired": 821
+        },
+        "1_3": {
+          "split": "train",
+          "n_windows_paired": 603
+        },
+        "2_5": {
+          "split": "test",
+          "n_windows_paired": 548
+        }
+      },
+      "dropped_runs": [
+        {
+          "run_key": "5_2",
+          "reason": "single_sensor"
+        },
+        {
+          "run_key": "5_3",
+          "reason": "single_sensor"
+        }
+      ]
+    },
+    "m3nvc__mustang__rs6": {
+      "dataset": "m3nvc",
+      "vehicle": "mustang",
+      "rs_node": "rs6",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            2492,
+            4376
+          ],
+          [
+            4987,
+            5870
+          ],
+          [
+            5887,
+            8428
+          ]
+        ],
+        "val": [
+          [
+            0,
+            1858
+          ],
+          [
+            4376,
+            4987
+          ]
+        ],
+        "test": [
+          [
+            1858,
+            2492
+          ],
+          [
+            8462,
+            10242
+          ],
+          [
+            10276,
+            10876
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_1": {
+          "split": "train",
+          "n_windows_paired": 2541
+        },
+        "2_4": {
+          "split": "train",
+          "n_windows_paired": 1884
+        },
+        "1_2": {
+          "split": "val",
+          "n_windows_paired": 1858
+        },
+        "5_2": {
+          "split": "test",
+          "n_windows_paired": 1780
+        },
+        "4_0": {
+          "split": "train",
+          "n_windows_paired": 883
+        },
+        "1_3": {
+          "split": "test",
+          "n_windows_paired": 634
+        },
+        "2_5": {
+          "split": "val",
+          "n_windows_paired": 611
+        },
+        "5_3": {
+          "split": "test",
+          "n_windows_paired": 600
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__mustang__rs7": {
+      "dataset": "m3nvc",
+      "vehicle": "mustang",
+      "rs_node": "rs7",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            0,
+            1832
+          ],
+          [
+            1858,
+            2458
+          ],
+          [
+            5886,
+            7822
+          ]
+        ],
+        "val": [
+          [
+            2492,
+            4323
+          ],
+          [
+            4375,
+            4929
+          ]
+        ],
+        "test": [
+          [
+            4986,
+            5687
+          ],
+          [
+            8387,
+            9614
+          ],
+          [
+            10200,
+            10239
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_1": {
+          "split": "train",
+          "n_windows_paired": 1936
+        },
+        "1_2": {
+          "split": "train",
+          "n_windows_paired": 1832
+        },
+        "2_4": {
+          "split": "val",
+          "n_windows_paired": 1831
+        },
+        "5_2": {
+          "split": "test",
+          "n_windows_paired": 1227
+        },
+        "4_0": {
+          "split": "test",
+          "n_windows_paired": 701
+        },
+        "1_3": {
+          "split": "train",
+          "n_windows_paired": 600
+        },
+        "2_5": {
+          "split": "val",
+          "n_windows_paired": 554
+        },
+        "5_3": {
+          "split": "test",
+          "n_windows_paired": 39
+        }
+      },
+      "dropped_runs": []
+    },
+    "m3nvc__mustang__rs8": {
+      "dataset": "m3nvc",
+      "vehicle": "mustang",
+      "rs_node": "rs8",
+      "marker": "split_runs",
+      "split_assignments": {
+        "train": [
+          [
+            4987,
+            5887
+          ],
+          [
+            5887,
+            8694
+          ],
+          [
+            8695,
+            10508
+          ]
+        ],
+        "val": [
+          [
+            2492,
+            4376
+          ],
+          [
+            10509,
+            11142
+          ]
+        ],
+        "test": [
+          [
+            0,
+            1858
+          ],
+          [
+            1858,
+            2492
+          ],
+          [
+            4376,
+            4987
+          ]
+        ]
+      },
+      "run_meta": {
+        "4_1": {
+          "split": "train",
+          "n_windows_paired": 2807
+        },
+        "2_4": {
+          "split": "val",
+          "n_windows_paired": 1884
+        },
+        "1_2": {
+          "split": "test",
+          "n_windows_paired": 1858
+        },
+        "5_2": {
+          "split": "train",
+          "n_windows_paired": 1813
+        },
+        "4_0": {
+          "split": "train",
+          "n_windows_paired": 900
+        },
+        "1_3": {
+          "split": "test",
+          "n_windows_paired": 634
+        },
+        "5_3": {
+          "split": "val",
+          "n_windows_paired": 633
+        },
+        "2_5": {
+          "split": "test",
+          "n_windows_paired": 611
+        }
+      },
+      "dropped_runs": []
+    }
+  }
+}

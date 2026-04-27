@@ -705,41 +705,16 @@ def compute_class_weights(ds: SensorDataset) -> tuple[torch.Tensor, torch.Tensor
 
 
 def collate_pairs(batch: list[dict]) -> dict:
-    """Collate for StratifiedPairDataset.
-
-    Anchor keys (x_*_t, *_t, *_avail) collate normally. Per-partner keys
-    (x_*_p{i}, detection_label_p{i}, vehicle_type_p{i}, partner_stratum_p{i})
-    are STACKED across the partner axis into single tensors per modality, so
-    the worker→main IPC handoff is O(modalities) rather than O(modalities*P).
-
-    This was the dominant bottleneck on 2026-04-26: ~26 fd-handoffs per sample
-    × B=128 saturated PyTorch's resource_sharer. Stacking partner-side tensors
-    cuts the fd count to a small constant.
-
-    New schema (B = batch, P = partners):
-      x_audio_partners        (B, P, 1, W_a)
-      x_seismic_partners      (B, P, 1, W_s)
-      detection_label_partners (B, P)
-      vehicle_type_partners    (B, P)
-      partner_stratum_partners (B, P)
-    """
+    """Collate for StratifiedPairDataset. Discovers partner slots dynamically."""
     out: dict = {}
     sample = batch[0]
 
+    # Count partners
     n_partners = sum(1 for k in sample if k.startswith("x_audio_p"))
     out["n_partners"] = n_partners
 
-    # Anchor and non-partner scalar keys collate normally.
-    partner_keys = {
-        "x_audio_p", "x_seismic_p",
-        "detection_label_p", "vehicle_type_p", "partner_stratum_p",
-    }
-    def _is_partner_key(k: str) -> bool:
-        return any(k.startswith(pk) for pk in partner_keys)
-
+    # Collate all keys
     for key in sample:
-        if _is_partner_key(key):
-            continue
         vals = [b[key] for b in batch]
         if isinstance(vals[0], torch.Tensor):
             out[key] = torch.stack(vals)
@@ -747,29 +722,5 @@ def collate_pairs(batch: list[dict]) -> dict:
             out[key] = torch.tensor(vals, dtype=torch.bool)
         else:
             out[key] = torch.tensor(vals)
-
-    if n_partners == 0:
-        return out
-
-    # Stack partners: each output is (B, P, ...) — one fd per modality, not per partner.
-    def _stack_partner(prefix: str) -> torch.Tensor:
-        # Inner: stack P partners per sample → (P, ...). Outer: stack B samples → (B, P, ...).
-        per_sample = [
-            torch.stack([b[f"{prefix}{p}"] for p in range(n_partners)])
-            for b in batch
-        ]
-        return torch.stack(per_sample)
-
-    def _stack_partner_scalars(prefix: str, dtype) -> torch.Tensor:
-        return torch.tensor(
-            [[b[f"{prefix}{p}"] for p in range(n_partners)] for b in batch],
-            dtype=dtype,
-        )
-
-    out["x_audio_partners"]   = _stack_partner("x_audio_p")
-    out["x_seismic_partners"] = _stack_partner("x_seismic_p")
-    out["detection_label_partners"] = _stack_partner_scalars("detection_label_p", torch.long)
-    out["vehicle_type_partners"]    = _stack_partner_scalars("vehicle_type_p", torch.long)
-    out["partner_stratum_partners"] = _stack_partner_scalars("partner_stratum_p", torch.long)
 
     return out

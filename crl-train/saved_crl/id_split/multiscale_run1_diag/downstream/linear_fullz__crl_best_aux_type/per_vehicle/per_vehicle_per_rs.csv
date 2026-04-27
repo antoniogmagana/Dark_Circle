@@ -1,0 +1,36 @@
+dataset,vehicle,rs_node,true_class,n_windows,n_rs_nodes,pred_pedestrian,pred_light,pred_medium,pred_heavy,pred_majority,majority_frac,accuracy,reclass_recommendation
+focal,bicycle2,rs1,pedestrian,392,1,0.074,0.1658,0.125,0.6352,heavy,0.6352,0.074,consider reclassifying as heavy (64% of windows predicted that)
+focal,bicycle2,rs2,pedestrian,391,1,0.087,0.1253,0.1586,0.6292,heavy,0.6292,0.087,consider reclassifying as heavy (63% of windows predicted that)
+focal,bicycle2,rs3,pedestrian,362,1,0.1271,0.1823,0.1215,0.5691,heavy,0.5691,0.1271,consider reclassifying as heavy (57% of windows predicted that)
+focal,bicycle2,rs7,pedestrian,289,1,0.2042,0.045,0.0519,0.699,heavy,0.699,0.2042,consider reclassifying as heavy (70% of windows predicted that)
+focal,forester2,rs1,medium,321,1,0.0031,0.2212,0.5794,0.1963,medium,0.5794,0.5794,
+focal,forester2,rs2,medium,276,1,0.0072,0.2355,0.4964,0.2609,medium,0.4964,0.4964,
+focal,forester2,rs3,medium,276,1,0.0036,0.1739,0.6594,0.163,medium,0.6594,0.6594,
+focal,forester2,rs7,medium,318,1,0.066,0.0377,0.7893,0.1069,medium,0.7893,0.7893,
+focal,motor2,rs1,light,320,1,0.0312,0.8063,0.0625,0.1,light,0.8063,0.8063,
+focal,motor2,rs2,light,309,1,0.0065,0.8997,0.0453,0.0485,light,0.8997,0.8997,
+focal,motor2,rs3,light,313,1,0.0128,0.8498,0.016,0.1214,light,0.8498,0.8498,
+focal,motor2,rs7,light,284,1,0.2042,0.6514,0.0141,0.1303,light,0.6514,0.6514,
+focal,mustang0528,rs1,medium,856,1,0.5257,0.1589,0.222,0.0935,pedestrian,0.5257,0.222,consider reclassifying as pedestrian (53% of windows predicted that)
+focal,mustang0528,rs2,medium,820,1,0.4573,0.1622,0.25,0.1305,pedestrian,0.4573,0.25,
+focal,mustang0528,rs3,medium,920,1,0.5533,0.0761,0.2891,0.0815,pedestrian,0.5533,0.2891,consider reclassifying as pedestrian (55% of windows predicted that)
+focal,mustang0528,rs7,medium,844,1,0.5758,0.1327,0.154,0.1374,pedestrian,0.5758,0.154,consider reclassifying as pedestrian (58% of windows predicted that)
+focal,pickup2,rs1,heavy,273,1,0.0037,0.3407,0.3956,0.2601,medium,0.3956,0.2601,
+focal,pickup2,rs2,heavy,261,1,0.0077,0.2414,0.2797,0.4713,heavy,0.4713,0.4713,
+focal,pickup2,rs3,heavy,248,1,0.0,0.2218,0.3347,0.4435,heavy,0.4435,0.4435,
+focal,pickup2,rs7,heavy,160,1,0.2437,0.2812,0.1437,0.3312,heavy,0.3312,0.3312,
+focal,scooter2,rs1,light,282,1,0.0035,0.2447,0.5887,0.1631,medium,0.5887,0.2447,consider reclassifying as medium (59% of windows predicted that)
+focal,scooter2,rs2,light,251,1,0.004,0.243,0.4781,0.2749,medium,0.4781,0.243,
+focal,scooter2,rs3,light,206,1,0.0,0.199,0.733,0.068,medium,0.733,0.199,consider reclassifying as medium (73% of windows predicted that)
+focal,scooter2,rs7,light,248,1,0.0766,0.0081,0.8952,0.0202,medium,0.8952,0.0081,consider reclassifying as medium (90% of windows predicted that)
+focal,tesla2,rs1,heavy,254,1,0.0276,0.1102,0.252,0.6102,heavy,0.6102,0.6102,
+focal,tesla2,rs2,heavy,256,1,0.0195,0.0703,0.3359,0.5742,heavy,0.5742,0.5742,
+focal,tesla2,rs3,heavy,177,1,0.0169,0.0452,0.0734,0.8644,heavy,0.8644,0.8644,
+focal,tesla2,rs7,heavy,192,1,0.2292,0.026,0.1042,0.6406,heavy,0.6406,0.6406,
+focal,walk2,rs1,pedestrian,315,1,0.9365,0.0444,0.0127,0.0063,pedestrian,0.9365,0.9365,
+focal,walk2,rs2,pedestrian,298,1,0.9362,0.0336,0.0101,0.0201,pedestrian,0.9362,0.9362,
+focal,walk2,rs3,pedestrian,297,1,0.9529,0.0135,0.0101,0.0236,pedestrian,0.9529,0.9529,
+focal,walk2,rs7,pedestrian,249,1,0.9558,0.0161,0.004,0.0241,pedestrian,0.9558,0.9558,
+iobt,polaris0235pm_nolineofsig,rs1,light,336,1,0.0863,0.3839,0.0387,0.4911,heavy,0.4911,0.3839,
+iobt,silverado0315pm,rs1,heavy,140,1,0.0,0.0286,0.0,0.9714,heavy,0.9714,0.9714,
+iobt,warhog_nolineofsight,rs1,light,68,1,0.3971,0.2941,0.0294,0.2794,pedestrian,0.3971,0.2941,
