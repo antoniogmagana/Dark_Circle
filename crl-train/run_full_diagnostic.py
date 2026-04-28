@@ -19,10 +19,10 @@ Usage
 
     # Reuse an existing CRL run (skips phase 1)
     python run_full_diagnostic.py \\
-        --crl-run-dir saved_crl/experiments/baseline_multiscale/2026-04-21_02-22-50
+        --crl-run-dir saved_crl/runs/multiscale/vae/v3_lowfreq
 
     # Resume an interrupted run (idempotent on completed sub-runs)
-    python run_full_diagnostic.py --out-dir saved_crl/oneshot/2026-04-21_14-00-00 \\
+    python run_full_diagnostic.py --out-dir saved_crl/runs/multiscale/vae/example/ \\
         --skip-existing
 """
 from __future__ import annotations
@@ -93,9 +93,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data-dir",   default="../data_files/parsed/train/")
     p.add_argument("--val-dir",    default="../data_files/parsed/val/")
     p.add_argument("--test-dir",   default="../data_files/parsed/test/")
-    p.add_argument("--cache-dir",  default="./saved_crl/cache")
+    p.add_argument("--cache-dir",  default="./saved_crl/caches/waveform")
     p.add_argument("--out-dir",    default=None,
-                   help="Root output dir. Defaults to saved_crl/oneshot/<timestamp>/")
+                   help="Root output dir. Defaults to "
+                        "saved_crl/runs/<frontend>/<training_mode>/<timestamp>/.")
     p.add_argument("--crl-run-dir", default=None,
                    help="Existing CRL run dir to reuse. Skips phase 1. Must contain "
                         "meta.json and at least one of {crl_best.pth, crl_best_aux_type.pth}.")
@@ -133,6 +134,12 @@ def parse_args() -> argparse.Namespace:
                         "alignment, env temporal stability, and signal "
                         "intervention invariance losses. Downstream probes "
                         "still run post-hoc for all modes.")
+    p.add_argument("--use-focal-type", action="store_true",
+                   help="Replace type CE with focal CE in pretraining aux_type and "
+                        "downstream probe. Stacks on existing class weights.")
+    p.add_argument("--focal-type-gamma", type=float, default=2.0,
+                   help="Focal CE gamma for the type loss (default 2.0; ignored "
+                        "unless --use-focal-type is set).")
     p.add_argument("--sensors", nargs="+", default=["audio", "seismic"])
     p.add_argument("--skip-existing", action="store_true",
                    help="Skip sub-runs that already have their completion marker.")
@@ -707,12 +714,14 @@ def main() -> None:
     args = parse_args()
     t_start = time.time()
 
-    # Output root
+    # Output root: auto-route by frontend/mode under saved_crl/runs/ when
+    # --out-dir is omitted. Mirrors the canonical
+    # saved_crl/runs/<frontend>/<training_mode>/<run-id>/ layout.
     if args.out_dir:
         out_root = Path(args.out_dir)
     else:
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        out_root = Path(f"saved_crl/oneshot/{ts}")
+        out_root = Path(f"saved_crl/runs/{args.frontend}/{args.training_mode}/{ts}")
     out_root.mkdir(parents=True, exist_ok=True)
     print(f"  Output root: {out_root}")
 
@@ -730,6 +739,8 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         n_epochs=args.crl_epochs,
+        use_focal_type=args.use_focal_type,
+        focal_type_gamma=args.focal_type_gamma,
     )
 
     # Resolve CRL dir: either reuse or a fresh subdir under out_root.
@@ -771,7 +782,7 @@ def main() -> None:
     if args.use_id_split:
         print(f"  --use-id-split set; reading splits from "
               f"DATASET_VEHICLE_MAP under id_root={args.id_root}")
-        id_cache_dir = Path("saved_crl/id_cache")
+        id_cache_dir = Path("saved_crl/caches/id_split")
         train_ds = SensorDataset(
             args.data_dir, cfg, is_train=True, cache_dir=cache_dir,
             use_id_split=True, role="train",

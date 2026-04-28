@@ -137,13 +137,16 @@ class RunMetrics:
 # --------------------------------------------------------------------------
 
 def discover_runs(root: Path) -> list[Path]:
-    """Find all <run>/ dirs under `root` that have crl/meta.json. Returns
-    a list of run dir paths (not meta.json paths)."""
+    """Find all <run>/ dirs anywhere under `root` that have crl/meta.json.
+    Recurses arbitrarily deep so the canonical
+    saved_crl/runs/<frontend>/<mode>/<run-id>/ layout works alongside
+    older flat layouts (saved_crl/<run-id>/). Returns run dir paths,
+    not meta.json paths."""
     root = Path(root)
     if not root.exists():
         return []
-    runs = [p.parent.parent for p in root.glob("*/crl/meta.json")]
-    return sorted(runs)
+    runs = [p.parent.parent for p in root.rglob("crl/meta.json")]
+    return sorted(set(runs))
 
 
 # --------------------------------------------------------------------------

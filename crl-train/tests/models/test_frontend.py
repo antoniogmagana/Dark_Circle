@@ -181,7 +181,7 @@ class TestMorletPerSensorInModel:
 
         cfg = CRLConfig(
             d_model=32, n_layers=1, n_heads=4,
-            frontend_type="morlet_per_sensor", d_z=24,
+            frontend_type="morlet_per_sensor", d_z=32,
             morlet_kernel_size=101,
         )
         model = CRLModel(cfg)
@@ -196,7 +196,7 @@ class TestMorletPerSensorInModel:
 
         cfg = CRLConfig(
             d_model=32, n_layers=1, n_heads=4,
-            frontend_type="morlet_per_sensor", d_z=24,
+            frontend_type="morlet_per_sensor", d_z=32,
             morlet_kernel_size=101,
         )
         model = CRLModel(cfg)
@@ -205,8 +205,8 @@ class TestMorletPerSensorInModel:
         with torch.no_grad():
             _, z_a, _, _ = model.encode("audio",   torch.randn(2, 1, W_a) * 0.01)
             _, z_s, _, _ = model.encode("seismic", torch.randn(2, 1, W_s) * 0.01)
-        assert z_a.shape == (2, 24)
-        assert z_s.shape == (2, 24)
+        assert z_a.shape == (2, 32)
+        assert z_s.shape == (2, 32)
 
     def test_missing_params_raises(self):
         from crl_vehicle.config import CRLConfig
@@ -267,7 +267,7 @@ class TestMorletPerSensorDerivation:
 
         cfg = CRLConfig(
             d_model=16, n_layers=1, n_heads=4,
-            frontend_type="morlet_per_sensor", d_z=24,
+            frontend_type="morlet_per_sensor", d_z=32,
         )
         # Single-sensor config: only the sensor under test in the params dict.
         cfg.morlet_per_sensor_params = {
@@ -299,7 +299,7 @@ class TestMorletPerSensorDerivation:
 
         cfg = CRLConfig(
             d_model=16, n_layers=1, n_heads=4,
-            frontend_type="multiscale", fused_seq_len=16, d_z=24,
+            frontend_type="multiscale", fused_seq_len=16, d_z=32,
         )
         model = CRLModel(cfg)
         assert model._morlet_derived_params == {}
@@ -335,7 +335,7 @@ class TestMorletFusedInModel:
         from crl_vehicle.config import CRLConfig
         return CRLConfig(
             d_model=d_model, n_layers=1, n_heads=4,
-            frontend_type="morlet_fused", fused_seq_len=16, d_z=24,
+            frontend_type="morlet_fused", fused_seq_len=16, d_z=32,
         )
 
     def test_model_constructs_with_fused_topology(self):
@@ -370,7 +370,7 @@ class TestMorletFusedInModel:
         assert features.ndim == 3
         assert features.shape[0] == 2
         assert features.shape[2] == 2 * cfg.fused_seq_len
-        assert z.shape == (2, 24)
+        assert z.shape == (2, 32)
         assert features.isfinite().all()
         assert z.isfinite().all()
 
@@ -519,7 +519,7 @@ class TestMorletLearnableInModel:
         from crl_vehicle.config import CRLConfig
         kwargs = dict(
             d_model=32, n_layers=1, n_heads=4,
-            frontend_type="morlet_learnable", d_z=24,
+            frontend_type="morlet_learnable", d_z=32,
         )
         kwargs.update(overrides)
         return CRLConfig(**kwargs)
@@ -549,8 +549,8 @@ class TestMorletLearnableInModel:
         with torch.no_grad():
             _, z_a, _, _ = model.encode("audio",   torch.randn(2, 1, W_a) * 0.01)
             _, z_s, _, _ = model.encode("seismic", torch.randn(2, 1, W_s) * 0.01)
-        assert z_a.shape == (2, 24)
-        assert z_s.shape == (2, 24)
+        assert z_a.shape == (2, 32)
+        assert z_s.shape == (2, 32)
 
     def test_w0_param_added_when_learnable(self):
         from training.trainer import CRLModel
@@ -571,7 +571,7 @@ class TestMorletLearnableFusedInModel:
         from crl_vehicle.config import CRLConfig
         kwargs = dict(
             d_model=32, n_layers=1, n_heads=4,
-            frontend_type="morlet_learnable_fused", fused_seq_len=16, d_z=24,
+            frontend_type="morlet_learnable_fused", fused_seq_len=16, d_z=32,
         )
         kwargs.update(overrides)
         return CRLConfig(**kwargs)
@@ -603,7 +603,7 @@ class TestMorletLearnableFusedInModel:
             )
         assert features.shape[0] == 2
         assert features.shape[2] == 2 * cfg.fused_seq_len
-        assert z.shape == (2, 24)
+        assert z.shape == (2, 32)
 
     def test_mismatched_fracs_raises(self):
         from training.trainer import CRLModel
@@ -626,7 +626,7 @@ class TestMorletLearnableFusedInModel:
         from training.trainer import CRLModel
         cfg = CRLConfig(
             d_model=32, n_layers=1, n_heads=4,
-            frontend_type="morlet_fused", fused_seq_len=16, d_z=24,
+            frontend_type="morlet_fused", fused_seq_len=16, d_z=32,
         )
         model = CRLModel(cfg)
         assert model.learnable_morlet_parameters() == []
@@ -641,7 +641,7 @@ class TestLearnableMorletOptimizerGroup:
         from crl_vehicle.config import CRLConfig
         from training.trainer import CRLModel, Trainer
         cfg = CRLConfig(
-            d_model=32, n_layers=1, frontend_type="morlet_learnable", d_z=24,
+            d_model=32, n_layers=1, frontend_type="morlet_learnable", d_z=32,
             lr=1e-3, morlet_learnable_lr_mult=0.1,
         )
         model = CRLModel(cfg)
@@ -658,7 +658,7 @@ class TestLearnableMorletOptimizerGroup:
         from crl_vehicle.config import CRLConfig
         from training.trainer import CRLModel, Trainer
         cfg = CRLConfig(
-            d_model=32, n_layers=1, frontend_type="morlet_learnable", d_z=24,
+            d_model=32, n_layers=1, frontend_type="morlet_learnable", d_z=32,
         )
         model = CRLModel(cfg)
         trainer = Trainer(model, cfg, torch.device("cpu"), tmp_path)
@@ -674,7 +674,7 @@ class TestLearnableMorletOptimizerGroup:
     def test_no_extra_group_for_fixed_variant(self, tmp_path):
         from crl_vehicle.config import CRLConfig
         from training.trainer import CRLModel, Trainer
-        cfg = CRLConfig(d_model=32, n_layers=1, frontend_type="morlet_per_sensor", d_z=24)
+        cfg = CRLConfig(d_model=32, n_layers=1, frontend_type="morlet_per_sensor", d_z=32)
         model = CRLModel(cfg)
         trainer = Trainer(model, cfg, torch.device("cpu"), tmp_path)
         names = [g.get("name", "") for g in trainer.optimizer.param_groups]

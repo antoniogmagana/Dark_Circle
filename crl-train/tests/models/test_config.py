@@ -11,7 +11,7 @@ def test_modality_config_fields():
 
 def test_crlconfig_defaults():
     cfg = CRLConfig()
-    assert cfg.d_z == 24
+    assert cfg.d_z == 32
     assert cfg.frontend_type == "multiscale"
     assert cfg.fused_seq_len == 32
     assert cfg.d_model == 64

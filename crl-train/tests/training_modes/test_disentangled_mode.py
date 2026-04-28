@@ -53,7 +53,7 @@ def _pair_batch(B=4, n_partners=2, audio_W=16000, seismic_W=200,
 def cfg_ms():
     return CRLConfig(
         d_model=32, n_layers=1, n_heads=4,
-        frontend_type="multiscale", fused_seq_len=16, d_z=24,
+        frontend_type="multiscale", fused_seq_len=16, d_z=32,
         training_mode="disentangled", d_signal=12,
         lambda_align=1.0, lambda_stab=0.1, lambda_interv_inv=1.0,
     )
@@ -63,7 +63,7 @@ def cfg_ms():
 def cfg_per_sensor():
     return CRLConfig(
         d_model=32, n_layers=1, n_heads=4,
-        frontend_type="morlet_per_sensor", fused_seq_len=16, d_z=24,
+        frontend_type="morlet_per_sensor", fused_seq_len=16, d_z=32,
         training_mode="disentangled", d_signal=12,
         lambda_align=1.0, lambda_stab=0.1, lambda_interv_inv=1.0,
     )
@@ -77,7 +77,7 @@ def test_factory_dispatches_to_disentangled(cfg_ms):
     mode = build_training_mode(cfg_ms)
     assert isinstance(mode, DisentangledVAETrainingMode)
     assert mode.latent.d_signal == 12
-    assert mode.latent.d_env == 12
+    assert mode.latent.d_env == 20
 
 
 def test_factory_rejects_non_standard_prior():
@@ -171,7 +171,7 @@ def test_forward_pair_per_sensor_grad_flows(cfg_per_sensor):
 # ---------------------------------------------------------------------------
 
 def test_should_save_checkpoint_dual_metric():
-    cfg = CRLConfig(training_mode="disentangled", d_z=24, d_signal=12)
+    cfg = CRLConfig(training_mode="disentangled", d_z=32, d_signal=12)
     mode = build_training_mode(cfg)
     state = CheckpointState()
 

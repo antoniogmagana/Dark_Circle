@@ -2,7 +2,7 @@
 """
 compare_runs.py — leaderboard of completed CRL runs.
 
-Walks saved_crl/oneshot/ (or --root), reads each run's meta.json +
+Walks saved_crl/runs/ (or --root) recursively, reads each run's meta.json +
 crl/crl_metrics.csv + downstream/<probe>/downstream_metrics.csv +
 eval/<probe>/<split>/eval_report.json, and emits a sorted leaderboard
 as both CSV and markdown.
@@ -167,7 +167,7 @@ def render_markdown(rows: list[dict], title: str) -> str:
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--root",    default="saved_crl/oneshot", type=Path)
+    p.add_argument("--root",    default="saved_crl/runs", type=Path)
     p.add_argument("--out",     default="saved_crl/analysis", type=Path)
     p.add_argument("--filter",  action="append", default=[], metavar="key=val",
                    help="Filter runs by config field (repeatable).")

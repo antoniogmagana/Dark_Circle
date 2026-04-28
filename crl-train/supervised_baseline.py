@@ -19,11 +19,11 @@ Usage
     python supervised_baseline.py \
         --frontend multiscale \
         --use-id-split --id-root ../data_files/parsed/ \
-        --epochs 30 --out-dir saved_crl/supervised_multiscale
+        --epochs 30 --out-dir saved_crl/runs/supervised/id_split/multiscale/
 
     # File-split parity with run_full_diagnostic defaults:
     python supervised_baseline.py --frontend multiscale --epochs 30 \
-        --out-dir saved_crl/supervised_filesplit
+        --out-dir saved_crl/runs/supervised/file_split/multiscale/
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data-dir",   default="../data_files/parsed/train/")
     p.add_argument("--val-dir",    default="../data_files/parsed/val/")
     p.add_argument("--test-dir",   default="../data_files/parsed/test/")
-    p.add_argument("--cache-dir",  default="./saved_crl/cache")
+    p.add_argument("--cache-dir",  default="./saved_crl/caches/waveform")
     p.add_argument("--out-dir",    required=True)
     p.add_argument("--use-id-split", action="store_true")
     p.add_argument("--id-root",    default="../data_files/parsed/")
@@ -159,7 +159,7 @@ def make_dataset(args, cfg, role: str, parquet_dir: str, is_train: bool) -> Sens
         return SensorDataset(
             parquet_dir, cfg, is_train=is_train, cache_dir=cache_dir,
             use_id_split=True, role=role,
-            id_root=args.id_root, id_cache_dir=Path("saved_crl/id_cache"),
+            id_root=args.id_root, id_cache_dir=Path("saved_crl/caches/id_split"),
         )
     return SensorDataset(parquet_dir, cfg, is_train=is_train, cache_dir=cache_dir)
 

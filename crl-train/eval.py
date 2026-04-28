@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--save-dir",   required=True,
                    help="Run directory containing meta.json and downstream_best.pth")
     p.add_argument("--test-dir",   default="../data_files/parsed/test/")
-    p.add_argument("--cache-dir",  default="./saved_crl/cache")
+    p.add_argument("--cache-dir",  default="./saved_crl/caches/waveform")
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--num-workers", type=int, default=8)
     p.add_argument("--out-dir",    default=None,

@@ -60,7 +60,7 @@ Post-hoc comparison of completed runs:
 - `plot_run.py` — per-run diagnostic plots (training curves, beta, Morlet freq drift, downstream)
 - `plot_aggregate.py` — cross-run overlay + bar + scatter
 
-All read from `saved_crl/oneshot/*/` and write to `saved_crl/analysis/` by default.
+All read recursively from `saved_crl/runs/` and write to `saved_crl/analysis/` by default.
 
 ---
 
@@ -83,7 +83,20 @@ crl-train/
 ├── configs/
 │   └── sweeps/                  # YAML sweep specs
 ├── tests/                       # 354 tests mirror the module tree
-├── saved_crl/                   # run outputs (not docs; see analysis scripts)
+├── saved_crl/                   # run outputs (see analysis scripts)
+│   ├── runs/                    # canonical: <frontend>/<training_mode>/<run-id>/{crl,downstream,eval}/
+│   │   ├── multiscale/
+│   │   ├── morlet_per_sensor/
+│   │   ├── morlet_fused/
+│   │   ├── morlet_learnable/
+│   │   ├── morlet/
+│   │   ├── supervised/          # non-CRL baselines: id_split/, file_split/
+│   │   └── _archive/            # smoke tests, sweeps, old-layout dirs
+│   ├── caches/
+│   │   ├── waveform/            # SensorDataset feature cache
+│   │   └── id_split/            # ID-split manifest cache
+│   ├── analysis/                # compare_runs.py / plot_aggregate.py outputs
+│   └── slides-figs/             # session figures, performance tables, notes
 │
 ├── train.py                     # single-run CLI
 ├── run_full_diagnostic.py       # CRL + downstream + cross-dataset eval in one shot
@@ -136,7 +149,7 @@ python plot_aggregate.py
 
 | Field | Default | Role |
 |---|---|---|
-| `d_z` | 24 | Latent dim; must exceed `D_CAUSAL = 19` to leave a free subspace |
+| `d_z` | 32 | Latent dim; must exceed `D_CAUSAL = 25` to leave a free subspace |
 | `d_model` | 64 | Transformer hidden size + frontend output channels |
 | `n_layers` / `n_heads` | 2 / 4 | Transformer shape |
 | `frontend_type` | `"multiscale"` | See frontend variants above |
@@ -150,6 +163,8 @@ python plot_aggregate.py
 | `batch_size`, `lr`, `wd` | 128, 3e-4, 1e-4 | Standard optimization hyperparams |
 | `early_stop_patience` | 25 | Epochs without val improvement before stopping |
 | `kl_floor`, `kl_target`, `beta_step` | 0.01, 0.5, 0.02 | Adaptive-β schedule |
+| `use_focal_type` | `False` | When `True`, replace type CE with `(1 - p_t)^γ · weighted_CE` in pretraining aux_type and downstream probe. Stacks on existing `type_class_weights`; presence BCE unaffected |
+| `focal_type_gamma` | 2.0 | Focal exponent γ. Ignored unless `use_focal_type=True` |
 
 Per-sensor Morlet knobs live in `morlet_per_sensor_params`:
 
@@ -170,7 +185,7 @@ Per-sensor Morlet knobs live in `morlet_per_sensor_params`:
 
 ## Run outputs
 
-Each run writes to a `save_dir` (default: `saved_crl/<frontend>/<timestamp>/`):
+Each run writes to a `save_dir` (default: `saved_crl/runs/<frontend>/<training_mode>/<timestamp>/`):
 
 ```
 <save_dir>/

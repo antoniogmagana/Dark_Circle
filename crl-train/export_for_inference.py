@@ -21,7 +21,7 @@ Output layout (in --out-dir):
     meta.json
 
 CLI:
-    python export_for_inference.py --save-dir saved_crl/id_split/<run> \\
+    python export_for_inference.py --save-dir saved_crl/runs/<frontend>/<mode>/<run> \\
         --out-dir /path/to/model/folder
 """
 from __future__ import annotations
@@ -385,8 +385,10 @@ class TypeOnZ(nn.Module):
 def resolve_type_slice(probe_mode: str, cfg: CRLConfig) -> tuple[int, int]:
     """Return (start, end) indices into z for the type head's input."""
     if probe_mode == "linear_ztype" or probe_mode == "mlp_ztype":
-        # CausalLatentSpace: pres=[0:4], type=[4:10]
-        return 4, 10
+        # CausalLatentSpace type slice = [D_PRES : D_PRES + D_TYPE].
+        from crl_vehicle.models.latent import CausalLatentSpace
+        start = CausalLatentSpace.D_PRES
+        return start, start + CausalLatentSpace.D_TYPE
     if probe_mode == "linear_fullz":
         return 0, cfg.d_z
     if probe_mode == "linear_signal" or probe_mode == "mlp_signal":

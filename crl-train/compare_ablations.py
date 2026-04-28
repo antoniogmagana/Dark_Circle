@@ -126,7 +126,7 @@ def render_report(
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--root", default="saved_crl/oneshot", type=Path)
+    p.add_argument("--root", default="saved_crl/runs", type=Path)
     p.add_argument("--out",  default="saved_crl/analysis/ablations.md", type=Path)
     p.add_argument("--filter", action="append", default=[], metavar="key=val",
                    help="Filter runs by config field before pairing (repeatable).")

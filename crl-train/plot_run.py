@@ -11,8 +11,8 @@ Generates up to four PNG+PDF figures per run:
 
 Usage
 -----
-    python plot_run.py saved_crl/oneshot/2026-04-24_01-39-26
-    python plot_run.py saved_crl/oneshot/<run> --out /tmp/plots
+    python plot_run.py saved_crl/runs/multiscale/vae/v3_lowfreq
+    python plot_run.py saved_crl/runs/multiscale/vae/v3_lowfreq --out /tmp/plots
 """
 from __future__ import annotations
 
@@ -145,7 +145,7 @@ def _save(fig, out_stem: Path) -> None:
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("run_dir", type=Path,
-                   help="Path to a single run dir under saved_crl/oneshot/")
+                   help="Path to a single run dir under saved_crl/runs/")
     p.add_argument("--out", type=Path, default=None,
                    help="Output dir. Default: saved_crl/analysis/plots/<run_name>/")
     return p.parse_args()

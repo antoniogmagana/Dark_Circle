@@ -56,10 +56,10 @@ Each init method:
 
 Every forward yields `z` from the encoder, then `model.latent.split(z)` partitions it into:
 - `z_pres` (D_PRES=4) → presence head + aux presence head
-- `z_type` (D_TYPE=6) → type head + aux type head
+- `z_type` (D_TYPE=12) → type head + aux type head
 - `z_prox` (D_PROX=3) → proximity head
 - `z_env` (D_ENV=6) → `UnknownInterventionClassifier`
-- `z_free` (d_z − 19) → unstructured nuisance, no supervision
+- `z_free` (d_z − 25) → unstructured nuisance, no supervision
 
 ## `Trainer`
 
@@ -125,6 +125,8 @@ At training end: saves `crl_final.pth` and writes `crl_checkpoint_summary.json` 
 4. Save `downstream_best.pth` by min `val_loss`.
 
 The class weighting (`pres_pos_weight`, `type_class_weights`) is computed once from the training set via `compute_class_weights(train_ds)` — uniform effective prior after reweighting. This is why the `probe/recalibration.py` log-prior shift assumes `p_train = uniform`.
+
+When `cfg.use_focal_type=True`, the type head's loss switches to `focal_cross_entropy(weight=type_class_weights, gamma=cfg.focal_type_gamma)` — the focal `(1-p_t)^γ` modulator stacks on top of the inverse-frequency weights, so easy minority-class samples are still up-weighted but hard samples get extra emphasis. Presence BCE is unaffected. The same flag also routes pretraining `aux_type` through focal CE (without class weights — pretraining never used them) so the encoder representation gets the same incentive.
 
 ### Two-stage mechanics
 

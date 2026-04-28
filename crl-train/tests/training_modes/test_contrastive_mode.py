@@ -53,7 +53,7 @@ def _pair_batch(B=4, n_partners=4, audio_W=16000, seismic_W=100,
 def cfg_ms():
     return CRLConfig(
         d_model=32, n_layers=1, n_heads=4,
-        frontend_type="multiscale", fused_seq_len=16, d_z=24,
+        frontend_type="multiscale", fused_seq_len=16, d_z=32,
         training_mode="contrastive",
         contrastive_d_proj=32, contrastive_temperature=0.1,
     )
@@ -63,7 +63,7 @@ def cfg_ms():
 def cfg_morlet():
     return CRLConfig(
         d_model=32, n_layers=1, n_heads=4,
-        frontend_type="morlet", d_z=24,
+        frontend_type="morlet", d_z=32,
         training_mode="contrastive",
         contrastive_d_proj=32, contrastive_temperature=0.1,
     )
@@ -73,7 +73,7 @@ def cfg_morlet():
 def cfg_morlet_fused():
     return CRLConfig(
         d_model=32, n_layers=1, n_heads=4,
-        frontend_type="morlet_fused", fused_seq_len=16, d_z=24,
+        frontend_type="morlet_fused", fused_seq_len=16, d_z=32,
         training_mode="contrastive",
         contrastive_d_proj=32, contrastive_temperature=0.1,
     )
@@ -83,7 +83,7 @@ def cfg_morlet_fused():
 def cfg_morlet_learnable():
     return CRLConfig(
         d_model=32, n_layers=1, n_heads=4,
-        frontend_type="morlet_learnable", d_z=24,
+        frontend_type="morlet_learnable", d_z=32,
         training_mode="contrastive",
         contrastive_d_proj=32, contrastive_temperature=0.1,
     )
@@ -93,7 +93,7 @@ def cfg_morlet_learnable():
 def cfg_morlet_learnable_fused():
     return CRLConfig(
         d_model=32, n_layers=1, n_heads=4,
-        frontend_type="morlet_learnable_fused", fused_seq_len=16, d_z=24,
+        frontend_type="morlet_learnable_fused", fused_seq_len=16, d_z=32,
         training_mode="contrastive",
         contrastive_d_proj=32, contrastive_temperature=0.1,
     )

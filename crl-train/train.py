@@ -53,9 +53,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--training-mode", choices=["vae", "contrastive", "disentangled"], default="vae",
                    help="'vae' = ELBO + aux + interv (default). 'contrastive' = "
                         "NT-Xent over stratified partners during CRL.")
+    p.add_argument("--use-focal-type", action="store_true",
+                   help="Replace type CE with focal CE in pretraining aux_type and "
+                        "downstream probe. Stacks on existing class weights.")
+    p.add_argument("--focal-type-gamma", type=float, default=2.0,
+                   help="Focal CE gamma for the type loss (default 2.0; ignored "
+                        "unless --use-focal-type is set).")
     p.add_argument("--steps-per-epoch", type=int, default=None,
                    help="Limit batches per epoch (for smoke tests)")
-    p.add_argument("--cache-dir",   default="./saved_crl/cache")
+    p.add_argument("--cache-dir",   default="./saved_crl/caches/waveform")
     # Downstream fine-tuning options
     p.add_argument("--finetune-top-n", type=int, default=0,
                    help="Unfreeze top N encoder transformer layers during downstream "
@@ -88,12 +94,12 @@ def parse_args() -> argparse.Namespace:
                         "converged stage-1 run (morlet_per_sensor or "
                         "morlet_fused), upgrade to the requested learnable "
                         "variant, and fine-tune. Pass 'auto' to search "
-                        "saved_crl/oneshot/ for the most recent compatible "
+                        "saved_crl/runs/ for the most recent compatible "
                         "run. Only valid with --frontend morlet_learnable or "
                         "morlet_learnable_fused.")
-    p.add_argument("--init-search-root", default="saved_crl/oneshot",
+    p.add_argument("--init-search-root", default="saved_crl/runs",
                    help="Root dir searched by --init-from-run=auto. Default: "
-                        "saved_crl/oneshot.")
+                        "saved_crl/runs.")
     return p.parse_args()
 
 
@@ -109,6 +115,8 @@ def main() -> None:
         n_epochs=args.crl_epochs,
         morlet_learnable_w0=args.morlet_learnable_w0,
         morlet_learnable_lr_mult=args.morlet_learnable_lr_mult,
+        use_focal_type=args.use_focal_type,
+        focal_type_gamma=args.focal_type_gamma,
     )
 
     if args.config_overrides_json is not None:
@@ -152,7 +160,7 @@ def main() -> None:
     if args.use_id_split:
         print(f"INFO: --use-id-split is set; --data-dir and --val-dir are ignored, "
               f"reading splits from DATASET_VEHICLE_MAP under id_root={args.id_root}")
-        id_cache_dir = Path("saved_crl/id_cache")
+        id_cache_dir = Path("saved_crl/caches/id_split")
         train_ds = SensorDataset(
             args.data_dir, cfg, is_train=True, cache_dir=cache_dir,
             use_id_split=True, role="train",

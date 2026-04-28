@@ -59,7 +59,7 @@ class ModalityConfig:
 @dataclass
 class CRLConfig:
     # Latent space
-    d_z: int = 24
+    d_z: int = 32
 
     # Encoder/decoder
     d_model: int = 64
@@ -175,6 +175,13 @@ class CRLConfig:
     lambda_aux_pres: float = 1.0
     lambda_aux_type: float = 1.0
     lambda_aux_prox: float = 0.1
+
+    # Focal cross-entropy on the type loss only (pres BCE unaffected). When
+    # enabled, the loss becomes (1 - p_t)^gamma * weighted_CE — stacked on
+    # top of inverse-frequency type_class_weights, not a replacement.
+    # Default gamma=0 recovers vanilla F.cross_entropy(weight=tcw) exactly.
+    use_focal_type: bool = False
+    focal_type_gamma: float = 2.0
 
     # Adaptive beta schedule
     beta_step: float = 0.02

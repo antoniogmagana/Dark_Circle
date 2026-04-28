@@ -4,13 +4,13 @@ import torch.nn as nn
 
 
 class CausalLatentSpace(nn.Module):
-    D_PRES = 4   # dims 0-3
-    D_TYPE = 6   # dims 4-9
-    D_PROX = 3   # dims 10-12
-    D_ENV  = 6   # dims 13-18
-    D_CAUSAL = D_PRES + D_TYPE + D_PROX + D_ENV  # = 19
+    D_PRES = 4    # dims 0-3
+    D_TYPE = 12   # dims 4-15
+    D_PROX = 3    # dims 16-18
+    D_ENV  = 6    # dims 19-24
+    D_CAUSAL = D_PRES + D_TYPE + D_PROX + D_ENV  # = 25
 
-    def __init__(self, d_z: int = 24) -> None:
+    def __init__(self, d_z: int = 32) -> None:
         super().__init__()
         if d_z <= self.D_CAUSAL:
             raise ValueError(
@@ -19,12 +19,16 @@ class CausalLatentSpace(nn.Module):
             )
         self.d_z = d_z
         self.d_free = d_z - self.D_CAUSAL
+        end_pres = self.D_PRES
+        end_type = end_pres + self.D_TYPE
+        end_prox = end_type + self.D_PROX
+        end_env  = end_prox + self.D_ENV
         self._slices = {
-            "pres": slice(0, 4),
-            "type": slice(4, 10),
-            "prox": slice(10, 13),
-            "env":  slice(13, 19),
-            "free": slice(19, d_z),
+            "pres": slice(0, end_pres),
+            "type": slice(end_pres, end_type),
+            "prox": slice(end_type, end_prox),
+            "env":  slice(end_prox, end_env),
+            "free": slice(end_env, d_z),
         }
 
     def split(

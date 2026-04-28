@@ -6,8 +6,9 @@ Pure functions, no state. Training modes call these directly.
 
 | File | Contents |
 |---|---|
-| `crl_loss.py` | `reconstruction_loss`, `kl_divergence`, `intervention_matching_loss` |
+| `crl_loss.py` | `reconstruction_loss`, `kl_divergence`, `intervention_matching_loss`, `focal_cross_entropy` |
 | `contrastive.py` | `nt_xent_loss` |
+| `disentanglement.py` | `cross_modal_alignment_loss`, `temporal_stability_loss`, `intervention_invariance_loss` |
 
 ## `crl_loss.py` — VAE losses
 
@@ -23,6 +24,11 @@ KL[q(z|x) ∥ N(0, I)], summed over latent dims and meaned over batch, scaled by
 Binary cross-entropy for the 2-bit intervention-matching prediction (presence-changed, type-changed). Called from `vae_mode.py` with logits from `UnknownInterventionClassifier(z_env_t, z_env_tn)` and targets from `label_change_target(det_t, det_tn, type_t, type_tn)`.
 
 This is the CITRIS piece: rather than learning which latent factor causes which label, we train an auxiliary classifier to identify *which latent block changed* between paired windows. The gradient flows back through the encoder, pressuring the factorization to be temporally coherent in the right blocks.
+
+### `focal_cross_entropy(logits, target, weight=None, gamma=2.0) → scalar`
+Focal cross-entropy: `(1 - p_t)^γ · weighted_CE`, mean-reduced (or weight-normalized when `weight` is given). Easy confident-correct samples (p_t near 1) contribute less; uncertain samples (p_t near 1/n_classes) contribute more. With `gamma=0` and a `weight` argument it reduces *exactly* to `F.cross_entropy(weight=weight)`, so it's a strict superset of weighted CE.
+
+Stacked, not substituted: when `cfg.use_focal_type=True`, the downstream type loss becomes `focal_cross_entropy(weight=type_class_weights, gamma=cfg.focal_type_gamma)` — the focal modulator multiplies the inverse-frequency-weighted CE rather than replacing it. So minority classes still get extra gradient *and* hard examples within each class get extra gradient. The pretraining `aux_type` site uses `weight=None` (matching its existing unweighted behavior) and only adds the focal modulator.
 
 ## `contrastive.py` — NT-Xent
 

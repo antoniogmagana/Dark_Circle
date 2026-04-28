@@ -6,7 +6,11 @@ import torch.nn.functional as F
 
 from crl_vehicle.data.dataset import STRATUM_CONSEC
 from crl_vehicle.data.transforms import apply_intervention_batch
-from crl_vehicle.losses.crl_loss import kl_divergence, reconstruction_loss
+from crl_vehicle.losses.crl_loss import (
+    focal_cross_entropy,
+    kl_divergence,
+    reconstruction_loss,
+)
 from crl_vehicle.losses.disentanglement import (
     cross_modal_alignment_loss,
     intervention_invariance_loss,
@@ -127,7 +131,13 @@ class DisentangledVAETrainingMode(TrainingMode):
         if valid_type.any():
             type_logit_valid  = self.type_head(mu_signal[valid_type])
             type_labels_valid = type_t[valid_type].long()
-            aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
+            if cfg.use_focal_type:
+                aux_type = focal_cross_entropy(
+                    type_logit_valid, type_labels_valid,
+                    weight=None, gamma=cfg.focal_type_gamma,
+                )
+            else:
+                aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
 
         # Temporal stability on env via consecutive partner.
         stab = torch.tensor(0.0, device=dev)
@@ -246,7 +256,13 @@ class DisentangledVAETrainingMode(TrainingMode):
         if valid_type_mask.any():
             type_logit_valid  = self.type_head(mu_signal_avg[valid_type_mask])
             type_labels_valid = type_valid[valid_type_mask].long()
-            aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
+            if cfg.use_focal_type:
+                aux_type = focal_cross_entropy(
+                    type_logit_valid, type_labels_valid,
+                    weight=None, gamma=cfg.focal_type_gamma,
+                )
+            else:
+                aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
 
         # Cross-modal alignment: only if BOTH audio and seismic are present
         # for at least one sample. Compare on the joint-availability subset.

@@ -23,7 +23,7 @@ Usage
 -----
     # Default: ID-split test set, the strongest run we have
     python per_vehicle_confusion.py \
-        --downstream-dir saved_crl/id_split/multiscale_run1_diag/downstream/linear_fullz__crl_best_aux_type \
+        --downstream-dir saved_crl/runs/multiscale/vae/v1_diag/downstream/linear_fullz__crl_best_aux_type \
         --use-id-split --id-root ../data_files/parsed/
 
 Caveats
@@ -66,7 +66,7 @@ def parse_args() -> argparse.Namespace:
                    help="Path to a downstream/<probe>__<ckpt>/ directory "
                         "containing meta.json + downstream_best.pth.")
     p.add_argument("--test-dir",   default="../data_files/parsed/test/")
-    p.add_argument("--cache-dir",  default="./saved_crl/cache")
+    p.add_argument("--cache-dir",  default="./saved_crl/caches/waveform")
     p.add_argument("--out-dir",    default=None,
                    help="Output dir (defaults to --downstream-dir/per_vehicle/)")
     p.add_argument("--use-id-split", action="store_true",
@@ -108,7 +108,7 @@ def make_test_dataset(args, cfg: CRLConfig) -> SensorDataset:
         return SensorDataset(
             args.test_dir, cfg, is_train=False, cache_dir=cache_dir,
             use_id_split=True, role="test",
-            id_root=args.id_root, id_cache_dir=Path("saved_crl/id_cache"),
+            id_root=args.id_root, id_cache_dir=Path("saved_crl/caches/id_split"),
         )
     return SensorDataset(args.test_dir, cfg, is_train=False, cache_dir=cache_dir)
 

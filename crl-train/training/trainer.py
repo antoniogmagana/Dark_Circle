@@ -22,6 +22,7 @@ from crl_vehicle.models.heads import (
     LinearPresenceHead, LinearTypeHead, LinearProximityHead,
     MLPTypeHead, FullZTypeHead,
 )
+from crl_vehicle.losses.crl_loss import focal_cross_entropy
 from crl_vehicle.training_modes import (
     CheckpointState, TrainingMode, build_training_mode,
 )
@@ -1306,6 +1307,7 @@ class Trainer:
 
         ppw = self._pres_pos_weight
         tcw = self._type_class_weights
+        cfg = model.cfg
 
         use_fullz  = model.probe_mode == "linear_fullz"
         use_signal = model.probe_mode in ("linear_signal", "mlp_signal")
@@ -1317,6 +1319,13 @@ class Trainer:
             if use_signal:
                 return z_full[mask][..., :d_signal]
             return z_type_block[mask]
+
+        def _type_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            if cfg.use_focal_type:
+                return focal_cross_entropy(
+                    logits, target, weight=tcw, gamma=cfg.focal_type_gamma,
+                )
+            return torch.nn.functional.cross_entropy(logits, target, weight=tcw)
 
         if model.is_fused_frontend():
             avail = batch["audio_avail"].bool() & batch["seismic_avail"].bool()
@@ -1336,8 +1345,7 @@ class Trainer:
                 if valid.any():
                     z_for_type = _select_type_slice(z, z_type, valid)
                     type_logit = model.type_heads["fused"](z_for_type)
-                    total = total + torch.nn.functional.cross_entropy(
-                        type_logit, vtype[valid], weight=tcw)
+                    total = total + _type_loss(type_logit, vtype[valid])
                     type_logits_list.append(type_logit.detach())
                     type_labels_list.append(vtype[valid])
                 n += 1
@@ -1360,8 +1368,7 @@ class Trainer:
                 if valid.any():
                     z_for_type = _select_type_slice(z, z_type, valid)
                     type_logit = model.type_heads[sensor](z_for_type)
-                    total = total + torch.nn.functional.cross_entropy(
-                        type_logit, vtype[valid], weight=tcw)
+                    total = total + _type_loss(type_logit, vtype[valid])
                     type_logits_list.append(type_logit.detach())
                     type_labels_list.append(vtype[valid])
                 n += 1

@@ -9,8 +9,9 @@ Each `TrainingMode` encapsulates one coherent CRL training program (loss, β sch
 | `base.py` | `TrainingMode(nn.Module, ABC)` + `CheckpointState` dataclass |
 | `vae_mode.py` | `VAETrainingMode` — ELBO + β schedule + intervention matching + aux heads |
 | `contrastive_mode.py` | `ContrastiveTrainingMode` — NT-Xent over stratified partners |
+| `disentangled_mode.py` | `DisentangledVAETrainingMode` — ELBO over a 2-block (signal/env) `SplitLatentSpace` with cross-modal alignment, env temporal stability, and signal intervention-invariance losses. Aux heads read the full d_signal block (no D_PRES/D_TYPE sub-slicing). Same dual-checkpoint shape as `VAETrainingMode`. |
 | `factory.py` | `build_training_mode(config)` — picks the right mode + prior |
-| `__init__.py` | Re-exports: `TrainingMode`, `CheckpointState`, `VAETrainingMode`, `ContrastiveTrainingMode`, `build_training_mode` |
+| `__init__.py` | Re-exports: `TrainingMode`, `CheckpointState`, `VAETrainingMode`, `ContrastiveTrainingMode`, `DisentangledVAETrainingMode`, `build_training_mode` |
 
 ## The interface
 
@@ -47,6 +48,7 @@ Classical CRL. Implements:
 
 - **Forward dispatch** by frontend topology: `model.is_fused_frontend()` → `_forward_pair_fused` (shared encoder, one head key `"fused"`) vs `_forward_pair_per_sensor` (per-sensor encoders, one head key per sensor).
 - **Loss** = `recon + β·kl + λ_interv·interv + λ_aux_pres·aux_pres + λ_aux_type·aux_type`.
+  - `aux_type` is `F.cross_entropy(unweighted)` by default, or `focal_cross_entropy(weight=None, gamma=cfg.focal_type_gamma)` when `cfg.use_focal_type=True`. `aux_pres` is BCE and not affected by the focal flag.
 - **KL computation** via the injected `Prior`. Y = `stack(det_t, type_t)` plumbed through even to `StandardPrior` (which ignores it).
 - **Adaptive β schedule** in `update_beta`:
   - If raw_kl below `config.kl_floor` → β decreases (prior collapsing).

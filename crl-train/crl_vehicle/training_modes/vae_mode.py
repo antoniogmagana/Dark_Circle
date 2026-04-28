@@ -6,6 +6,7 @@ import torch.nn.functional as F
 
 from crl_vehicle.data.transforms import apply_intervention_batch
 from crl_vehicle.losses.crl_loss import (
+    focal_cross_entropy,
     intervention_matching_loss,
     kl_divergence,
     reconstruction_loss,
@@ -128,7 +129,13 @@ class VAETrainingMode(TrainingMode):
         if valid_type.any():
             aux_type_logit_valid = model.aux_type_heads["fused"](z_type[valid_type])
             type_labels_valid    = type_t[valid_type].long()
-            aux_type = F.cross_entropy(aux_type_logit_valid, type_labels_valid)
+            if cfg.use_focal_type:
+                aux_type = focal_cross_entropy(
+                    aux_type_logit_valid, type_labels_valid,
+                    weight=None, gamma=cfg.focal_type_gamma,
+                )
+            else:
+                aux_type = F.cross_entropy(aux_type_logit_valid, type_labels_valid)
 
         n_partners = batch["n_partners"]
         interv = torch.tensor(0.0, device=dev)
@@ -204,7 +211,13 @@ class VAETrainingMode(TrainingMode):
             if valid_type.any():
                 type_logit_valid  = model.aux_type_heads[sensor](z_type[valid_type])
                 type_labels_valid = type_t[valid_type].long()
-                aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
+                if cfg.use_focal_type:
+                    aux_type = focal_cross_entropy(
+                        type_logit_valid, type_labels_valid,
+                        weight=None, gamma=cfg.focal_type_gamma,
+                    )
+                else:
+                    aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
                 aux_type_logits_all.append(type_logit_valid.detach().cpu())
                 aux_type_labels_all.append(type_labels_valid.detach().cpu())
 
