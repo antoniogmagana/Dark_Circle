@@ -243,7 +243,7 @@ def run_inference(
     type_labels: list[torch.Tensor] = []
     probe_mode = getattr(model, "probe_mode", "linear_ztype")
     use_fullz  = probe_mode == "linear_fullz"
-    use_signal = probe_mode == "linear_signal"
+    use_signal = probe_mode in ("linear_signal", "mlp_signal")
     d_signal   = model.cfg.d_signal
 
     def _select_type_slice(z_full, z_type_block, mask):

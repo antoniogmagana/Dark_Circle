@@ -61,11 +61,15 @@ def parse_args() -> argparse.Namespace:
                    help="Unfreeze top N encoder transformer layers during downstream "
                         "(0 = fully frozen backbone, -1 = unfreeze all)")
     p.add_argument("--probe-mode",
-                   choices=["linear_ztype", "mlp_ztype", "linear_fullz", "linear_signal"],
+                   choices=["linear_ztype", "mlp_ztype", "linear_fullz",
+                            "linear_signal", "mlp_signal"],
                    default="linear_ztype",
                    help="Downstream type-head architecture. linear_ztype: Linear(6,4) on "
                         "z_type (default); mlp_ztype: Linear(6,32)-ReLU-Linear(32,4) on "
-                        "z_type; linear_fullz: Linear(d_z,4) on the full latent.")
+                        "z_type; linear_fullz: Linear(d_z,4) on the full latent; "
+                        "linear_signal: Linear(d_signal,4) on z[0:d_signal] (disentangled); "
+                        "mlp_signal: Linear(d_signal,32)-ReLU-Linear(32,4) on z[0:d_signal] "
+                        "(disentangled).")
     p.add_argument("--crl-run-dir", default=None,
                    help="Existing run dir to load crl_best.pth from. When set, --save-dir "
                         "defaults to <crl-run-dir>/probes/<probe-mode>/ so probe artifacts "

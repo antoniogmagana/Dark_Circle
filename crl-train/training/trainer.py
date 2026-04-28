@@ -43,7 +43,10 @@ class CRLModel(nn.Module):
         per-sensor TemporalEncoder → per-sensor FeatureDecoder
     """
 
-    VALID_PROBE_MODES = ("linear_ztype", "mlp_ztype", "linear_fullz", "linear_signal")
+    VALID_PROBE_MODES = (
+        "linear_ztype", "mlp_ztype", "linear_fullz",
+        "linear_signal", "mlp_signal",
+    )
 
     def __init__(
         self,
@@ -119,6 +122,8 @@ class CRLModel(nn.Module):
             # 2-block partition. Sized by config.d_signal so the probe matches
             # the partition that produced the checkpoint.
             return LinearTypeHead(d_in=self.cfg.d_signal)
+        if self.probe_mode == "mlp_signal":
+            return MLPTypeHead(d_in=self.cfg.d_signal)
         raise ValueError(f"Unknown probe_mode: {self.probe_mode!r}")
 
     def is_fused_frontend(self) -> bool:
@@ -1303,7 +1308,7 @@ class Trainer:
         tcw = self._type_class_weights
 
         use_fullz  = model.probe_mode == "linear_fullz"
-        use_signal = model.probe_mode == "linear_signal"
+        use_signal = model.probe_mode in ("linear_signal", "mlp_signal")
         d_signal   = self.model.cfg.d_signal
 
         def _select_type_slice(z_full, z_type_block, mask):

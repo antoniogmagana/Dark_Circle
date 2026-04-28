@@ -62,16 +62,17 @@ from eval import (
 # ---------------------------------------------------------------------------
 
 PROBE_MODES = ("linear_ztype", "mlp_ztype", "linear_fullz")
-PROBE_MODES_DISENTANGLED = ("linear_signal", "linear_fullz")
+PROBE_MODES_DISENTANGLED = ("linear_signal", "mlp_signal", "linear_fullz")
 
 
 def _probe_modes_for(cfg: CRLConfig) -> tuple[str, ...]:
     """Pick the probe set that matches the latent partition the run produced.
 
-    Disentangled runs use linear_signal (z[0:d_signal]) and linear_fullz only —
-    the legacy mlp_ztype/linear_ztype probes slice z[4:10] (CausalLatentSpace.
-    D_TYPE), which is meaningless under the 2-block partition. linear_fullz
-    is the upper bound across all dims and is partition-agnostic."""
+    Disentangled runs use linear_signal / mlp_signal (z[0:d_signal]) and
+    linear_fullz — the legacy mlp_ztype/linear_ztype probes slice z[4:10]
+    (CausalLatentSpace.D_TYPE), which is meaningless under the 2-block
+    partition. linear_fullz is the upper bound across all dims and is
+    partition-agnostic."""
     if cfg.training_mode == "disentangled":
         return PROBE_MODES_DISENTANGLED
     return PROBE_MODES
