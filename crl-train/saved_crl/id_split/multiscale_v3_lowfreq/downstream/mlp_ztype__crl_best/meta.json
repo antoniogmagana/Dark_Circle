@@ -75,5 +75,5 @@
   "probe_mode": "mlp_ztype",
   "ckpt_name": "crl_best.pth",
   "crl_run_dir": "/home/lvc_toolkit/project-files/Dark_Circle/crl-train/saved_crl/id_split/multiscale_v3_lowfreq/crl",
-  "ds_elapsed_min": 18.73
+  "ds_elapsed_min": 17.96
 }

@@ -8,24 +8,24 @@
   ],
   "n_windows": 1575,
   "presence": {
-    "accuracy": 0.6476,
-    "precision": 0.8654,
-    "recall": 0.5734,
-    "specificity": 0.8076,
-    "f1": 0.6898,
-    "balanced_accuracy": 0.6905,
-    "mcc": 0.3561,
-    "tp": 617,
-    "fp": 96,
-    "fn": 459,
-    "tn": 403
+    "accuracy": 0.701,
+    "precision": 0.8426,
+    "recall": 0.6914,
+    "specificity": 0.7214,
+    "f1": 0.7596,
+    "balanced_accuracy": 0.7064,
+    "mcc": 0.387,
+    "tp": 744,
+    "fp": 139,
+    "fn": 332,
+    "tn": 360
   },
   "type": {
-    "accuracy": 0.3978,
-    "macro_f1": 0.2752,
-    "macro_f1_support_only": 0.5504,
-    "macro_precision": 0.4055,
-    "macro_recall": 0.2928,
+    "accuracy": 0.4164,
+    "macro_f1": 0.2933,
+    "macro_f1_support_only": 0.5867,
+    "macro_precision": 0.4158,
+    "macro_recall": 0.2991,
     "per_class": {
       "pedestrian": {
         "precision": 0.0,
@@ -34,9 +34,9 @@
         "support": 0
       },
       "light": {
-        "precision": 1.0,
-        "recall": 0.2084,
-        "f1": 0.345,
+        "precision": 0.9843,
+        "recall": 0.2333,
+        "f1": 0.3771,
         "support": 806
       },
       "medium": {
@@ -46,9 +46,9 @@
         "support": 0
       },
       "heavy": {
-        "precision": 0.622,
+        "precision": 0.6789,
         "recall": 0.963,
-        "f1": 0.7558,
+        "f1": 0.7963,
         "support": 270
       }
     },
@@ -60,10 +60,10 @@
         0
       ],
       [
-        8,
-        168,
-        472,
-        158
+        29,
+        188,
+        466,
+        123
       ],
       [
         0,
@@ -73,8 +73,8 @@
       ],
       [
         0,
-        0,
-        10,
+        3,
+        7,
         260
       ]
     ]

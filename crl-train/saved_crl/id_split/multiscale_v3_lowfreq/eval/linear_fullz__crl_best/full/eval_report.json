@@ -4,76 +4,76 @@
   "ckpt_name": "crl_best.pth",
   "split": "full",
   "include_datasets": null,
-  "n_windows": 91325,
+  "n_windows": 88631,
   "presence": {
-    "accuracy": 0.7996,
-    "precision": 0.8982,
-    "recall": 0.8246,
-    "specificity": 0.7263,
-    "f1": 0.8598,
-    "balanced_accuracy": 0.7755,
-    "mcc": 0.5163,
-    "tp": 56141,
-    "fp": 6361,
-    "fn": 11942,
-    "tn": 16881
+    "accuracy": 0.8096,
+    "precision": 0.8791,
+    "recall": 0.8629,
+    "specificity": 0.6546,
+    "f1": 0.8709,
+    "balanced_accuracy": 0.7588,
+    "mcc": 0.5089,
+    "tp": 56923,
+    "fp": 7830,
+    "fn": 9041,
+    "tn": 14837
   },
   "type": {
-    "accuracy": 0.7218,
-    "macro_f1": 0.5776,
-    "macro_f1_support_only": 0.5776,
-    "macro_precision": 0.6266,
-    "macro_recall": 0.5632,
+    "accuracy": 0.7303,
+    "macro_f1": 0.6005,
+    "macro_f1_support_only": 0.6005,
+    "macro_precision": 0.6203,
+    "macro_recall": 0.59,
     "per_class": {
       "pedestrian": {
-        "precision": 0.5578,
-        "recall": 0.307,
-        "f1": 0.396,
+        "precision": 0.4817,
+        "recall": 0.4191,
+        "f1": 0.4482,
         "support": 6082
       },
       "light": {
-        "precision": 0.546,
-        "recall": 0.373,
-        "f1": 0.4432,
+        "precision": 0.5667,
+        "recall": 0.4105,
+        "f1": 0.4761,
         "support": 5123
       },
       "medium": {
-        "precision": 0.8479,
-        "recall": 0.8125,
-        "f1": 0.8298,
+        "precision": 0.8304,
+        "recall": 0.8266,
+        "f1": 0.8285,
         "support": 40569
       },
       "heavy": {
-        "precision": 0.5546,
-        "recall": 0.7604,
-        "f1": 0.6414,
-        "support": 16309
+        "precision": 0.6025,
+        "recall": 0.704,
+        "f1": 0.6493,
+        "support": 14190
       }
     },
     "confusion_matrix": [
       [
-        1867,
-        366,
-        1265,
-        2584
+        2549,
+        573,
+        1296,
+        1664
       ],
       [
-        66,
-        1911,
-        1604,
-        1542
+        192,
+        2103,
+        2020,
+        808
       ],
       [
-        1280,
-        493,
-        32963,
-        5833
+        2411,
+        506,
+        33534,
+        4118
       ],
       [
-        134,
-        730,
-        3044,
-        12401
+        140,
+        529,
+        3531,
+        9990
       ]
     ]
   }

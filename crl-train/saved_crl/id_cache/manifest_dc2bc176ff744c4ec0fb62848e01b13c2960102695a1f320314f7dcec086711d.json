@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "created_unix": 1777196081,
+  "created_unix": 1777368862,
   "config_window_sizes": {
     "audio": 16000,
     "seismic": 100
@@ -416,86 +416,6 @@
           [
             693,
             1386
-          ]
-        ]
-      }
-    },
-    "focal__tesla2__rs1": {
-      "dataset": "focal",
-      "vehicle": "tesla2",
-      "rs_node": "rs1",
-      "marker": "split",
-      "split_assignments": {
-        "val": [
-          [
-            0,
-            667
-          ]
-        ],
-        "test": [
-          [
-            667,
-            1334
-          ]
-        ]
-      }
-    },
-    "focal__tesla2__rs2": {
-      "dataset": "focal",
-      "vehicle": "tesla2",
-      "rs_node": "rs2",
-      "marker": "split",
-      "split_assignments": {
-        "val": [
-          [
-            0,
-            680
-          ]
-        ],
-        "test": [
-          [
-            680,
-            1360
-          ]
-        ]
-      }
-    },
-    "focal__tesla2__rs3": {
-      "dataset": "focal",
-      "vehicle": "tesla2",
-      "rs_node": "rs3",
-      "marker": "split",
-      "split_assignments": {
-        "val": [
-          [
-            0,
-            686
-          ]
-        ],
-        "test": [
-          [
-            686,
-            1373
-          ]
-        ]
-      }
-    },
-    "focal__tesla2__rs7": {
-      "dataset": "focal",
-      "vehicle": "tesla2",
-      "rs_node": "rs7",
-      "marker": "split",
-      "split_assignments": {
-        "val": [
-          [
-            0,
-            659
-          ]
-        ],
-        "test": [
-          [
-            659,
-            1319
           ]
         ]
       }

@@ -6,76 +6,76 @@
   "include_datasets": [
     "focal"
   ],
-  "n_windows": 32674,
+  "n_windows": 29980,
   "presence": {
-    "accuracy": 0.8012,
-    "precision": 0.9067,
-    "recall": 0.8056,
-    "specificity": 0.7903,
-    "f1": 0.8531,
-    "balanced_accuracy": 0.798,
-    "mcc": 0.5583,
-    "tp": 18863,
-    "fp": 1941,
-    "fn": 4553,
-    "tn": 7317
+    "accuracy": 0.8018,
+    "precision": 0.9048,
+    "recall": 0.8057,
+    "specificity": 0.7921,
+    "f1": 0.8524,
+    "balanced_accuracy": 0.7989,
+    "mcc": 0.5625,
+    "tp": 17160,
+    "fp": 1805,
+    "fn": 4137,
+    "tn": 6878
   },
   "type": {
-    "accuracy": 0.4638,
-    "macro_f1": 0.4636,
-    "macro_f1_support_only": 0.4636,
-    "macro_precision": 0.4861,
-    "macro_recall": 0.484,
+    "accuracy": 0.4513,
+    "macro_f1": 0.4259,
+    "macro_f1_support_only": 0.4259,
+    "macro_precision": 0.4271,
+    "macro_recall": 0.4489,
     "per_class": {
       "pedestrian": {
-        "precision": 0.4828,
-        "recall": 0.4767,
-        "f1": 0.4797,
+        "precision": 0.4718,
+        "recall": 0.5125,
+        "f1": 0.4913,
         "support": 6082
       },
       "light": {
-        "precision": 0.449,
-        "recall": 0.5175,
-        "f1": 0.4808,
+        "precision": 0.4052,
+        "recall": 0.5601,
+        "f1": 0.4702,
         "support": 4317
       },
       "medium": {
-        "precision": 0.7026,
-        "recall": 0.3819,
-        "f1": 0.4949,
+        "precision": 0.6014,
+        "recall": 0.3821,
+        "f1": 0.4673,
         "support": 8771
       },
       "heavy": {
-        "precision": 0.31,
-        "recall": 0.5598,
-        "f1": 0.399,
-        "support": 4246
+        "precision": 0.2301,
+        "recall": 0.3409,
+        "f1": 0.2747,
+        "support": 2127
       }
     },
     "confusion_matrix": [
       [
-        2899,
-        647,
-        411,
-        2125
+        3117,
+        1115,
+        774,
+        1076
       ],
       [
-        194,
-        2234,
-        650,
-        1239
+        236,
+        2418,
+        1071,
+        592
       ],
       [
-        2546,
-        948,
-        3350,
-        1927
+        3047,
+        1615,
+        3351,
+        758
       ],
       [
-        365,
-        1147,
-        357,
-        2377
+        207,
+        819,
+        376,
+        725
       ]
     ]
   }

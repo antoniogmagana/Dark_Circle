@@ -4,76 +4,76 @@
   "ckpt_name": "crl_best_aux_type.pth",
   "split": "full",
   "include_datasets": null,
-  "n_windows": 91325,
+  "n_windows": 88631,
   "presence": {
-    "accuracy": 0.8052,
-    "precision": 0.8921,
-    "recall": 0.8404,
-    "specificity": 0.7021,
-    "f1": 0.8655,
-    "balanced_accuracy": 0.7713,
-    "mcc": 0.5168,
-    "tp": 57217,
-    "fp": 6923,
-    "fn": 10866,
-    "tn": 16319
+    "accuracy": 0.8062,
+    "precision": 0.8862,
+    "recall": 0.8486,
+    "specificity": 0.6827,
+    "f1": 0.867,
+    "balanced_accuracy": 0.7657,
+    "mcc": 0.5123,
+    "tp": 55980,
+    "fp": 7192,
+    "fn": 9984,
+    "tn": 15475
   },
   "type": {
-    "accuracy": 0.7259,
-    "macro_f1": 0.6098,
-    "macro_f1_support_only": 0.6098,
-    "macro_precision": 0.602,
-    "macro_recall": 0.6214,
+    "accuracy": 0.7067,
+    "macro_f1": 0.6038,
+    "macro_f1_support_only": 0.6038,
+    "macro_precision": 0.5865,
+    "macro_recall": 0.6278,
     "per_class": {
       "pedestrian": {
-        "precision": 0.4635,
-        "recall": 0.4844,
-        "f1": 0.4737,
+        "precision": 0.4571,
+        "recall": 0.5122,
+        "f1": 0.4831,
         "support": 6082
       },
       "light": {
-        "precision": 0.4723,
-        "recall": 0.4899,
-        "f1": 0.481,
+        "precision": 0.4444,
+        "recall": 0.5403,
+        "f1": 0.4877,
         "support": 5123
       },
       "medium": {
-        "precision": 0.8779,
-        "recall": 0.7961,
-        "f1": 0.835,
+        "precision": 0.8517,
+        "recall": 0.7595,
+        "f1": 0.8029,
         "support": 40569
       },
       "heavy": {
-        "precision": 0.5945,
-        "recall": 0.7153,
-        "f1": 0.6494,
-        "support": 16309
+        "precision": 0.5926,
+        "recall": 0.6992,
+        "f1": 0.6415,
+        "support": 14190
       }
     },
     "confusion_matrix": [
       [
-        2946,
-        643,
-        408,
-        2085
+        3115,
+        1067,
+        763,
+        1137
       ],
       [
-        241,
-        2510,
-        1015,
-        1357
+        287,
+        2768,
+        1367,
+        701
       ],
       [
-        2772,
-        984,
-        32299,
-        4514
+        3199,
+        1575,
+        30812,
+        4983
       ],
       [
-        397,
-        1177,
-        3069,
-        11666
+        213,
+        818,
+        3237,
+        9922
       ]
     ]
   }

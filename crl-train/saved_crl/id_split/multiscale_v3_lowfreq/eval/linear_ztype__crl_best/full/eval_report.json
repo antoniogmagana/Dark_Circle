@@ -4,76 +4,76 @@
   "ckpt_name": "crl_best.pth",
   "split": "full",
   "include_datasets": null,
-  "n_windows": 91325,
+  "n_windows": 88631,
   "presence": {
-    "accuracy": 0.816,
-    "precision": 0.8791,
-    "recall": 0.8733,
-    "specificity": 0.6481,
-    "f1": 0.8762,
-    "balanced_accuracy": 0.7607,
-    "mcc": 0.5181,
-    "tp": 59458,
-    "fp": 8180,
-    "fn": 8625,
-    "tn": 15062
+    "accuracy": 0.809,
+    "precision": 0.8798,
+    "recall": 0.8609,
+    "specificity": 0.6578,
+    "f1": 0.8703,
+    "balanced_accuracy": 0.7594,
+    "mcc": 0.5088,
+    "tp": 56791,
+    "fp": 7756,
+    "fn": 9173,
+    "tn": 14911
   },
   "type": {
-    "accuracy": 0.7234,
-    "macro_f1": 0.5783,
-    "macro_f1_support_only": 0.5783,
-    "macro_precision": 0.6285,
-    "macro_recall": 0.5628,
+    "accuracy": 0.7299,
+    "macro_f1": 0.5986,
+    "macro_f1_support_only": 0.5986,
+    "macro_precision": 0.6182,
+    "macro_recall": 0.5879,
     "per_class": {
       "pedestrian": {
-        "precision": 0.554,
-        "recall": 0.3137,
-        "f1": 0.4006,
+        "precision": 0.4828,
+        "recall": 0.4013,
+        "f1": 0.4383,
         "support": 6082
       },
       "light": {
-        "precision": 0.5556,
-        "recall": 0.3617,
-        "f1": 0.4382,
+        "precision": 0.5585,
+        "recall": 0.4183,
+        "f1": 0.4783,
         "support": 5123
       },
       "medium": {
-        "precision": 0.8475,
-        "recall": 0.8156,
-        "f1": 0.8313,
+        "precision": 0.8298,
+        "recall": 0.8273,
+        "f1": 0.8285,
         "support": 40569
       },
       "heavy": {
-        "precision": 0.557,
-        "recall": 0.7603,
-        "f1": 0.643,
-        "support": 16309
+        "precision": 0.6016,
+        "recall": 0.7049,
+        "f1": 0.6491,
+        "support": 14190
       }
     },
     "confusion_matrix": [
       [
-        1908,
-        341,
-        1247,
-        2586
+        2441,
+        610,
+        1346,
+        1685
       ],
       [
-        69,
-        1853,
-        1615,
-        1586
+        175,
+        2143,
+        2029,
+        776
       ],
       [
-        1324,
-        465,
-        33090,
-        5690
+        2309,
+        535,
+        33561,
+        4164
       ],
       [
-        143,
-        676,
-        3090,
-        12400
+        131,
+        549,
+        3508,
+        10002
       ]
     ]
   }
