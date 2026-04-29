@@ -1,0 +1,73 @@
+{
+  "save_dir": "saved_crl/morlet/2026-04-20_21-23-23",
+  "test_dir": "../data_files/parsed/test/",
+  "n_windows": 12432,
+  "presence": {
+    "accuracy": 0.454,
+    "precision": 0.7914,
+    "recall": 0.2761,
+    "f1": 0.4093,
+    "tp": 4704,
+    "fp": 1240,
+    "fn": 12336,
+    "tn": 6584
+  },
+  "type": {
+    "accuracy": 0.2677,
+    "macro_f1": 0.1202,
+    "macro_precision": 0.0966,
+    "macro_recall": 0.1712,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0269,
+        "recall": 0.0072,
+        "f1": 0.0114,
+        "support": 6102
+      },
+      "light": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 2840
+      },
+      "medium": {
+        "precision": 0.3468,
+        "recall": 0.6522,
+        "f1": 0.4528,
+        "support": 6880
+      },
+      "heavy": {
+        "precision": 0.0126,
+        "recall": 0.0255,
+        "f1": 0.0168,
+        "support": 1218
+      }
+    },
+    "confusion_matrix": [
+      [
+        44,
+        0,
+        4797,
+        1261
+      ],
+      [
+        74,
+        0,
+        2470,
+        296
+      ],
+      [
+        1516,
+        0,
+        4487,
+        877
+      ],
+      [
+        3,
+        0,
+        1184,
+        31
+      ]
+    ]
+  }
+}
