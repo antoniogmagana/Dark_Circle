@@ -1,0 +1,17 @@
+{
+  "name": "low_interv",
+  "timestamp": "2026-04-21_06-20-51",
+  "description": "Weaker intervention signal (lambda_interv=0.5)",
+  "overrides": {
+    "lambda_interv": 0.5
+  },
+  "crl_elapsed_min": 55.56,
+  "ds_elapsed_min": 4.18,
+  "best_val_ref_elbo": 0.262,
+  "crl_converged_epoch": 96,
+  "val_pres_f1": 0.8864,
+  "val_pres_acc": 0.8284,
+  "val_type_f1": 0.6671,
+  "val_type_acc": 0.7423,
+  "val_loss": 1.565
+}

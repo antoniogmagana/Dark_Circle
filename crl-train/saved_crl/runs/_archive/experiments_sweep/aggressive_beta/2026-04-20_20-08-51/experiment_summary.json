@@ -1,0 +1,18 @@
+{
+  "name": "aggressive_beta",
+  "timestamp": "2026-04-20_20-08-51",
+  "description": "Faster beta growth and higher KL target for stronger VAE pressure",
+  "overrides": {
+    "beta_step": 0.05,
+    "kl_target": 1.0
+  },
+  "crl_elapsed_min": 37.21,
+  "ds_elapsed_min": 4.41,
+  "best_val_ref_elbo": 0.1724,
+  "crl_converged_epoch": 43,
+  "val_pres_f1": 1.0,
+  "val_pres_acc": 1.0,
+  "val_type_f1": 0.6924,
+  "val_type_acc": 0.7584,
+  "val_loss": 1.3059
+}

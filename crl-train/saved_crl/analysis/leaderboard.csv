@@ -1,0 +1,13 @@
+name,frontend_type,morlet_use_phase,prior_type,training_mode,stage2,epochs_completed,best_pres_f1,best_type_f1,best_val_ref_elbo,min_dataset_type_f1,worst_dataset,calibrated_type_f1,balanced_accuracy,mcc,shippable,diverged
+v3_lowfreq,multiscale,False,standard,vae,False,100,0.875,0.6565,0.2028,0.4364,focal,0.5986,0.7594,0.5088,False,False
+v3_lowfreq,multiscale,False,standard,disentangled,False,100,0.8612,0.6499,0.1072,0.4294,focal,0.5735,0.7347,0.4212,False,False
+2026-04-28_23-12-59,multiscale,False,standard,vae,False,100,0.8777,0.6351,0.214,0.3359,focal,0.4667,0.5,0.0,False,False
+v2,multiscale,False,standard,vae,False,100,0.8767,0.6082,0.1799,0.4071,focal,0.5266,0.7583,0.5075,False,False
+filesplit_v2,multiscale,False,standard,vae,False,100,0.8924,0.5248,0.1631,0.2309,focal,0.3925,0.7733,0.5376,False,False
+phase_v1_diag,morlet_per_sensor,True,standard,vae,False,78,0.7884,0.4977,2.2769,0.3568,focal,0.4446,0.6789,0.3121,False,False
+2026-04-25_09-41,multiscale,False,standard,disentangled,False,68,0.8859,0.4778,0.1438,0.2409,focal,0.3657,0.7007,0.3755,False,False
+2026-04-24_16-31,multiscale,False,standard,vae,False,100,0.8837,0.4718,0.1736,0.2181,focal,0.3288,0.7414,0.4394,False,False
+2026-04-24_16-17,multiscale,False,standard,contrastive,False,35,0.7519,0.4029,,0.1708,focal,0.3076,0.5265,0.0566,False,False
+2026-04-25_10-06,morlet_per_sensor,True,standard,disentangled,False,96,0.8707,0.3701,1.9765,0.2535,focal,0.3537,0.6469,0.2699,False,False
+2026-04-24_18-57,morlet_fused,True,standard,vae,False,82,0.8192,0.3489,2.3114,0.2402,focal,0.3774,0.7502,0.4423,False,False
+framework_smoke,multiscale,,standard,vae,False,2,0.5774,0.3164,8.6386,0.0203,focal,0.1442,0.5324,0.1226,False,False
