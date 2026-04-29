@@ -59,7 +59,7 @@ class ModalityConfig:
 @dataclass
 class CRLConfig:
     # Latent space
-    d_z: int = 32
+    d_z: int = 24
 
     # Encoder/decoder
     d_model: int = 64

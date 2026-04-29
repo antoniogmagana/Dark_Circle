@@ -96,7 +96,7 @@ def test_trainer_survives_non_vae_mode(tmp_path, monkeypatch):
 
     cfg = CRLConfig(
         d_model=32, n_layers=1, frontend_type="multiscale",
-        fused_seq_len=16, d_z=32, n_epochs=2, early_stop_patience=10,
+        fused_seq_len=16, d_z=24, n_epochs=2, early_stop_patience=10,
     )
 
     # Monkey-patch the factory so Trainer receives the stub.

@@ -10,7 +10,7 @@ def test_presence_head_shape():
 
 
 def test_type_head_shape():
-    assert LinearTypeHead(d_in=12, n_classes=4)(torch.randn(8, 12)).shape == (8, 4)
+    assert LinearTypeHead(d_in=6, n_classes=4)(torch.randn(8, 6)).shape == (8, 4)
 
 
 def test_type_head_default_d_in():
@@ -24,7 +24,7 @@ def test_proximity_head_shape():
 def test_all_heads_finite():
     for head, z in [
         (LinearPresenceHead(), torch.randn(4, 4)),
-        (LinearTypeHead(), torch.randn(4, 12)),
+        (LinearTypeHead(), torch.randn(4, 6)),
         (LinearProximityHead(), torch.randn(4, 3)),
     ]:
         assert head(z).isfinite().all()

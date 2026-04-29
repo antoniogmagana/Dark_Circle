@@ -8,13 +8,13 @@ from training.trainer import CRLModel, Trainer
 @pytest.fixture
 def cfg_ms():
     return CRLConfig(d_model=32, n_layers=1, n_heads=4,
-                     frontend_type="multiscale", fused_seq_len=16, d_z=32)
+                     frontend_type="multiscale", fused_seq_len=16, d_z=24)
 
 
 @pytest.fixture
 def cfg_morlet():
     return CRLConfig(d_model=32, n_layers=1, n_heads=4,
-                     frontend_type="morlet", d_z=32)
+                     frontend_type="morlet", d_z=24)
 
 
 def _synthetic_batch(B=4, n_partners=4):
@@ -67,8 +67,8 @@ class TestCRLModelMultiscale:
                 torch.zeros(4, 1, 16000), torch.zeros(4, 1, 200)
             )
         assert features.shape == (4, cfg_ms.d_model, 2 * T)
-        assert z.shape == (4, 32)
-        assert mu.shape == (4, 32)
+        assert z.shape == (4, 24)
+        assert mu.shape == (4, 24)
 
     def test_decode_fused_shape_matches_features(self, cfg_ms):
         model = CRLModel(cfg_ms)
@@ -105,7 +105,7 @@ class TestCRLModelMorlet:
         model.eval()
         with torch.no_grad():
             _, z, _, _ = model.encode("audio", torch.zeros(4, 1, 16000))
-        assert z.shape == (4, 32)
+        assert z.shape == (4, 24)
 
     def test_encode_seismic_shape(self, cfg_morlet):
         model = CRLModel(cfg_morlet)
@@ -113,7 +113,7 @@ class TestCRLModelMorlet:
         W_s = cfg_morlet.modality_cfg("seismic").window_size
         with torch.no_grad():
             _, z, _, _ = model.encode("seismic", torch.zeros(4, 1, W_s))
-        assert z.shape == (4, 32)
+        assert z.shape == (4, 24)
 
     def test_no_shared_encoder(self, cfg_morlet):
         model = CRLModel(cfg_morlet)
@@ -233,7 +233,7 @@ class TestLinearSignalProbe:
     def test_builds_head_sized_to_d_signal(self):
         cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
                         frontend_type="multiscale", fused_seq_len=16,
-                        d_z=32, d_signal=12)
+                        d_z=24, d_signal=12)
         model = CRLModel(cfg, probe_mode="linear_signal")
         head = model.type_heads["fused"].head
         assert head.weight.shape == (4, 12)
@@ -241,7 +241,7 @@ class TestLinearSignalProbe:
     def test_d_signal_16_makes_16_dim_head(self):
         cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
                         frontend_type="multiscale", fused_seq_len=16,
-                        d_z=32, d_signal=16)
+                        d_z=24, d_signal=16)
         model = CRLModel(cfg, probe_mode="linear_signal")
         head = model.type_heads["fused"].head
         assert head.weight.shape == (4, 16)
@@ -249,7 +249,7 @@ class TestLinearSignalProbe:
     def test_per_sensor_frontend_also_works(self):
         cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
                         frontend_type="morlet_per_sensor", fused_seq_len=16,
-                        d_z=32, d_signal=12)
+                        d_z=24, d_signal=12)
         model = CRLModel(cfg, probe_mode="linear_signal")
         for sensor in ("audio", "seismic"):
             head = model.type_heads[sensor].head
@@ -257,7 +257,7 @@ class TestLinearSignalProbe:
 
     def test_invalid_probe_mode_still_rejected(self):
         cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
-                        frontend_type="multiscale", fused_seq_len=16, d_z=32)
+                        frontend_type="multiscale", fused_seq_len=16, d_z=24)
         with pytest.raises(ValueError, match="probe_mode must be one of"):
             CRLModel(cfg, probe_mode="bogus")
 

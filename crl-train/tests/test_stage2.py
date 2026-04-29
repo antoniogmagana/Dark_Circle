@@ -213,7 +213,7 @@ class TestStateDictConversion:
     def _stage1_state(self, **overrides):
         """Build a converged stage-1 state_dict for morlet_per_sensor."""
         cfg = CRLConfig(
-            d_model=32, n_layers=1, n_heads=4, d_z=32,
+            d_model=32, n_layers=1, n_heads=4, d_z=24,
             frontend_type="morlet_per_sensor",
         )
         for k, v in overrides.items():
@@ -227,7 +227,7 @@ class TestStateDictConversion:
 
     def _stage2_model(self, **overrides):
         cfg = CRLConfig(
-            d_model=32, n_layers=1, n_heads=4, d_z=32,
+            d_model=32, n_layers=1, n_heads=4, d_z=24,
             frontend_type="morlet_learnable",
         )
         for k, v in overrides.items():
@@ -298,7 +298,7 @@ class TestStage2Trainer:
 
     def _cfg(self, **overrides):
         base = dict(
-            d_model=32, n_layers=1, frontend_type="morlet_learnable", d_z=32,
+            d_model=32, n_layers=1, frontend_type="morlet_learnable", d_z=24,
             lr=1e-3, morlet_learnable_lr_mult=0.1,
             stage2_encoder_lr_mult=0.3,
         )

@@ -34,7 +34,7 @@ def _small_multiscale_cfg() -> CRLConfig:
     # Small enough to run fast; mirrors the production frontend type.
     return CRLConfig(
         d_model=32, n_layers=1, n_heads=4,
-        frontend_type="multiscale", fused_seq_len=8, d_z=32,
+        frontend_type="multiscale", fused_seq_len=8, d_z=24,
         multiscale_pool_stride=16,
     )
 
@@ -46,7 +46,7 @@ def _small_morlet_per_sensor_cfg(use_phase: bool) -> CRLConfig:
     # on kernel_size only).
     return CRLConfig(
         d_model=16, n_layers=1, n_heads=4,
-        frontend_type="morlet_per_sensor", d_z=32,
+        frontend_type="morlet_per_sensor", d_z=24,
         morlet_use_phase=use_phase,
         morlet_per_sensor_params={
             "audio":   {"freq_min": 50.0, "freq_max": 8000.0,
@@ -170,12 +170,12 @@ def test_deployment_meta_fused_includes_scalar_threshold() -> None:
 # ---------------------------------------------------------------------------
 
 def test_resolve_type_slice_modes() -> None:
-    cfg = CRLConfig(d_z=32, d_signal=12)
-    # Type slice = [D_PRES : D_PRES + D_TYPE] = [4 : 4 + 12] = (4, 16)
-    assert resolve_type_slice("linear_ztype", cfg) == (4, 16)
-    assert resolve_type_slice("mlp_ztype", cfg) == (4, 16)
+    cfg = CRLConfig(d_z=24, d_signal=12)
+    # Type slice = [D_PRES : D_PRES + D_TYPE] = [4 : 4 + 6] = (4, 10)
+    assert resolve_type_slice("linear_ztype", cfg) == (4, 10)
+    assert resolve_type_slice("mlp_ztype", cfg) == (4, 10)
     assert resolve_type_slice("mlp_signal", cfg) == (0, 12)
-    assert resolve_type_slice("linear_fullz", cfg) == (0, 32)
+    assert resolve_type_slice("linear_fullz", cfg) == (0, 24)
     assert resolve_type_slice("linear_signal", cfg) == (0, 12)
     with pytest.raises(ValueError):
         resolve_type_slice("unknown_mode", cfg)

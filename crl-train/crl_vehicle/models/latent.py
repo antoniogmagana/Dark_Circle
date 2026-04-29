@@ -4,13 +4,13 @@ import torch.nn as nn
 
 
 class CausalLatentSpace(nn.Module):
-    D_PRES = 4    # dims 0-3
-    D_TYPE = 12   # dims 4-15
-    D_PROX = 3    # dims 16-18
-    D_ENV  = 6    # dims 19-24
-    D_CAUSAL = D_PRES + D_TYPE + D_PROX + D_ENV  # = 25
+    D_PRES = 4   # dims 0-3
+    D_TYPE = 6   # dims 4-9
+    D_PROX = 3   # dims 10-12
+    D_ENV  = 6   # dims 13-18
+    D_CAUSAL = D_PRES + D_TYPE + D_PROX + D_ENV  # = 19
 
-    def __init__(self, d_z: int = 32) -> None:
+    def __init__(self, d_z: int = 24) -> None:
         super().__init__()
         if d_z <= self.D_CAUSAL:
             raise ValueError(

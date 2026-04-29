@@ -96,12 +96,12 @@ Partitions the d_z latent into four causal blocks plus a free subspace:
 | Block | Dims | Slice |
 |---|---|---|
 | `pres` | 4 | `z[..., 0:4]` |
-| `type` | 12 | `z[..., 4:16]` |
-| `prox` | 3 | `z[..., 16:19]` |
-| `env` | 6 | `z[..., 19:25]` |
-| `free` | d_z − 25 | `z[..., 25:d_z]` |
+| `type` | 6 | `z[..., 4:10]` |
+| `prox` | 3 | `z[..., 10:13]` |
+| `env` | 6 | `z[..., 13:19]` |
+| `free` | d_z − 19 | `z[..., 19:d_z]` |
 
-`D_CAUSAL = 25`. `d_z` must be strictly greater to leave a free/nuisance subspace. Default `d_z=32` gives 7 free dims.
+`D_CAUSAL = 19`. `d_z` must be strictly greater to leave a free/nuisance subspace. Default `d_z=24` gives 5 free dims.
 
 Single method: `split(z) → (z_pres, z_type, z_prox, z_env, z_free)`. Every training mode and every aux head uses these slices to read the right subspace. The `env` block is what feeds `UnknownInterventionClassifier`; `pres`/`type`/`prox` feed their respective aux heads.
 
@@ -126,9 +126,9 @@ Trained post-CRL on the frozen encoder. Type-head variant selected by `config.pr
 | Class | `probe_mode` | Input |
 |---|---|---|
 | `LinearPresenceHead` | (always) | `z_pres` (D_PRES=4) → `Linear(4, 1)` → presence logit |
-| `LinearTypeHead` | `linear_ztype` (default, vae mode) | `z_type` (D_TYPE=12) → `Linear(12, 4)` → 4-class logits |
-| `MLPTypeHead` | `mlp_ztype` (vae mode) | `z_type` → `Linear(12, 32) → ReLU → Linear(32, 4)` |
-| `FullZTypeHead` | `linear_fullz` | full `z` (d_z=32) → `Linear(32, 4)` |
+| `LinearTypeHead` | `linear_ztype` (default, vae mode) | `z_type` (D_TYPE=6) → `Linear(6, 4)` → 4-class logits |
+| `MLPTypeHead` | `mlp_ztype` (vae mode) | `z_type` → `Linear(6, 32) → ReLU → Linear(32, 4)` |
+| `FullZTypeHead` | `linear_fullz` | full `z` (d_z=24) → `Linear(24, 4)` |
 | `LinearTypeHead(d_in=d_signal)` | `linear_signal` (disentangled mode) | `z[0:d_signal]` (default 12) → `Linear(d_signal, 4)` |
 | `MLPTypeHead(d_in=d_signal)` | `mlp_signal` (disentangled mode) | `z[0:d_signal]` → `Linear(d_signal, 32) → ReLU → Linear(32, 4)` |
 | `LinearProximityHead` | (always) | `z_prox` (D_PROX=3) → `Linear(3, 1)` |

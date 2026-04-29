@@ -149,7 +149,7 @@ python plot_aggregate.py
 
 | Field | Default | Role |
 |---|---|---|
-| `d_z` | 32 | Latent dim; must exceed `D_CAUSAL = 25` to leave a free subspace |
+| `d_z` | 24 | Latent dim; must exceed `D_CAUSAL = 19` to leave a free subspace |
 | `d_model` | 64 | Transformer hidden size + frontend output channels |
 | `n_layers` / `n_heads` | 2 / 4 | Transformer shape |
 | `frontend_type` | `"multiscale"` | See frontend variants above |

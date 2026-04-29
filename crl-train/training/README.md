@@ -56,10 +56,10 @@ Each init method:
 
 Every forward yields `z` from the encoder, then `model.latent.split(z)` partitions it into:
 - `z_pres` (D_PRES=4) → presence head + aux presence head
-- `z_type` (D_TYPE=12) → type head + aux type head
+- `z_type` (D_TYPE=6) → type head + aux type head
 - `z_prox` (D_PROX=3) → proximity head
 - `z_env` (D_ENV=6) → `UnknownInterventionClassifier`
-- `z_free` (d_z − 25) → unstructured nuisance, no supervision
+- `z_free` (d_z − 19) → unstructured nuisance, no supervision
 
 ## `Trainer`
 
