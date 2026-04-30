@@ -78,7 +78,7 @@ def plot_metric_over_epochs(
     ax.set_title(title)
     ax.grid(alpha=0.3)
     if clip_max is not None:
-        ax.set_ylim(top=clip_max)
+        ax.set_ylim(0,clip_max)
     if plotted > 0:
         _legend_inside_or_outside(ax, plotted)
     fig.tight_layout()
@@ -196,7 +196,7 @@ def main() -> int:
         runs, "val_ref_elbo",
         title="val_ref_elbo across runs (y-clip at 10)",
         out=out_dir / "val_ref_elbo_over_epochs",
-        clip_max=10.0,
+        clip_max=20.0,
     )
     plot_best_f1_bar(runs, out_dir / "best_f1_by_run")
     plot_complexity_vs_f1(runs, out_dir / "complexity_vs_f1")
