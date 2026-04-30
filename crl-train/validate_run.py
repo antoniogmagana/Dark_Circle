@@ -390,9 +390,10 @@ def main() -> None:
         frontend = "multiscale"
         print(f"No meta.json; using sensors={sensors}")
 
-    cfg             = CRLConfig()
+    # Build with frontend_type set so __post_init__ reconciles the new
+    # (frontend_bank, frontend_fusion) schema correctly.
+    cfg = CRLConfig(frontend_type=frontend)
     cfg.batch_size  = args.batch_size
-    cfg.frontend_type = frontend
     cfg.num_workers = args.num_workers
 
     ckpt_path = save_dir / args.checkpoint

@@ -444,13 +444,13 @@ def _rebuild_morlet_frontends_from_meta(
     from crl_vehicle.models.frontend import MorletFilterbank, LearnableMorletFilterbank
     cfg = model.cfg
     use_phase = cfg.morlet_use_phase
-    is_learnable = cfg.frontend_type in ("morlet_learnable",)
+    is_learnable = cfg.frontend_bank == "morlet_learnable"
 
     for sensor in sensors:
         if sensor not in derived:
             continue
         d = derived[sensor]
-        sp = cfg.morlet_per_sensor_params[sensor]
+        sp = cfg.frontend_per_sensor_params[sensor]
         mc = cfg.modality_cfg(sensor)
         out_channels = max(1, int(round(cfg.d_model * sp.get("out_channels_frac", 1.0))))
 

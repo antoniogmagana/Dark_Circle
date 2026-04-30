@@ -43,7 +43,24 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--frontend",    choices=["multiscale", "morlet", "morlet_per_sensor",
                                               "morlet_fused", "morlet_learnable",
                                               "morlet_learnable_fused"],
-                   default="multiscale")
+                   default="multiscale",
+                   help="Legacy frontend selector. Translates to "
+                        "(--frontend-bank, --frontend-fusion). Prefer the new "
+                        "two-flag form for new experiments.")
+    p.add_argument("--frontend-bank",
+                   choices=["multiscale", "morlet", "morlet_learnable"],
+                   default=None,
+                   help="New two-axis frontend selector (bank). When set, "
+                        "overrides --frontend translation.")
+    p.add_argument("--frontend-fusion",
+                   choices=["late", "early"],
+                   default=None,
+                   help="New two-axis frontend selector (fusion). When set, "
+                        "overrides --frontend translation.")
+    p.add_argument("--audio-target-rate", type=int, default=None,
+                   help="Audio resample target rate. Default 16000. Set lower "
+                        "(e.g. 4000) when only the sub-2 kHz vehicle band "
+                        "matters; the dataset cache key auto-versions on this.")
     p.add_argument("--morlet-learnable-w0", action="store_true",
                    help="Make per-filter w0 learnable (only applies to "
                         "morlet_learnable / morlet_learnable_fused).")
@@ -106,7 +123,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    cfg = CRLConfig(
+    cfg_kwargs = dict(
         frontend_type=args.frontend,
         training_mode=args.training_mode,
         batch_size=args.batch_size,
@@ -118,6 +135,13 @@ def main() -> None:
         use_focal_type=args.use_focal_type,
         focal_type_gamma=args.focal_type_gamma,
     )
+    if args.frontend_bank is not None:
+        cfg_kwargs["frontend_bank"] = args.frontend_bank
+    if args.frontend_fusion is not None:
+        cfg_kwargs["frontend_fusion"] = args.frontend_fusion
+    if args.audio_target_rate is not None:
+        cfg_kwargs["audio_target_rate"] = args.audio_target_rate
+    cfg = CRLConfig(**cfg_kwargs)
 
     if args.config_overrides_json is not None:
         import json as _json

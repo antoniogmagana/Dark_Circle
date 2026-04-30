@@ -142,7 +142,7 @@ class TestCRLModelShared:
                 assert id(p) not in backbone_ids
 
     def test_unknown_frontend_raises(self):
-        with pytest.raises(ValueError, match="Unknown frontend_type"):
+        with pytest.raises(ValueError, match="frontend_type must be one of"):
             CRLModel(CRLConfig(frontend_type="bad", d_model=32, n_layers=1))
 
 
@@ -263,3 +263,42 @@ class TestLinearSignalProbe:
 
     def test_valid_probe_modes_includes_linear_signal(self):
         assert "linear_signal" in CRLModel.VALID_PROBE_MODES
+
+
+class TestSR4000GraduatedExperiment:
+    """End-to-end construction + forward for the audio_target_rate=4000
+    graduated-kernel experiment. This is the config that drives commit 8."""
+
+    def _cfg(self):
+        return CRLConfig(
+            d_model=16, n_layers=1, n_heads=4,
+            audio_target_rate=4000,
+            frontend_per_sensor_params={
+                "audio":   {"target_tokens": 32,
+                            "kernel_sizes": [201, 41, 9, 5],
+                            "strides": [67, 13, 3, 1],
+                            "out_channels_frac": 1.0},
+                "seismic": {"target_tokens": 32,
+                            "kernel_sizes": [51, 21, 7, 3],
+                            "strides": [17, 7, 2, 1],
+                            "out_channels_frac": 1.0},
+            },
+        )
+
+    def test_audio_window_size_follows_target_rate(self):
+        cfg = self._cfg()
+        assert cfg.modality_cfg("audio").sample_rate == 4000
+        assert cfg.modality_cfg("audio").window_size == 4000
+
+    def test_constructs_and_runs(self):
+        cfg = self._cfg()
+        model = CRLModel(cfg)
+        model.eval()
+        audio = torch.randn(2, 1, 4000) * 0.01
+        seismic = torch.randn(2, 1, 100) * 0.01
+        with torch.no_grad():
+            features, z, mu, _ = model.encode_fused(audio, seismic)
+        # 2 sensors × 32 tokens = 64
+        assert features.shape == (2, 16, 64)
+        assert z.shape == (2, cfg.d_z)
+        assert features.isfinite().all()

@@ -7,7 +7,17 @@ import torch.nn.functional as F
 
 class MultiScale1DFrontend(nn.Module):
     """Parallel multi-scale Conv1D branches with GroupNorm + GELU, merged by 1x1 conv.
-    Runs in fp32 to avoid overflow on large-stride audio inputs."""
+    Runs in fp32 to avoid overflow on large-stride audio inputs.
+
+    Per-branch stride: when `strides` is given, each branch uses its own stride
+    (e.g. ks // 3 to hop at ~1/3 of the kernel's receptive field). When None,
+    falls back to the legacy uniform `stride` for every branch.
+
+    Branch alignment: when `target_tokens` is set, each branch ends with
+    AdaptiveAvgPool1d(target_tokens), so concat happens on already-aligned
+    tensors regardless of stride. When None, no per-branch pool is added —
+    callers using a uniform stride get aligned outputs by construction.
+    """
 
     def __init__(
         self,
@@ -15,17 +25,29 @@ class MultiScale1DFrontend(nn.Module):
         out_channels: int,
         kernel_sizes: list[int] | None = None,
         stride: int = 4,
+        strides: list[int] | None = None,
+        target_tokens: int | None = None,
     ) -> None:
         super().__init__()
         kernel_sizes = kernel_sizes or [9, 19, 39]
+        if strides is None:
+            strides = [stride] * len(kernel_sizes)
+        elif len(strides) != len(kernel_sizes):
+            raise ValueError(
+                f"strides length {len(strides)} must match kernel_sizes "
+                f"length {len(kernel_sizes)}"
+            )
         self.branches = nn.ModuleList()
-        for ks in kernel_sizes:
-            self.branches.append(nn.Sequential(
-                nn.Conv1d(in_channels, out_channels, kernel_size=ks, stride=stride,
+        for ks, s in zip(kernel_sizes, strides):
+            layers: list[nn.Module] = [
+                nn.Conv1d(in_channels, out_channels, kernel_size=ks, stride=s,
                           padding=ks // 2, bias=False),
                 nn.GroupNorm(min(8, out_channels), out_channels),
                 nn.GELU(),
-            ))
+            ]
+            if target_tokens is not None:
+                layers.append(nn.AdaptiveAvgPool1d(target_tokens))
+            self.branches.append(nn.Sequential(*layers))
         self.proj = nn.Conv1d(
             len(kernel_sizes) * out_channels, out_channels, kernel_size=1, bias=False
         )
@@ -33,8 +55,6 @@ class MultiScale1DFrontend(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.float()
         feats = [branch(x) for branch in self.branches]
-        min_len = min(f.shape[-1] for f in feats)
-        feats = [f[..., :min_len] for f in feats]
         return self.proj(torch.cat(feats, dim=1))
 
 

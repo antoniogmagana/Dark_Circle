@@ -12,11 +12,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from crl_vehicle.config import CRLConfig
-from crl_vehicle.models.frontend import (
-    MultiScale1DFrontend, MorletFilterbank, LearnableMorletFilterbank,
-)
+from crl_vehicle.models.frontend import LearnableMorletFilterbank
+from crl_vehicle.models.frontend_factory import build_frontend
 from crl_vehicle.models.latent import CausalLatentSpace
-from crl_vehicle.models.encoder_decoder import TemporalEncoder, FeatureDecoder
 from crl_vehicle.models.intervention import UnknownInterventionClassifier
 from crl_vehicle.models.heads import (
     LinearPresenceHead, LinearTypeHead, LinearProximityHead,
@@ -75,26 +73,15 @@ class CRLModel(nn.Module):
         # without re-deriving from config.
         self._morlet_derived_params: dict[str, dict] = {}
 
-        if config.frontend_type == "multiscale":
-            self._init_multiscale(config, d_z)
-            head_keys = ["fused"]
-        elif config.frontend_type == "morlet":
-            self._init_morlet(config, d_z)
-            head_keys = self.sensors
-        elif config.frontend_type == "morlet_per_sensor":
-            self._init_morlet_per_sensor(config, d_z)
-            head_keys = self.sensors
-        elif config.frontend_type == "morlet_fused":
-            self._init_morlet_fused(config, d_z)
-            head_keys = ["fused"]
-        elif config.frontend_type == "morlet_learnable":
-            self._init_morlet_learnable(config, d_z)
-            head_keys = self.sensors
-        elif config.frontend_type == "morlet_learnable_fused":
-            self._init_morlet_learnable_fused(config, d_z)
-            head_keys = ["fused"]
+        if config.frontend_bank in ("multiscale", "morlet", "morlet_learnable"):
+            self._refresh_legacy_per_sensor_params(config)
+            self.frontends, self.encoder, self.decoder, \
+                self.encoders, self.decoders, self._morlet_derived_params = (
+                    build_frontend(config, self.sensors)
+                )
+            head_keys = ["fused"] if config.frontend_fusion == "early" else self.sensors
         else:
-            raise ValueError(f"Unknown frontend_type: {config.frontend_type!r}")
+            raise ValueError(f"Unknown frontend_bank: {config.frontend_bank!r}")
 
         # Downstream heads (one set per head_key)
         self.pres_heads = nn.ModuleDict()
@@ -110,6 +97,38 @@ class CRLModel(nn.Module):
             self.prox_heads[key]     = LinearProximityHead()
             self.aux_pres_heads[key] = nn.Linear(CausalLatentSpace.D_PRES, 1)
             self.aux_type_heads[key] = nn.Linear(CausalLatentSpace.D_TYPE, 4)
+
+    def _refresh_legacy_per_sensor_params(self, config: CRLConfig) -> None:
+        """Re-import legacy `morlet_per_sensor_params` into the unified
+        `frontend_per_sensor_params` if the user mutated the legacy dict
+        post-construction. Tests and ad-hoc scripts sometimes do
+        `cfg.morlet_per_sensor_params[sensor] = ...` after CRLConfig() is
+        built, which bypasses __post_init__ translation.
+
+        Skipped for `frontend_type="morlet"` (the SR-heuristic variant) —
+        that path uses synthesized params from the legacy heuristic, not
+        the morlet_per_sensor_params dict. Refreshing would overwrite the
+        synthesized values with the (irrelevant) default dict entries.
+        """
+        if config.frontend_bank not in ("morlet", "morlet_learnable"):
+            return
+        if config.frontend_type == "morlet":
+            return
+        legacy = config.morlet_per_sensor_params
+        if not legacy:
+            return
+        config.frontend_per_sensor_params = {
+            s: dict(p) for s, p in legacy.items()
+        }
+        # Early fusion: legacy morlet_fused always pooled to fused_seq_len,
+        # overriding per-sensor target_tokens. Match that.
+        if config.frontend_fusion == "early":
+            for sp in config.frontend_per_sensor_params.values():
+                sp["target_tokens"] = config.fused_seq_len
+        else:
+            # Late fusion: respect per-sensor target_tokens; default to 32.
+            for sp in config.frontend_per_sensor_params.values():
+                sp.setdefault("target_tokens", 32)
 
     def _build_type_head(self, d_z: int) -> nn.Module:
         if self.probe_mode == "linear_ztype":
@@ -129,11 +148,9 @@ class CRLModel(nn.Module):
 
     def is_fused_frontend(self) -> bool:
         """True when the frontend feeds a single shared encoder via
-        time-concat (multiscale, morlet_fused, morlet_learnable_fused)
-        rather than per-sensor encoders."""
-        return self.cfg.frontend_type in (
-            "multiscale", "morlet_fused", "morlet_learnable_fused",
-        )
+        time-concat (early fusion: multiscale, morlet_fused,
+        morlet_learnable_fused) rather than per-sensor encoders."""
+        return self.cfg.frontend_fusion == "early"
 
     def learnable_morlet_parameters(self) -> list[nn.Parameter]:
         """All nn.Parameters belonging to LearnableMorletFilterbank
@@ -147,472 +164,6 @@ class CRLModel(nn.Module):
                     params.extend(module.parameters(recurse=False))
         return params
 
-    def _init_multiscale(self, config: CRLConfig, d_z: int) -> None:
-        T = config.fused_seq_len
-        stride = config.multiscale_pool_stride
-        for sensor in self.sensors:
-            mc = config.modality_cfg(sensor)
-            self.frontends[sensor] = nn.Sequential(
-                MultiScale1DFrontend(
-                    mc.n_channels, config.d_model,
-                    kernel_sizes=config.multiscale_kernel_sizes.get(sensor),
-                ),
-                nn.AvgPool1d(stride, stride),
-                nn.AdaptiveAvgPool1d(T),
-            )
-        self.encoder = TemporalEncoder(
-            in_channels=config.d_model,
-            d_z=d_z,
-            d_model=config.d_model,
-            n_heads=config.n_heads,
-            n_layers=config.n_layers,
-        )
-        self.decoder = FeatureDecoder(
-            out_channels=config.d_model,
-            seq_len=len(self.sensors) * T,
-            d_z=d_z,
-            d_model=config.d_model,
-        )
-        # Empty per-sensor dicts for structural consistency
-        self.encoders = nn.ModuleDict()
-        self.decoders = nn.ModuleDict()
-
-    def _init_morlet(self, config: CRLConfig, d_z: int) -> None:
-        self.encoder = None
-        self.decoder = None
-        self.encoders = nn.ModuleDict()
-        self.decoders = nn.ModuleDict()
-        stride = config.morlet_pool_stride
-        use_phase = getattr(config, "morlet_use_phase", False)
-        for sensor in self.sensors:
-            mc = config.modality_cfg(sensor)
-            ks = config.morlet_kernel_size
-            kernel_mb = (2 * config.d_model * mc.n_channels * ks * 4) / 1e6
-            print(f"  MorletFilterbank [{sensor}]: kernel {2*config.d_model}×{mc.n_channels}×{ks} = {kernel_mb:.2f} MB")
-            bank = MorletFilterbank(
-                mc.n_channels, config.d_model, ks, mc.sample_rate,
-                use_phase=use_phase,
-            )
-            self.frontends[sensor] = nn.Sequential(
-                bank, nn.AvgPool1d(stride, stride),
-            )
-            # Downstream encoder sees bank.total_out_channels (3× if phase).
-            enc_in_channels = bank.total_out_channels
-            seq_len = mc.window_size // stride
-            self.encoders[sensor] = TemporalEncoder(
-                in_channels=enc_in_channels,
-                d_z=d_z,
-                d_model=config.d_model,
-                n_heads=config.n_heads,
-                n_layers=config.n_layers,
-            )
-            # Decoder must match frontend channel count — recon target is
-            # the frontend's raw output, which is 3× when use_phase=True.
-            self.decoders[sensor] = FeatureDecoder(
-                out_channels=enc_in_channels,
-                seq_len=max(1, seq_len),
-                d_z=d_z,
-                d_model=config.d_model,
-            )
-
-    def _init_morlet_per_sensor(self, config: CRLConfig, d_z: int) -> None:
-        """Per-sensor Morlet banks with sensor-specific freq ranges, coupled
-        pool stride, and coupled kernel size.
-
-        Per-sensor derivation (from morlet_per_sensor_params[sensor]):
-          pool_stride = window_size // target_tokens
-          kernel_size = round(2 * receptive_cycles * w0 / (2π·freq_min) * SR),
-                        forced odd and ≥3
-        """
-        self.encoder = None
-        self.decoder = None
-        self.encoders = nn.ModuleDict()
-        self.decoders = nn.ModuleDict()
-        use_phase = config.morlet_use_phase
-        params_by_sensor = config.morlet_per_sensor_params
-
-        for sensor in self.sensors:
-            if sensor not in params_by_sensor:
-                raise ValueError(
-                    f"morlet_per_sensor requires params for {sensor!r} in "
-                    f"config.morlet_per_sensor_params (got keys "
-                    f"{list(params_by_sensor.keys())})"
-                )
-            sp = params_by_sensor[sensor]
-            mc = config.modality_cfg(sensor)
-            out_channels = max(1, int(round(config.d_model * sp.get("out_channels_frac", 1.0))))
-            freq_min = float(sp["freq_min"])
-            freq_max = float(sp["freq_max"])
-            w0 = float(sp.get("w0", 6.0))
-            target_tokens    = int(sp.get("target_tokens", 32))
-            receptive_cycles = float(sp.get("receptive_cycles", 3.0))
-
-            # Per-sensor coupled derivation.
-            pool_stride = max(1, mc.window_size // target_tokens)
-            ks_float    = 2 * receptive_cycles * w0 / (2 * math.pi * freq_min) * mc.sample_rate
-            kernel_size = max(3, int(round(ks_float)) | 1)  # odd, ≥3
-
-            post_pool_tokens = mc.window_size // pool_stride
-            post_pool_rate   = mc.sample_rate / pool_stride
-
-            self._morlet_derived_params[sensor] = {
-                "pool_stride":      pool_stride,
-                "kernel_size":      kernel_size,
-                "target_tokens":    target_tokens,
-                "receptive_cycles": receptive_cycles,
-                "post_pool_tokens": post_pool_tokens,
-                "post_pool_rate":   round(post_pool_rate, 3),
-            }
-
-            kernel_mb = (2 * out_channels * mc.n_channels * kernel_size * 4) / 1e6
-            print(
-                f"  MorletFilterbank [{sensor}]: "
-                f"{out_channels}ch × [{freq_min:g}, {freq_max:g}] Hz, "
-                f"w0={w0}, ks={kernel_size} (derived, {receptive_cycles:g} cycles @ {freq_min:g} Hz), "
-                f"stride={pool_stride} (→{post_pool_tokens} tokens @ {post_pool_rate:.1f} Hz), "
-                f"= {kernel_mb:.2f} MB"
-                + (", +phase" if use_phase else "")
-            )
-
-            bank = MorletFilterbank(
-                in_channels=mc.n_channels,
-                out_channels=out_channels,
-                kernel_size=kernel_size,
-                sample_rate=mc.sample_rate,
-                w0=w0,
-                freq_min=freq_min,
-                freq_max=freq_max,
-                use_phase=use_phase,
-            )
-            self.frontends[sensor] = nn.Sequential(
-                bank, nn.AvgPool1d(pool_stride, pool_stride),
-            )
-            enc_in_channels = bank.total_out_channels
-            self.encoders[sensor] = TemporalEncoder(
-                in_channels=enc_in_channels,
-                d_z=d_z,
-                d_model=config.d_model,
-                n_heads=config.n_heads,
-                n_layers=config.n_layers,
-            )
-            self.decoders[sensor] = FeatureDecoder(
-                out_channels=enc_in_channels,
-                seq_len=max(1, post_pool_tokens),
-                d_z=d_z,
-                d_model=config.d_model,
-            )
-
-    def _init_morlet_fused(self, config: CRLConfig, d_z: int) -> None:
-        """Morlet banks per sensor (same derivation as morlet_per_sensor)
-        normalized to a common T via AdaptiveAvgPool1d, then time-concat
-        into a single shared encoder/decoder — Morlet kernels on a
-        multiscale-shaped fusion topology.
-
-        Requires matching out_channels_frac across sensors so the per-sensor
-        outputs can be concatenated along the time axis without channel
-        projection.
-        """
-        T = config.fused_seq_len
-        use_phase = config.morlet_use_phase
-        params_by_sensor = config.morlet_per_sensor_params
-
-        for sensor in self.sensors:
-            if sensor not in params_by_sensor:
-                raise ValueError(
-                    f"morlet_fused requires params for {sensor!r} in "
-                    f"config.morlet_per_sensor_params (got keys "
-                    f"{list(params_by_sensor.keys())})"
-                )
-
-        fracs = {s: params_by_sensor[s].get("out_channels_frac", 1.0)
-                 for s in self.sensors}
-        if len(set(fracs.values())) > 1:
-            raise ValueError(
-                f"morlet_fused requires matching out_channels_frac across "
-                f"sensors (got {fracs}); early fusion concatenates along time "
-                f"and a channel mismatch would break the concat."
-            )
-
-        shared_out_channels: int | None = None
-
-        for sensor in self.sensors:
-            sp = params_by_sensor[sensor]
-            mc = config.modality_cfg(sensor)
-            out_channels = max(1, int(round(config.d_model * sp.get("out_channels_frac", 1.0))))
-            freq_min = float(sp["freq_min"])
-            freq_max = float(sp["freq_max"])
-            w0 = float(sp.get("w0", 6.0))
-            target_tokens    = int(sp.get("target_tokens", 32))
-            receptive_cycles = float(sp.get("receptive_cycles", 3.0))
-
-            pool_stride = max(1, mc.window_size // target_tokens)
-            ks_float    = 2 * receptive_cycles * w0 / (2 * math.pi * freq_min) * mc.sample_rate
-            kernel_size = max(3, int(round(ks_float)) | 1)
-
-            post_pool_tokens = mc.window_size // pool_stride
-            post_pool_rate   = mc.sample_rate / pool_stride
-
-            self._morlet_derived_params[sensor] = {
-                "pool_stride":      pool_stride,
-                "kernel_size":      kernel_size,
-                "target_tokens":    target_tokens,
-                "receptive_cycles": receptive_cycles,
-                "post_pool_tokens": post_pool_tokens,
-                "post_pool_rate":   round(post_pool_rate, 3),
-                "adaptive_pool_T":  T,
-            }
-
-            kernel_mb = (2 * out_channels * mc.n_channels * kernel_size * 4) / 1e6
-            print(
-                f"  MorletFilterbank [{sensor}, fused]: "
-                f"{out_channels}ch × [{freq_min:g}, {freq_max:g}] Hz, "
-                f"w0={w0}, ks={kernel_size} (derived, {receptive_cycles:g} cycles @ {freq_min:g} Hz), "
-                f"stride={pool_stride} (→{post_pool_tokens} tokens @ {post_pool_rate:.1f} Hz) "
-                f"→ AdaptiveAvgPool1d(T={T}), = {kernel_mb:.2f} MB"
-                + (", +phase" if use_phase else "")
-            )
-
-            bank = MorletFilterbank(
-                in_channels=mc.n_channels,
-                out_channels=out_channels,
-                kernel_size=kernel_size,
-                sample_rate=mc.sample_rate,
-                w0=w0,
-                freq_min=freq_min,
-                freq_max=freq_max,
-                use_phase=use_phase,
-            )
-            self.frontends[sensor] = nn.Sequential(
-                bank,
-                nn.AvgPool1d(pool_stride, pool_stride),
-                nn.AdaptiveAvgPool1d(T),
-            )
-
-            if shared_out_channels is None:
-                shared_out_channels = bank.total_out_channels
-            elif bank.total_out_channels != shared_out_channels:
-                raise RuntimeError(
-                    f"morlet_fused: sensor {sensor!r} produced "
-                    f"{bank.total_out_channels} channels, expected "
-                    f"{shared_out_channels} (from first sensor). This should "
-                    f"be prevented by the out_channels_frac check — please report."
-                )
-
-        self.encoder = TemporalEncoder(
-            in_channels=shared_out_channels,
-            d_z=d_z,
-            d_model=config.d_model,
-            n_heads=config.n_heads,
-            n_layers=config.n_layers,
-        )
-        self.decoder = FeatureDecoder(
-            out_channels=shared_out_channels,
-            seq_len=len(self.sensors) * T,
-            d_z=d_z,
-            d_model=config.d_model,
-        )
-        self.encoders = nn.ModuleDict()
-        self.decoders = nn.ModuleDict()
-
-    def _init_morlet_learnable(self, config: CRLConfig, d_z: int) -> None:
-        """Late-fusion Morlet variant with learnable scales (and optionally
-        per-filter w0). Structurally identical to _init_morlet_per_sensor —
-        per-sensor frontends, per-sensor encoders/decoders, coupled
-        kernel_size/pool_stride derivation — but swaps in
-        LearnableMorletFilterbank so scales are nn.Parameter."""
-        self.encoder = None
-        self.decoder = None
-        self.encoders = nn.ModuleDict()
-        self.decoders = nn.ModuleDict()
-        use_phase    = config.morlet_use_phase
-        learnable_w0 = config.morlet_learnable_w0
-        params_by_sensor = config.morlet_per_sensor_params
-
-        for sensor in self.sensors:
-            if sensor not in params_by_sensor:
-                raise ValueError(
-                    f"morlet_learnable requires params for {sensor!r} in "
-                    f"config.morlet_per_sensor_params (got keys "
-                    f"{list(params_by_sensor.keys())})"
-                )
-            sp = params_by_sensor[sensor]
-            mc = config.modality_cfg(sensor)
-            out_channels = max(1, int(round(config.d_model * sp.get("out_channels_frac", 1.0))))
-            freq_min = float(sp["freq_min"])
-            freq_max = float(sp["freq_max"])
-            w0 = float(sp.get("w0", 6.0))
-            target_tokens    = int(sp.get("target_tokens", 32))
-            receptive_cycles = float(sp.get("receptive_cycles", 3.0))
-
-            pool_stride = max(1, mc.window_size // target_tokens)
-            ks_float    = 2 * receptive_cycles * w0 / (2 * math.pi * freq_min) * mc.sample_rate
-            kernel_size = max(3, int(round(ks_float)) | 1)
-
-            post_pool_tokens = mc.window_size // pool_stride
-            post_pool_rate   = mc.sample_rate / pool_stride
-
-            self._morlet_derived_params[sensor] = {
-                "pool_stride":      pool_stride,
-                "kernel_size":      kernel_size,
-                "target_tokens":    target_tokens,
-                "receptive_cycles": receptive_cycles,
-                "post_pool_tokens": post_pool_tokens,
-                "post_pool_rate":   round(post_pool_rate, 3),
-                "learnable":        True,
-                "learnable_w0":     learnable_w0,
-            }
-
-            kernel_mb = (2 * out_channels * mc.n_channels * kernel_size * 4) / 1e6
-            print(
-                f"  LearnableMorletFilterbank [{sensor}]: "
-                f"{out_channels}ch × [{freq_min:g}, {freq_max:g}] Hz, "
-                f"w0={w0}{'+learnable' if learnable_w0 else ''}, "
-                f"ks={kernel_size} (derived, {receptive_cycles:g} cycles @ {freq_min:g} Hz), "
-                f"stride={pool_stride} (→{post_pool_tokens} tokens @ {post_pool_rate:.1f} Hz), "
-                f"= {kernel_mb:.2f} MB"
-                + (", +phase" if use_phase else "")
-            )
-
-            bank = LearnableMorletFilterbank(
-                in_channels=mc.n_channels,
-                out_channels=out_channels,
-                kernel_size=kernel_size,
-                sample_rate=mc.sample_rate,
-                w0=w0,
-                freq_min=freq_min,
-                freq_max=freq_max,
-                use_phase=use_phase,
-                learnable_w0=learnable_w0,
-            )
-            self.frontends[sensor] = nn.Sequential(
-                bank, nn.AvgPool1d(pool_stride, pool_stride),
-            )
-            enc_in_channels = bank.total_out_channels
-            self.encoders[sensor] = TemporalEncoder(
-                in_channels=enc_in_channels,
-                d_z=d_z,
-                d_model=config.d_model,
-                n_heads=config.n_heads,
-                n_layers=config.n_layers,
-            )
-            self.decoders[sensor] = FeatureDecoder(
-                out_channels=enc_in_channels,
-                seq_len=max(1, post_pool_tokens),
-                d_z=d_z,
-                d_model=config.d_model,
-            )
-
-    def _init_morlet_learnable_fused(self, config: CRLConfig, d_z: int) -> None:
-        """Early-fusion version of morlet_learnable. Mirrors
-        _init_morlet_fused topology (AdaptiveAvgPool1d + time-concat +
-        shared encoder/decoder), with LearnableMorletFilterbank as the
-        per-sensor frontend."""
-        T = config.fused_seq_len
-        use_phase    = config.morlet_use_phase
-        learnable_w0 = config.morlet_learnable_w0
-        params_by_sensor = config.morlet_per_sensor_params
-
-        for sensor in self.sensors:
-            if sensor not in params_by_sensor:
-                raise ValueError(
-                    f"morlet_learnable_fused requires params for {sensor!r} in "
-                    f"config.morlet_per_sensor_params (got keys "
-                    f"{list(params_by_sensor.keys())})"
-                )
-
-        fracs = {s: params_by_sensor[s].get("out_channels_frac", 1.0)
-                 for s in self.sensors}
-        if len(set(fracs.values())) > 1:
-            raise ValueError(
-                f"morlet_learnable_fused requires matching out_channels_frac "
-                f"across sensors (got {fracs}); early fusion concatenates "
-                f"along time and a channel mismatch would break the concat."
-            )
-
-        shared_out_channels: int | None = None
-
-        for sensor in self.sensors:
-            sp = params_by_sensor[sensor]
-            mc = config.modality_cfg(sensor)
-            out_channels = max(1, int(round(config.d_model * sp.get("out_channels_frac", 1.0))))
-            freq_min = float(sp["freq_min"])
-            freq_max = float(sp["freq_max"])
-            w0 = float(sp.get("w0", 6.0))
-            target_tokens    = int(sp.get("target_tokens", 32))
-            receptive_cycles = float(sp.get("receptive_cycles", 3.0))
-
-            pool_stride = max(1, mc.window_size // target_tokens)
-            ks_float    = 2 * receptive_cycles * w0 / (2 * math.pi * freq_min) * mc.sample_rate
-            kernel_size = max(3, int(round(ks_float)) | 1)
-
-            post_pool_tokens = mc.window_size // pool_stride
-            post_pool_rate   = mc.sample_rate / pool_stride
-
-            self._morlet_derived_params[sensor] = {
-                "pool_stride":      pool_stride,
-                "kernel_size":      kernel_size,
-                "target_tokens":    target_tokens,
-                "receptive_cycles": receptive_cycles,
-                "post_pool_tokens": post_pool_tokens,
-                "post_pool_rate":   round(post_pool_rate, 3),
-                "adaptive_pool_T":  T,
-                "learnable":        True,
-                "learnable_w0":     learnable_w0,
-            }
-
-            kernel_mb = (2 * out_channels * mc.n_channels * kernel_size * 4) / 1e6
-            print(
-                f"  LearnableMorletFilterbank [{sensor}, fused]: "
-                f"{out_channels}ch × [{freq_min:g}, {freq_max:g}] Hz, "
-                f"w0={w0}{'+learnable' if learnable_w0 else ''}, "
-                f"ks={kernel_size} (derived, {receptive_cycles:g} cycles @ {freq_min:g} Hz), "
-                f"stride={pool_stride} (→{post_pool_tokens} tokens @ {post_pool_rate:.1f} Hz) "
-                f"→ AdaptiveAvgPool1d(T={T}), = {kernel_mb:.2f} MB"
-                + (", +phase" if use_phase else "")
-            )
-
-            bank = LearnableMorletFilterbank(
-                in_channels=mc.n_channels,
-                out_channels=out_channels,
-                kernel_size=kernel_size,
-                sample_rate=mc.sample_rate,
-                w0=w0,
-                freq_min=freq_min,
-                freq_max=freq_max,
-                use_phase=use_phase,
-                learnable_w0=learnable_w0,
-            )
-            self.frontends[sensor] = nn.Sequential(
-                bank,
-                nn.AvgPool1d(pool_stride, pool_stride),
-                nn.AdaptiveAvgPool1d(T),
-            )
-
-            if shared_out_channels is None:
-                shared_out_channels = bank.total_out_channels
-            elif bank.total_out_channels != shared_out_channels:
-                raise RuntimeError(
-                    f"morlet_learnable_fused: sensor {sensor!r} produced "
-                    f"{bank.total_out_channels} channels, expected "
-                    f"{shared_out_channels} (from first sensor). This should "
-                    f"be prevented by the out_channels_frac check — please report."
-                )
-
-        self.encoder = TemporalEncoder(
-            in_channels=shared_out_channels,
-            d_z=d_z,
-            d_model=config.d_model,
-            n_heads=config.n_heads,
-            n_layers=config.n_layers,
-        )
-        self.decoder = FeatureDecoder(
-            out_channels=shared_out_channels,
-            seq_len=len(self.sensors) * T,
-            d_z=d_z,
-            d_model=config.d_model,
-        )
-        self.encoders = nn.ModuleDict()
-        self.decoders = nn.ModuleDict()
 
     # ------------------------------------------------------------------
     # Encode / decode API
