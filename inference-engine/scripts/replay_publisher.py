@@ -47,6 +47,8 @@ import time
 from pathlib import Path
 
 import rclpy
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from ros2_interfaces.msg import InferenceResult, RawSensorReading
 
@@ -236,12 +238,29 @@ class ReplayNode(Node):
         self.window_state: dict[float, dict] = {}
         self.results: list[dict] = []
 
+        # Two callback groups so the timer and the subscription can run
+        # concurrently under MultiThreadedExecutor. The default
+        # SingleThreadedExecutor (rclpy.spin) serializes everything: the
+        # 10Hz timer's per-tick work (publishing 1600 audio + 10 seismic
+        # samples) starves the subscription, which then never sees
+        # /inference_result messages even though they're being delivered
+        # by DDS. Putting the subscription on its own group lets it run
+        # in parallel with the timer.
+        self._timer_cb_group = MutuallyExclusiveCallbackGroup()
+        self._sub_cb_group = ReentrantCallbackGroup()
+
         if not args.no_subscribe:
             self.create_subscription(
-                InferenceResult, args.inference_topic, self._on_inference, 10
+                InferenceResult,
+                args.inference_topic,
+                self._on_inference,
+                10,
+                callback_group=self._sub_cb_group,
             )
 
-        self.timer = self.create_timer(1.0 / TICK_HZ, self._tick)
+        self.timer = self.create_timer(
+            1.0 / TICK_HZ, self._tick, callback_group=self._timer_cb_group
+        )
         max_secs = self._max_duration()
         if args.duration:
             max_secs = min(max_secs, float(args.duration))
@@ -462,11 +481,14 @@ def main():
 
     rclpy.init()
     node = ReplayNode(args, audio_amp, audio_pres, seis_amp, seis_pres)
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         node.summarize()
     finally:
+        executor.shutdown()
         if rclpy.ok():
             rclpy.shutdown()
 
