@@ -13,8 +13,11 @@ data:
         seismic: {{ $spec.seismic }}
 {{- if $spec.accel }}
         accel:
-          x: {{ $spec.accel.x }}
-          y: {{ $spec.accel.y }}
-          z: {{ $spec.accel.z }}
+          {{- /* Use index to look up keys by string, defensive against
+                 YAML 1.1 quirks where bare ``y``/``n`` parse as booleans
+                 and become the wrong map key. */ -}}
+          x: {{ index $spec.accel "x" }}
+          y: {{ index $spec.accel "y" }}
+          z: {{ index $spec.accel "z" }}
 {{- end }}
 {{- end }}
