@@ -1,25 +1,27 @@
 #!/usr/bin/env bash
-# Convenience wrapper for replay_publisher.py against a kind cluster.
-# Copies the script + a paired (audio, seismic) parquet recording into
-# the kind control-plane container and runs the replay there so its DDS
-# participant lands on the same hostNetwork as the in-cluster pods.
+# Convenience wrapper: run replay_publisher.py against the kind smoke-test
+# cluster as a one-off Pod, reusing the already-built ingestor:dev image
+# (which has ROS2 Jazzy + ros2_interfaces baked in). This avoids
+# installing ROS2 inside the kind node, which is minimal Debian without
+# the ROS2 apt repo and would balloon the node by ~500MB.
+#
+# The Pod joins hostNetwork so its DDS participant lives on the same
+# 172.18.0.2 IP as the in-cluster pods — the cluster cannot tell this
+# apart from a real Raspberry Shake.
 #
 # Usage:
-#   scripts/replay_in_kind.sh <audio.parquet> <seismic.parquet> [--duration 60] [...other replay flags]
+#   scripts/replay_in_kind.sh <audio.parquet|csv> <seismic.parquet|csv> [replay flags...]
 #
-# Environment:
-#   KIND_CLUSTER       kind cluster name (default: dark-circle)
-#   FASTDDS_TRANSPORTS forces UDPv4 inside the container; matches the
-#                      cluster pods. Override only if you've changed the
-#                      pipeline's DDS config in values.yaml.
+# Env:
+#   POD_NAME      override the one-off pod name (default: replay-publisher)
+#   IMAGE         override the base image (default: inference-engine/ingestor:dev)
 set -eo pipefail
 
-KIND_CLUSTER="${KIND_CLUSTER:-dark-circle}"
-NODE="${KIND_CLUSTER}-control-plane"
-FASTDDS_TRANSPORTS="${FASTDDS_TRANSPORTS:-UDPv4}"
+POD_NAME="${POD_NAME:-replay-publisher}"
+IMAGE="${IMAGE:-inference-engine/ingestor:dev}"
 
 if [ "$#" -lt 2 ]; then
-    echo "usage: $0 <audio.parquet> <seismic.parquet> [replay flags...]" >&2
+    echo "usage: $0 <audio.parquet|csv> <seismic.parquet|csv> [replay flags...]" >&2
     exit 2
 fi
 
@@ -31,47 +33,83 @@ for f in "$AUDIO" "$SEISMIC"; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Stage assets into the kind node
-docker cp "$SCRIPT_DIR/replay_publisher.py" "$NODE:/tmp/replay_publisher.py"
-docker cp "$AUDIO" "$NODE:/tmp/replay_audio.parquet"
-docker cp "$SEISMIC" "$NODE:/tmp/replay_seismic.parquet"
+# Forward extra flags through the pod's argv. Argparse-friendly quoting:
+# pass each as a separate `command:` element.
+EXTRA_ARGS=("$@")
+EXTRA_ARGS_JSON="["
+first=1
+for a in "${EXTRA_ARGS[@]}"; do
+    if [ $first -eq 0 ]; then EXTRA_ARGS_JSON+=","; fi
+    EXTRA_ARGS_JSON+="\"$a\""
+    first=0
+done
+EXTRA_ARGS_JSON+="]"
 
-# Stage the chart's ros2_interfaces source so we can colcon-build it inside
-# the kind node. The replay script uses the InferenceResult + RawSensorReading
-# message types; without them rclpy can't subscribe / publish.
-docker cp "$ROOT/ros2_interfaces" "$NODE:/tmp/ros2_interfaces"
+# Clean up any prior run.
+kubectl delete pod "$POD_NAME" --ignore-not-found --wait=true >/dev/null
 
-# One-time bootstrap inside the node: install ROS2, pyarrow, build interfaces.
-# Idempotent — short-circuits if already done.
-docker exec "$NODE" bash -lc '
-    set -e
-    if [ ! -f /tmp/.replay-bootstrap-done ]; then
-        echo "=== bootstrapping replay environment ==="
-        apt-get update -qq
-        apt-get install -y -qq ros-jazzy-ros-base python3-pip python3-colcon-common-extensions \
-            ros-jazzy-ament-cmake ros-jazzy-rosidl-default-generators \
-            ros-jazzy-rosidl-default-runtime ros-jazzy-builtin-interfaces \
-            ros-jazzy-std-msgs ros-jazzy-sensor-msgs >/dev/null
-        pip3 install --break-system-packages pyarrow >/dev/null
-        mkdir -p /tmp/ros2_ws/src
-        cp -r /tmp/ros2_interfaces /tmp/ros2_ws/src/
-        cd /tmp/ros2_ws
-        source /opt/ros/jazzy/setup.bash
-        colcon build --packages-select ros2_interfaces >/dev/null
-        touch /tmp/.replay-bootstrap-done
-    fi
-'
+# Stage the script + recordings inside a sleep container, then exec
+# python3 against the staged files. Apply via kubectl apply -f so we
+# get full control over hostNetwork and env wiring.
+echo "=== creating pod $POD_NAME (image $IMAGE) ==="
+kubectl apply -f - <<EOF >/dev/null
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $POD_NAME
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  restartPolicy: Never
+  containers:
+    - name: replay
+      image: $IMAGE
+      imagePullPolicy: IfNotPresent
+      command: ["sleep", "infinity"]
+      env:
+        - name: FASTDDS_BUILTIN_TRANSPORTS
+          value: "UDPv4"
+        - name: ROS_DOMAIN_ID
+          valueFrom:
+            configMapKeyRef:
+              name: inference-engine-config
+              key: ROS_DOMAIN_ID
+EOF
 
-# Run the replay. FASTDDS_BUILTIN_TRANSPORTS=UDPv4 matches what the cluster
-# pods use (set in inference-engine-config), required for kind hostNetwork.
-docker exec -it "$NODE" bash -lc "
+echo "=== waiting for pod to be Ready ==="
+kubectl wait --for=condition=Ready pod/"$POD_NAME" --timeout=60s
+
+# Copy the script and recordings into the pod.
+echo "=== copying replay assets ==="
+kubectl cp "$SCRIPT_DIR/replay_publisher.py" "$POD_NAME:/tmp/replay_publisher.py"
+kubectl cp "$AUDIO"   "$POD_NAME:/tmp/replay_audio$(echo "$AUDIO"   | sed 's/.*\././')"
+kubectl cp "$SEISMIC" "$POD_NAME:/tmp/replay_seismic$(echo "$SEISMIC" | sed 's/.*\././')"
+
+# pyarrow may or may not be in the ingestor image; install if missing.
+kubectl exec "$POD_NAME" -- /bin/bash -c \
+    'python3 -c "import pyarrow" 2>/dev/null || pip3 install --break-system-packages --quiet pyarrow'
+
+# Pick the actual filenames we copied (matches whatever extension the
+# caller passed — .parquet or .csv).
+AUDIO_FNAME="/tmp/replay_audio$(echo "$AUDIO"   | sed 's/.*\././')"
+SEISMIC_FNAME="/tmp/replay_seismic$(echo "$SEISMIC" | sed 's/.*\././')"
+
+# Run replay. The ingestor image's CMD already sources ROS2 Jazzy and
+# the ros2_ws install dir, so we explicitly do the same here.
+set +e
+kubectl exec -t "$POD_NAME" -- /bin/bash -c "
     source /opt/ros/jazzy/setup.bash
-    source /tmp/ros2_ws/install/setup.bash
-    export FASTDDS_BUILTIN_TRANSPORTS=$FASTDDS_TRANSPORTS
+    source /ros2_ws/install/setup.bash
     python3 /tmp/replay_publisher.py \\
-        --audio /tmp/replay_audio.parquet \\
-        --seismic /tmp/replay_seismic.parquet \\
-        $*
+        --audio $AUDIO_FNAME \\
+        --seismic $SEISMIC_FNAME \\
+        ${EXTRA_ARGS[*]}
 "
+RC=$?
+set -e
+
+echo "=== removing pod $POD_NAME ==="
+kubectl delete pod "$POD_NAME" --wait=false >/dev/null
+
+exit $RC
