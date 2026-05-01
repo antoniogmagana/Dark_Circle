@@ -38,11 +38,19 @@ spec:
               value: "/app/ingestor-template.yaml"
             - name: CONFIG_PATH
               value: "/etc/inference-engine/expected-sensors.yaml"
+            - name: FASTRTPS_DEFAULT_PROFILES_FILE
+              value: "/etc/fastdds/fastdds.xml"
           volumeMounts:
             - name: expected-sensors
               mountPath: /etc/inference-engine
+              readOnly: true
+            - name: fastdds-profiles
+              mountPath: /etc/fastdds
               readOnly: true
       volumes:
         - name: expected-sensors
           configMap:
             name: expected-sensors
+        - name: fastdds-profiles
+          configMap:
+            name: fastdds-profiles

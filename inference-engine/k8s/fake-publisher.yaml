@@ -32,3 +32,13 @@ spec:
               value: "/shake_001/aud,/shake_001/ehz,/shake_001/ene,/shake_001/enn,/shake_001/enz"
             - name: FAKE_RATE_HZ
               value: "10"
+            - name: FASTRTPS_DEFAULT_PROFILES_FILE
+              value: "/etc/fastdds/fastdds.xml"
+          volumeMounts:
+            - name: fastdds-profiles
+              mountPath: /etc/fastdds
+              readOnly: true
+      volumes:
+        - name: fastdds-profiles
+          configMap:
+            name: fastdds-profiles

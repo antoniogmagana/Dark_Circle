@@ -31,15 +31,45 @@ data:
   # --- Cluster-internal (defaults; rarely customer-edited) ---
   NATS_URL: "nats://nats-service:4222"
 ---
-# Optional FastDDS unicast profile. When the customer's network blocks
-# multicast (most enterprise networks), populate fastdds.xml below with
-# explicit peer addresses and reference it via FASTRTPS_DEFAULT_PROFILES_FILE
-# in the relevant Deployments. The smoke test relies on hostNetwork +
-# multicast, so this file is empty by default.
+# FastDDS unicast profile. Customers running on networks that block
+# multicast (most enterprise / Kubernetes networks) point
+# FASTRTPS_DEFAULT_PROFILES_FILE at this. The default profile below uses
+# the kind smoke-test layout where all DDS-speaking pods share hostNetwork
+# on a single node, so the only initial peer is the kind node IP.
+#
+# In a real multi-host deployment, the customer replaces the
+# <metatrafficUnicastLocatorList> entries with the IP of each ROS2-speaking
+# host (Raspberry Shake gateway + the k8s node hosting the egress pod).
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: fastdds-profiles
   namespace: default
 data:
-  fastdds.xml: ""
+  fastdds.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+      <participant profile_name="unicast_participant" is_default_profile="true">
+        <rtps>
+          <builtin>
+            <discovery_config>
+              <discoveryProtocol>SIMPLE</discoveryProtocol>
+            </discovery_config>
+            <metatrafficUnicastLocatorList>
+              <locator>
+                <udpv4>
+                  <address>172.18.0.2</address>
+                </udpv4>
+              </locator>
+            </metatrafficUnicastLocatorList>
+            <initialPeersList>
+              <locator>
+                <udpv4>
+                  <address>172.18.0.2</address>
+                </udpv4>
+              </locator>
+            </initialPeersList>
+          </builtin>
+        </rtps>
+      </participant>
+    </profiles>

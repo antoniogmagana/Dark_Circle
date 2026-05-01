@@ -75,3 +75,13 @@ spec:
                 configMapKeyRef:
                   name: sensor-config
                   key: target_rate
+            - name: FASTRTPS_DEFAULT_PROFILES_FILE
+              value: "/etc/fastdds/fastdds.xml"
+          volumeMounts:
+            - name: fastdds-profiles
+              mountPath: /etc/fastdds
+              readOnly: true
+      volumes:
+        - name: fastdds-profiles
+          configMap:
+            name: fastdds-profiles

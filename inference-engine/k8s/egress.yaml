@@ -23,6 +23,11 @@ spec:
       labels:
         app: egress
     spec:
+      # DDS multicast does not traverse Calico-VXLAN, so kind-based smoke
+      # tests need hostNetwork. Customers on a multicast-capable CNI can
+      # drop hostNetwork and rely on FASTRTPS_DEFAULT_PROFILES_FILE alone.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: egress
           image: inference-engine/egress:dev
@@ -30,3 +35,14 @@ spec:
           envFrom:
             - configMapRef:
                 name: inference-engine-config
+          env:
+            - name: FASTRTPS_DEFAULT_PROFILES_FILE
+              value: "/etc/fastdds/fastdds.xml"
+          volumeMounts:
+            - name: fastdds-profiles
+              mountPath: /etc/fastdds
+              readOnly: true
+      volumes:
+        - name: fastdds-profiles
+          configMap:
+            name: fastdds-profiles
