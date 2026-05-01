@@ -23,6 +23,15 @@ from inference_protos import inference_pb2
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/model"))
 
+# Constrain PyTorch's intra-op thread pool to the container's CPU budget.
+# Without this, PyTorch defaults to the host's physical core count (e.g.
+# 120 on a beefy server), but the cgroup CPU limit (typically 2) throttles
+# the process. Threads then thrash competing for the limited CPU slices,
+# turning a 50ms inference into a 2-second one. Drop the limit here so
+# PyTorch only spawns as many threads as it can actually run in parallel.
+_TORCH_THREADS = int(os.environ.get("TORCH_NUM_THREADS", "2"))
+torch.set_num_threads(_TORCH_THREADS)
+
 
 def _load_artifacts(model_dir: Path):
     meta = json.loads((model_dir / "meta.json").read_text())

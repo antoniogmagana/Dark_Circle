@@ -150,6 +150,10 @@ inference:
     resources:
       requests: {cpu: "500m", memory: "512Mi"}
       limits:   {cpu: "2",    memory: "2Gi"}
+    # PyTorch intra-op thread pool size. Should match the integer part
+    # of ``resources.limits.cpu`` — PyTorch's default is the host's
+    # physical core count, which thrashes against the cgroup CPU limit.
+    torchThreads: 2
 
   inferClassify:
     replicas: 1
@@ -158,6 +162,7 @@ inference:
     resources:
       requests: {cpu: "500m", memory: "512Mi"}
       limits:   {cpu: "2",    memory: "2Gi"}
+    torchThreads: 2
 
   egress:
     replicas: 1

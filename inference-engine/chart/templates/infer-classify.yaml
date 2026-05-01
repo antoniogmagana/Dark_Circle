@@ -27,6 +27,11 @@ spec:
           env:
             - name: MODEL_DIR
               value: /app/model
+            # Pin PyTorch's intra-op thread pool to the CPU limit so it
+            # doesn't thrash on cgroup-throttled cores. Default tracks
+            # values.yaml inference.inferClassify.resources.limits.cpu.
+            - name: TORCH_NUM_THREADS
+              value: {{ .Values.inference.inferClassify.torchThreads | default "2" | quote }}
           resources:
             {{- toYaml .Values.inference.inferClassify.resources | nindent 12 }}
 {{- if .Values.keda.enabled }}
