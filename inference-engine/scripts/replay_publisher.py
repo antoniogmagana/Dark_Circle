@@ -50,6 +50,7 @@ import rclpy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from ros2_interfaces.msg import InferenceResult, RawSensorReading
 
 WINDOW_SEC = 1.0          # ingestor's window size
@@ -250,11 +251,20 @@ class ReplayNode(Node):
         self._sub_cb_group = ReentrantCallbackGroup()
 
         if not args.no_subscribe:
+            # Explicit QoS matching egress's publisher (RELIABLE / VOLATILE,
+            # depth=10). Avoids reliance on rclpy default-QoS behavior,
+            # which differs subtly between ROS2 distros.
+            sub_qos = QoSProfile(
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.VOLATILE,
+                history=HistoryPolicy.KEEP_LAST,
+                depth=10,
+            )
             self.create_subscription(
                 InferenceResult,
                 args.inference_topic,
                 self._on_inference,
-                10,
+                sub_qos,
                 callback_group=self._sub_cb_group,
             )
 
@@ -347,6 +357,11 @@ class ReplayNode(Node):
                 }
 
     def _on_inference(self, msg: InferenceResult):
+        # TEMP DEBUG: confirm callback is firing at all
+        self.get_logger().info(
+            f"[debug] callback fired! ts={msg.timestamp} "
+            f"detected={msg.vehicle_detected} det_conf={msg.detection_confidence:.3f}"
+        )
         recv_wall = time.time()
         key = round(msg.timestamp, 3)
         with self.lock:
