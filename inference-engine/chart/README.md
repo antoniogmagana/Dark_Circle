@@ -261,6 +261,120 @@ release. Manual cleanup is rarely needed.
 
 ---
 
+## Testing on pre-recorded data
+
+The pipeline accepts a live ROS2 sensor stream as its input. If you'd
+like to validate an install before connecting real Raspberry Shake
+hardware (or to replay a known recording for offline evaluation),
+`scripts/replay_publisher.py` publishes recorded sensor data to the
+same ROS2 topics the cluster expects, with optional ground-truth
+scoring and end-to-end latency measurement.
+
+### Supported file formats
+
+| Format | Extension | Notes |
+|--------|-----------|-------|
+| Parquet | `.parquet` | Columns inferred from file metadata. |
+| CSV | `.csv` | Header row required by default; use `--no-header` for positional. |
+
+Both formats need a paired (audio, seismic) recording with these
+columns at minimum:
+
+| Canonical name | Type | Required | Purpose |
+|----------------|------|----------|---------|
+| `amplitude` | int / float | yes | Raw ADC sample. |
+| `time_stamp` | float (sec) | recommended | Used to verify the sample rate. |
+| `present` | bool | optional | Per-row ground truth; enables precision/recall scoring. |
+
+If your files use different column names, pass `--column-map`:
+
+```bash
+--column-map "amplitude=value,time_stamp=t,present=label"
+```
+
+Only mention columns whose names differ from the canonical names — the
+others fall through unchanged.
+
+### One-shot setup (Ubuntu / Debian)
+
+```bash
+bash scripts/install_replay.sh
+```
+
+This installs ROS2 Jazzy, `pyarrow`, and builds the `ros2_interfaces`
+custom message package into `~/ros2_replay_ws`. Idempotent — safe to
+re-run. **Does not** modify your `ROS_DOMAIN_ID`, RMW choice, or any
+DDS configuration; replay inherits whatever ROS2 environment you've
+sourced when you invoke it.
+
+### Manual setup (other platforms)
+
+If you're not on Ubuntu / Debian, follow your platform's ROS2 Jazzy
+install guide (https://docs.ros.org/en/jazzy/Installation.html), then:
+
+```bash
+# 1. Python deps
+pip3 install pyarrow
+
+# 2. Build the inference-engine custom messages
+mkdir -p ~/ros2_replay_ws/src
+cp -R inference-engine/ros2_interfaces ~/ros2_replay_ws/src/
+cd ~/ros2_replay_ws
+source /opt/ros/jazzy/setup.bash      # or your platform's equivalent
+colcon build --packages-select ros2_interfaces
+```
+
+### Running the replay
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_replay_ws/install/setup.bash
+
+python3 inference-engine/scripts/replay_publisher.py \
+    --audio path/to/audio.parquet \
+    --seismic path/to/seismic.parquet \
+    --duration 60
+```
+
+`--duration` caps the replay length in seconds. Without it, the tool
+plays the full recording.
+
+The tool publishes to `/shake_001/aud` and `/shake_001/ehz` by default
+(matches the chart's default `expectedSensors.shake-001`). Override
+with `--audio-topic` / `--seismic-topic` if your `expectedSensors`
+configuration uses different names.
+
+### Reading the output
+
+While replaying, one log line per inference window:
+
+```
+t=  3.0s GT=A pred=A det=0.49 cls=         — latency=  85.3ms
+t=  4.0s GT=P pred=P det=0.78 cls=    pickup latency=  92.1ms
+```
+
+- `t` — relative time in the recording.
+- `GT` — ground truth (`P` = present, `A` = absent, `?` = no GT column).
+- `pred` — pipeline prediction.
+- `det` — detection confidence.
+- `cls` — predicted vehicle class (only when detected).
+- `latency` — end-to-end (publish window-end → InferenceResult receive).
+
+After the replay completes, a summary prints per-window precision/recall
+(when GT is available) and latency p50/p95/p99.
+
+### DDS configuration for cross-host replay
+
+If your replay machine is on a different host from the cluster nodes,
+DDS must be able to find them. The chart's pipeline pods use UDP
+unicast (with `FASTDDS_BUILTIN_TRANSPORTS=UDPv4`); your replay process
+should match. If multicast works on your network, no extra
+configuration is needed. Otherwise, point both sides at the same
+`FASTRTPS_DEFAULT_PROFILES_FILE` listing every host's IP — see
+`ros2.fastddsProfile` in `values.yaml`.
+
+---
+
 ## Known limitations
 
 1. **Single-namespace.** Discovery's RBAC scopes it to its own namespace.
