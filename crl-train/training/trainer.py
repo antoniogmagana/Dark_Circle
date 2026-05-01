@@ -1,34 +1,40 @@
 """CRLModel assembly and Trainer for CRL pre-training and downstream evaluation."""
+
 from __future__ import annotations
 
 import csv
 import json
 import math
+from collections.abc import Iterator
 from pathlib import Path
-from typing import IO, Iterator
+from typing import IO
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
-
 from crl_vehicle.config import CRLConfig
+from crl_vehicle.losses.crl_loss import focal_cross_entropy
 from crl_vehicle.models.frontend import LearnableMorletFilterbank
 from crl_vehicle.models.frontend_factory import build_frontend
-from crl_vehicle.models.latent import CausalLatentSpace
-from crl_vehicle.models.intervention import UnknownInterventionClassifier
 from crl_vehicle.models.heads import (
-    LinearPresenceHead, LinearTypeHead, LinearProximityHead,
-    MLPTypeHead, FullZTypeHead,
+    FullZTypeHead,
+    LinearPresenceHead,
+    LinearProximityHead,
+    LinearTypeHead,
+    MLPTypeHead,
 )
-from crl_vehicle.losses.crl_loss import focal_cross_entropy
+from crl_vehicle.models.intervention import UnknownInterventionClassifier
+from crl_vehicle.models.latent import CausalLatentSpace
 from crl_vehicle.training_modes import (
-    CheckpointState, TrainingMode, build_training_mode,
+    CheckpointState,
+    TrainingMode,
+    build_training_mode,
 )
-
+from torch.utils.data import DataLoader
 
 # ---------------------------------------------------------------------------
 # CRLModel
 # ---------------------------------------------------------------------------
+
 
 class CRLModel(nn.Module):
     """Full CRL model supporting multiscale (early fusion) and morlet (late fusion) frontends.
@@ -43,8 +49,11 @@ class CRLModel(nn.Module):
     """
 
     VALID_PROBE_MODES = (
-        "linear_ztype", "mlp_ztype", "linear_fullz",
-        "linear_signal", "mlp_signal",
+        "linear_ztype",
+        "mlp_ztype",
+        "linear_fullz",
+        "linear_signal",
+        "mlp_signal",
     )
 
     def __init__(
@@ -75,10 +84,14 @@ class CRLModel(nn.Module):
 
         if config.frontend_bank in ("multiscale", "morlet", "morlet_learnable"):
             self._refresh_legacy_per_sensor_params(config)
-            self.frontends, self.encoder, self.decoder, \
-                self.encoders, self.decoders, self._morlet_derived_params = (
-                    build_frontend(config, self.sensors)
-                )
+            (
+                self.frontends,
+                self.encoder,
+                self.decoder,
+                self.encoders,
+                self.decoders,
+                self._morlet_derived_params,
+            ) = build_frontend(config, self.sensors)
             head_keys = ["fused"] if config.frontend_fusion == "early" else self.sensors
         else:
             raise ValueError(f"Unknown frontend_bank: {config.frontend_bank!r}")
@@ -92,9 +105,9 @@ class CRLModel(nn.Module):
         self.aux_type_heads = nn.ModuleDict()
 
         for key in head_keys:
-            self.pres_heads[key]     = LinearPresenceHead()
-            self.type_heads[key]     = self._build_type_head(d_z)
-            self.prox_heads[key]     = LinearProximityHead()
+            self.pres_heads[key] = LinearPresenceHead()
+            self.type_heads[key] = self._build_type_head(d_z)
+            self.prox_heads[key] = LinearProximityHead()
             self.aux_pres_heads[key] = nn.Linear(CausalLatentSpace.D_PRES, 1)
             self.aux_type_heads[key] = nn.Linear(CausalLatentSpace.D_TYPE, 4)
 
@@ -117,9 +130,7 @@ class CRLModel(nn.Module):
         legacy = config.morlet_per_sensor_params
         if not legacy:
             return
-        config.frontend_per_sensor_params = {
-            s: dict(p) for s, p in legacy.items()
-        }
+        config.frontend_per_sensor_params = {s: dict(p) for s, p in legacy.items()}
         # Early fusion: legacy morlet_fused always pooled to fused_seq_len,
         # overriding per-sensor target_tokens. Match that.
         if config.frontend_fusion == "early":
@@ -164,7 +175,6 @@ class CRLModel(nn.Module):
                     params.extend(module.parameters(recurse=False))
         return params
 
-
     # ------------------------------------------------------------------
     # Encode / decode API
     # ------------------------------------------------------------------
@@ -174,8 +184,10 @@ class CRLModel(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Early-fusion encode. Returns (features, z, mu, logvar).
         features: (B, d_model, n_sensors*fused_seq_len) — reconstruction target."""
-        feats = [self.frontends[s](x.float())
-                 for s, x in zip(self.sensors, [x_audio, x_seismic])]
+        feats = [
+            self.frontends[s](x.float())
+            for s, x in zip(self.sensors, [x_audio, x_seismic], strict=False)
+        ]
         features = torch.cat(feats, dim=2)
         z, mu, logvar = self.encoder(features)
         return features, z, mu, logvar
@@ -201,14 +213,17 @@ class CRLModel(nn.Module):
     def backbone_parameters(self) -> list[nn.Parameter]:
         """Backbone params — excludes downstream heads AND learnable Morlet
         params (those get their own optimizer group with a reduced LR)."""
-        exclude_ids = set(
+        exclude_ids = {
             id(p)
             for group in [
-                self.pres_heads, self.type_heads, self.prox_heads,
-                self.aux_pres_heads, self.aux_type_heads,
+                self.pres_heads,
+                self.type_heads,
+                self.prox_heads,
+                self.aux_pres_heads,
+                self.aux_type_heads,
             ]
             for p in group.parameters()
-        )
+        }
         exclude_ids.update(id(p) for p in self.learnable_morlet_parameters())
         return [p for p in self.parameters() if id(p) not in exclude_ids]
 
@@ -217,7 +232,9 @@ class CRLModel(nn.Module):
             yield from group.parameters()
 
     def load_from_fixed_morlet_checkpoint(
-        self, state_dict: dict, strict: bool = True,
+        self,
+        state_dict: dict,
+        strict: bool = True,
     ) -> tuple[list[str], list[str]]:
         """Load weights from a fixed-Morlet (morlet_per_sensor or morlet_fused)
         checkpoint into this learnable model.
@@ -251,10 +268,10 @@ class CRLModel(nn.Module):
 
         # Per-sensor filterbank conversion: drop fixed kernels, inject
         # log_scales from init_scales.
-        for sensor_name in self.frontends.keys():
+        for sensor_name in self.frontends:
             ks_re_key = f"frontends.{sensor_name}.0.kernel_re"
             ks_im_key = f"frontends.{sensor_name}.0.kernel_im"
-            init_key  = f"frontends.{sensor_name}.0.init_scales"
+            init_key = f"frontends.{sensor_name}.0.init_scales"
 
             for k in (ks_re_key, ks_im_key):
                 if k in source:
@@ -271,13 +288,12 @@ class CRLModel(nn.Module):
         # sensors missing from the source are OK (fresh init). probe head
         # re-init is also expected (we dropped them).
         def _is_expected_missing(k: str) -> bool:
-            return (
-                k.startswith(("pres_heads.", "type_heads.", "prox_heads."))
-                or k.endswith(".w0_per_filter")   # source had fixed w0; we init fresh
-            )
+            return k.startswith(("pres_heads.", "type_heads.", "prox_heads.")) or k.endswith(
+                ".w0_per_filter"
+            )  # source had fixed w0; we init fresh
 
-        other_missing    = [k for k in missing    if not _is_expected_missing(k)]
-        other_unexpected = [k for k in unexpected]
+        other_missing = [k for k in missing if not _is_expected_missing(k)]
+        other_unexpected = list(unexpected)
 
         if strict and (other_missing or other_unexpected):
             raise RuntimeError(
@@ -317,6 +333,7 @@ class CRLModel(nn.Module):
 # Metric helpers
 # ---------------------------------------------------------------------------
 
+
 def _binary_f1_acc(logits: torch.Tensor, labels: torch.Tensor) -> tuple[float, float]:
     """Binary F1 and accuracy from raw logits and {0,1} labels."""
     if logits.numel() == 0:
@@ -325,7 +342,7 @@ def _binary_f1_acc(logits: torch.Tensor, labels: torch.Tensor) -> tuple[float, f
     tp = ((preds == 1) & (labels == 1)).sum().item()
     fp = ((preds == 1) & (labels == 0)).sum().item()
     fn = ((preds == 0) & (labels == 1)).sum().item()
-    f1  = (2 * tp) / max(2 * tp + fp + fn, 1)
+    f1 = (2 * tp) / max(2 * tp + fp + fn, 1)
     acc = (preds == labels).float().mean().item()
     return f1, acc
 
@@ -337,7 +354,7 @@ def _macro_f1_acc(
     if logits.numel() == 0:
         return 0.0, 0.0
     preds = logits.argmax(dim=-1)
-    acc   = (preds == labels).float().mean().item()
+    acc = (preds == labels).float().mean().item()
     f1_sum = 0.0
     for c in range(n_classes):
         tp = ((preds == c) & (labels == c)).sum().item()
@@ -350,6 +367,7 @@ def _macro_f1_acc(
 # ---------------------------------------------------------------------------
 # Trainer
 # ---------------------------------------------------------------------------
+
 
 class Trainer:
     """Handles CRL pre-training and downstream head training.
@@ -367,8 +385,8 @@ class Trainer:
         save_dir: Path,
         stage2: bool = False,
     ) -> None:
-        self.model  = model
-        self.cfg    = config
+        self.model = model
+        self.cfg = config
         self.device = device
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -378,7 +396,7 @@ class Trainer:
         self.ckpt_state = CheckpointState()
 
         self.beta = 0.0
-        self._pres_pos_weight:    torch.Tensor | None = None
+        self._pres_pos_weight: torch.Tensor | None = None
         self._type_class_weights: torch.Tensor | None = None
 
         # The optimizer covers: (1) model backbone, (2) learnable params
@@ -391,8 +409,7 @@ class Trainer:
         # LR to stage2_encoder_lr_mult× the base LR. Filters become the
         # primary mover; encoder just fine-tunes.
         backbone_param_ids = {id(p) for p in model.backbone_parameters()}
-        mode_params = [p for p in self.mode.parameters()
-                       if id(p) not in backbone_param_ids]
+        mode_params = [p for p in self.mode.parameters() if id(p) not in backbone_param_ids]
         learnable_morlet_params = model.learnable_morlet_parameters()
 
         backbone_lr = config.lr
@@ -400,26 +417,38 @@ class Trainer:
             backbone_lr = config.lr * config.stage2_encoder_lr_mult
 
         param_groups = [
-            {"params": model.backbone_parameters(), "weight_decay": config.wd,
-             "lr": backbone_lr, "name": "backbone"}
+            {
+                "params": model.backbone_parameters(),
+                "weight_decay": config.wd,
+                "lr": backbone_lr,
+                "name": "backbone",
+            }
         ]
         if mode_params:
-            param_groups.append({
-                "params": mode_params, "weight_decay": config.wd,
-                "lr": backbone_lr, "name": "mode",
-            })
+            param_groups.append(
+                {
+                    "params": mode_params,
+                    "weight_decay": config.wd,
+                    "lr": backbone_lr,
+                    "name": "mode",
+                }
+            )
         if learnable_morlet_params:
-            param_groups.append({
-                "params":       learnable_morlet_params,
-                "weight_decay": config.wd,
-                "lr":           config.lr * config.morlet_learnable_lr_mult,
-                "name":         "learnable_morlet",
-            })
+            param_groups.append(
+                {
+                    "params": learnable_morlet_params,
+                    "weight_decay": config.wd,
+                    "lr": config.lr * config.morlet_learnable_lr_mult,
+                    "name": "learnable_morlet",
+                }
+            )
         self.optimizer = torch.optim.AdamW(param_groups, lr=config.lr)
 
+        self.scheduler: torch.optim.lr_scheduler.LRScheduler
         if stage2:
             self.scheduler = self._build_stage2_scheduler(
-                total_epochs=config.n_epochs, warmup_epochs=3,
+                total_epochs=config.n_epochs,
+                warmup_epochs=3,
             )
         else:
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -427,7 +456,9 @@ class Trainer:
             )
 
     def _build_stage2_scheduler(
-        self, total_epochs: int, warmup_epochs: int,
+        self,
+        total_epochs: int,
+        warmup_epochs: int,
     ) -> torch.optim.lr_scheduler.LambdaLR:
         """Stage-2 schedule: for the learnable_morlet group, linear warmup
         from 0 to full LR over warmup_epochs, then cosine annealing over the
@@ -460,12 +491,10 @@ class Trainer:
                         max(total_epochs - warmup_epochs, 1),
                     )
                 return _lr_multiplier_cosine(epoch, total_epochs)
+
             return _fn
 
-        lambdas = [
-            _lambda_for_group(g.get("name", ""))
-            for g in self.optimizer.param_groups
-        ]
+        lambdas = [_lambda_for_group(g.get("name", "")) for g in self.optimizer.param_groups]
         return torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambdas)
 
     # ------------------------------------------------------------------
@@ -473,7 +502,9 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def _forward_pair(
-        self, batch: dict, beta: float,
+        self,
+        batch: dict,
+        beta: float,
     ) -> tuple[torch.Tensor, dict]:
         return self.mode.forward_pair(self.model, batch, beta, self.device)
 
@@ -482,8 +513,10 @@ class Trainer:
     # ------------------------------------------------------------------
 
     _AUX_TENSOR_KEYS = (
-        "aux_pres_logits", "aux_pres_labels",
-        "aux_type_logits", "aux_type_labels",
+        "aux_pres_logits",
+        "aux_pres_labels",
+        "aux_type_logits",
+        "aux_type_labels",
     )
 
     def _accumulate(
@@ -506,19 +539,31 @@ class Trainer:
         prefix: str,
     ) -> dict:
         out = {f"{prefix}{k}": v / max(n_batches, 1) for k, v in scalar_agg.items()}
-        pres_logits = torch.cat(tensor_agg.get("aux_pres_logits", [])) \
-            if tensor_agg.get("aux_pres_logits") else torch.empty(0)
-        pres_labels = torch.cat(tensor_agg.get("aux_pres_labels", [])) \
-            if tensor_agg.get("aux_pres_labels") else torch.empty(0, dtype=torch.long)
-        type_logits = torch.cat(tensor_agg.get("aux_type_logits", [])) \
-            if tensor_agg.get("aux_type_logits") else torch.empty(0)
-        type_labels = torch.cat(tensor_agg.get("aux_type_labels", [])) \
-            if tensor_agg.get("aux_type_labels") else torch.empty(0, dtype=torch.long)
+        pres_logits = (
+            torch.cat(tensor_agg.get("aux_pres_logits", []))
+            if tensor_agg.get("aux_pres_logits")
+            else torch.empty(0)
+        )
+        pres_labels = (
+            torch.cat(tensor_agg.get("aux_pres_labels", []))
+            if tensor_agg.get("aux_pres_labels")
+            else torch.empty(0, dtype=torch.long)
+        )
+        type_logits = (
+            torch.cat(tensor_agg.get("aux_type_logits", []))
+            if tensor_agg.get("aux_type_logits")
+            else torch.empty(0)
+        )
+        type_labels = (
+            torch.cat(tensor_agg.get("aux_type_labels", []))
+            if tensor_agg.get("aux_type_labels")
+            else torch.empty(0, dtype=torch.long)
+        )
         pres_f1, pres_acc = _binary_f1_acc(pres_logits, pres_labels)
         type_f1, type_acc = _macro_f1_acc(type_logits, type_labels, n_classes=4)
-        out[f"{prefix}aux_pres_f1"]  = round(pres_f1,  4)
+        out[f"{prefix}aux_pres_f1"] = round(pres_f1, 4)
         out[f"{prefix}aux_pres_acc"] = round(pres_acc, 4)
-        out[f"{prefix}aux_type_f1"]  = round(type_f1,  4)
+        out[f"{prefix}aux_type_f1"] = round(type_f1, 4)
         out[f"{prefix}aux_type_acc"] = round(type_acc, 4)
         return out
 
@@ -582,7 +627,7 @@ class Trainer:
                     w0_vec = bank.w0_per_filter.detach().cpu().tolist()
                 else:
                     w0_vec = [bank.w0] * bank.out_channels
-                for idx, (f_hz, w) in enumerate(zip(freqs, w0_vec)):
+                for idx, (f_hz, w) in enumerate(zip(freqs, w0_vec, strict=False)):
                     writer.writerow([epoch, sensor, idx, f_hz, w])
 
     def _learned_morlet_params_summary(self) -> dict:
@@ -618,19 +663,17 @@ class Trainer:
         try:
             for epoch in range(epochs):
                 train_m = self._train_epoch(train_loader, self.beta, steps_per_epoch)
-                val_m   = self._eval_epoch(val_loader, self.beta)
+                val_m = self._eval_epoch(val_loader, self.beta)
                 self.scheduler.step()
 
-                new_beta, event = self.mode.update_beta(
-                    self.beta, val_m, self.ckpt_state, self.cfg
-                )
+                new_beta, event = self.mode.update_beta(self.beta, val_m, self.ckpt_state, self.cfg)
                 self.beta = new_beta
 
                 row = {"epoch": epoch, "beta": self.beta, "beta_event": event}
                 row.update(train_m)
                 row.update(val_m)
                 if csv_writer is None:
-                    csv_file = open(csv_path, "w", newline="")
+                    csv_file = open(csv_path, "w", newline="")  # noqa: SIM115  # fmt: skip
                     csv_writer = csv.DictWriter(csv_file, fieldnames=list(row.keys()))
                     csv_writer.writeheader()
                 csv_writer.writerow(row)
@@ -714,13 +757,14 @@ class Trainer:
                     dropped_shape_mismatch.append(k)
                     state.pop(k)
             missing, unexpected = self.model.load_state_dict(state, strict=False)
+
             # type_heads.* / aux_type_heads.* mismatches are expected when
             # --probe-mode differs from the saved run. Anything else indicates a
             # genuine shape/config mismatch (e.g., wrong d_z) and should fail loudly.
             def _is_type_head_key(k: str) -> bool:
                 return k.startswith(("type_heads.", "aux_type_heads."))
 
-            other_missing    = [k for k in missing    if not _is_type_head_key(k)]
+            other_missing = [k for k in missing if not _is_type_head_key(k)]
             other_unexpected = [k for k in unexpected if not _is_type_head_key(k)]
             if other_missing or other_unexpected:
                 raise RuntimeError(
@@ -728,7 +772,7 @@ class Trainer:
                     f"silently train on partially-initialized backbone. "
                     f"Missing: {other_missing[:5]} | Unexpected: {other_unexpected[:5]}"
                 )
-            type_keys_missing    = [k for k in missing    if _is_type_head_key(k)]
+            type_keys_missing = [k for k in missing if _is_type_head_key(k)]
             type_keys_unexpected = [k for k in unexpected if _is_type_head_key(k)]
             if type_keys_missing or type_keys_unexpected or dropped_shape_mismatch:
                 print(
@@ -746,7 +790,7 @@ class Trainer:
 
         backbone_params: list[nn.Parameter] = []
         if finetune_top_n != 0:
-            backbone_params = self._finetune_params(finetune_top_n)
+            backbone_params = self.model._finetune_params(finetune_top_n)
             for p in backbone_params:
                 p.requires_grad_(True)
 
@@ -755,7 +799,7 @@ class Trainer:
             param_groups.append({"params": backbone_params, "lr": self.cfg.lr * 0.1})
 
         head_opt = torch.optim.AdamW(param_groups)
-        self._pres_pos_weight    = pres_pos_weight
+        self._pres_pos_weight = pres_pos_weight
         self._type_class_weights = type_class_weights
 
         csv_path = self.save_dir / "downstream_metrics.csv"
@@ -800,21 +844,23 @@ class Trainer:
                 type_f1 = type_acc = 0.0
                 if type_logits_all:
                     type_f1, type_acc = _macro_f1_acc(
-                        torch.cat(type_logits_all), torch.cat(type_labels_all), n_classes=4
+                        torch.cat(type_logits_all),
+                        torch.cat(type_labels_all),
+                        n_classes=4,
                     )
 
                 avg_val = val_loss / max(m, 1)
                 row = {
-                    "epoch":        epoch,
-                    "train_loss":   train_loss / max(n, 1),
-                    "val_loss":     avg_val,
-                    "val_pres_f1":  round(pres_f1,  4),
-                    "val_pres_acc": round(pres_acc,  4),
-                    "val_type_f1":  round(type_f1,  4),
-                    "val_type_acc": round(type_acc,  4),
+                    "epoch": epoch,
+                    "train_loss": train_loss / max(n, 1),
+                    "val_loss": avg_val,
+                    "val_pres_f1": round(pres_f1, 4),
+                    "val_pres_acc": round(pres_acc, 4),
+                    "val_type_f1": round(type_f1, 4),
+                    "val_type_acc": round(type_acc, 4),
                 }
                 if csv_writer is None:
-                    csv_file = open(csv_path, "w", newline="")
+                    csv_file = open(csv_path, "w", newline="")  # noqa: SIM115  # fmt: skip
                     csv_writer = csv.DictWriter(csv_file, fieldnames=list(row.keys()))
                     csv_writer.writeheader()
                 csv_writer.writerow(row)
@@ -832,22 +878,20 @@ class Trainer:
         finally:
             if csv_file is not None:
                 csv_file.close()
-            self._pres_pos_weight    = None
+            self._pres_pos_weight = None
             self._type_class_weights = None
 
         for p in self.model.parameters():
             p.requires_grad_(True)
 
-    def _downstream_forward(
-        self, batch: dict
-    ) -> tuple[torch.Tensor, dict]:
+    def _downstream_forward(self, batch: dict) -> tuple[torch.Tensor, dict]:
         """Return (loss, {pres_logits, pres_labels, type_logits, type_labels}).
 
         type_logits/type_labels are None when no valid-type samples exist in batch.
         Logits returned on the same device as model; accumulate on CPU for epoch metrics.
         """
         model = self.model
-        dev   = self.device
+        dev = self.device
         total = torch.tensor(0.0, device=dev)
         n = 0
 
@@ -860,9 +904,9 @@ class Trainer:
         tcw = self._type_class_weights
         cfg = model.cfg
 
-        use_fullz  = model.probe_mode == "linear_fullz"
+        use_fullz = model.probe_mode == "linear_fullz"
         use_signal = model.probe_mode in ("linear_signal", "mlp_signal")
-        d_signal   = self.model.cfg.d_signal
+        d_signal = self.model.cfg.d_signal
 
         def _select_type_slice(z_full, z_type_block, mask):
             if use_fullz:
@@ -874,7 +918,10 @@ class Trainer:
         def _type_loss(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
             if cfg.use_focal_type:
                 return focal_cross_entropy(
-                    logits, target, weight=tcw, gamma=cfg.focal_type_gamma,
+                    logits,
+                    target,
+                    weight=tcw,
+                    gamma=cfg.focal_type_gamma,
                 )
             return torch.nn.functional.cross_entropy(logits, target, weight=tcw)
 
@@ -885,11 +932,12 @@ class Trainer:
                 x_s = batch["x_seismic"][avail].to(dev)
                 _, z, _, _ = model.encode_fused(x_a, x_s)
                 z_pres, z_type, _, _, _ = model.latent.split(z)
-                det   = batch["detection_label"][avail].float().to(dev)
+                det = batch["detection_label"][avail].float().to(dev)
                 vtype = batch["vehicle_type"][avail].to(dev)
                 pres_logit = model.pres_heads["fused"](z_pres).squeeze(-1)
                 total = total + torch.nn.functional.binary_cross_entropy_with_logits(
-                    pres_logit, det, pos_weight=ppw)
+                    pres_logit, det, pos_weight=ppw
+                )
                 pres_logits_list.append(pres_logit.detach())
                 pres_labels_list.append(det.long())
                 valid = vtype >= 0
@@ -908,11 +956,12 @@ class Trainer:
                 x = batch[f"x_{sensor}"][avail].to(dev)
                 _, z, _, _ = model.encode(sensor, x)
                 z_pres, z_type, _, _, _ = model.latent.split(z)
-                det   = batch["detection_label"][avail].float().to(dev)
+                det = batch["detection_label"][avail].float().to(dev)
                 vtype = batch["vehicle_type"][avail].to(dev)
                 pres_logit = model.pres_heads[sensor](z_pres).squeeze(-1)
                 total = total + torch.nn.functional.binary_cross_entropy_with_logits(
-                    pres_logit, det, pos_weight=ppw)
+                    pres_logit, det, pos_weight=ppw
+                )
                 pres_logits_list.append(pres_logit.detach())
                 pres_labels_list.append(det.long())
                 valid = vtype >= 0
@@ -925,10 +974,15 @@ class Trainer:
                 n += 1
 
         outputs = {
-            "pres_logits": torch.cat(pres_logits_list) if pres_logits_list else torch.empty(0, device=dev),
-            "pres_labels": torch.cat(pres_labels_list) if pres_labels_list else torch.empty(0, dtype=torch.long, device=dev),
+            "pres_logits": (
+                torch.cat(pres_logits_list) if pres_logits_list else torch.empty(0, device=dev)
+            ),
+            "pres_labels": (
+                torch.cat(pres_labels_list)
+                if pres_labels_list
+                else torch.empty(0, dtype=torch.long, device=dev)
+            ),
             "type_logits": torch.cat(type_logits_list) if type_logits_list else None,
             "type_labels": torch.cat(type_labels_list) if type_labels_list else None,
         }
         return total / max(n, 1), outputs
-

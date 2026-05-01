@@ -1,9 +1,7 @@
+import config
 import pytest
 import torch
-import config
-
-from train import VehicleStreamer, extract_instance_from_table, assign_label
-
+from train import VehicleStreamer, assign_label, extract_instance_from_table
 
 # ============================================================
 # 1. Mock DB functions
@@ -88,12 +86,9 @@ def test_streamer_with_mocked_db(monkeypatch):
         assert isinstance(window, torch.Tensor)
         assert window.dim() == 2  # [C, T]
         assert (
-            window.shape[1]
-            == int(config.NATIVE_SR["iobt"]["audio"] * config.SAMPLE_SECONDS)
-            or window.shape[1]
-            == int(config.NATIVE_SR["focal"]["audio"] * config.SAMPLE_SECONDS)
-            or window.shape[1]
-            == int(config.NATIVE_SR["m3nvc"]["audio"] * config.SAMPLE_SECONDS)
+            window.shape[1] == int(config.NATIVE_SR["iobt"]["audio"] * config.SAMPLE_SECONDS)
+            or window.shape[1] == int(config.NATIVE_SR["focal"]["audio"] * config.SAMPLE_SECONDS)
+            or window.shape[1] == int(config.NATIVE_SR["m3nvc"]["audio"] * config.SAMPLE_SECONDS)
         )
 
         # -----------------------------

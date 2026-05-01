@@ -18,6 +18,7 @@ Output (default --out saved_crl/analysis/):
     leaderboard.csv   — all columns, one row per run
     leaderboard.md    — markdown table sorted by --sort, shippable rows flagged
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,7 +28,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from crl_vehicle import analysis as A
-
 
 # --------------------------------------------------------------------------
 # Row assembly
@@ -56,23 +56,23 @@ COLUMNS = [
 
 def _row(rm: A.RunMetrics) -> dict:
     return {
-        "name":                rm.name,
-        "frontend_type":       rm.config.get("frontend_type", ""),
-        "morlet_use_phase":    rm.config.get("morlet_use_phase", ""),
-        "prior_type":          rm.config.get("prior_type", ""),
-        "training_mode":       rm.config.get("training_mode", ""),
-        "stage2":              rm.stage2,
-        "epochs_completed":    rm.epochs_completed,
-        "best_pres_f1":        _fmt(rm.best_pres_f1),
-        "best_type_f1":        _fmt(rm.best_type_f1),
-        "best_val_ref_elbo":   _fmt(rm.best_val_ref_elbo),
+        "name": rm.name,
+        "frontend_type": rm.config.get("frontend_type", ""),
+        "morlet_use_phase": rm.config.get("morlet_use_phase", ""),
+        "prior_type": rm.config.get("prior_type", ""),
+        "training_mode": rm.config.get("training_mode", ""),
+        "stage2": rm.stage2,
+        "epochs_completed": rm.epochs_completed,
+        "best_pres_f1": _fmt(rm.best_pres_f1),
+        "best_type_f1": _fmt(rm.best_type_f1),
+        "best_val_ref_elbo": _fmt(rm.best_val_ref_elbo),
         "min_dataset_type_f1": _fmt(rm.min_dataset_type_f1),
-        "worst_dataset":       rm.worst_dataset or "",
-        "calibrated_type_f1":  _fmt(rm.calibrated_type_f1),
-        "balanced_accuracy":   _fmt(rm.balanced_accuracy),
-        "mcc":                 _fmt(rm.mcc),
-        "shippable":           rm.shippable,
-        "diverged":            rm.diverged,
+        "worst_dataset": rm.worst_dataset or "",
+        "calibrated_type_f1": _fmt(rm.calibrated_type_f1),
+        "balanced_accuracy": _fmt(rm.balanced_accuracy),
+        "mcc": _fmt(rm.mcc),
+        "shippable": rm.shippable,
+        "diverged": rm.diverged,
     }
 
 
@@ -90,15 +90,15 @@ def _fmt(v):
 
 # Metrics where higher is better vs lower is better.
 _SORT_DIRECTION = {
-    "best_pres_f1":        "desc",
-    "best_type_f1":        "desc",
+    "best_pres_f1": "desc",
+    "best_type_f1": "desc",
     "min_dataset_type_f1": "desc",
-    "calibrated_type_f1":  "desc",
-    "balanced_accuracy":   "desc",
-    "mcc":                 "desc",
-    "shippable":           "desc",
-    "epochs_completed":    "desc",
-    "best_val_ref_elbo":   "asc",
+    "calibrated_type_f1": "desc",
+    "balanced_accuracy": "desc",
+    "mcc": "desc",
+    "shippable": "desc",
+    "epochs_completed": "desc",
+    "best_val_ref_elbo": "asc",
 }
 
 
@@ -109,7 +109,7 @@ def _sort_key(row: dict, field: str):
         return (1, 0)
     if isinstance(val, bool):
         return (0, -int(val) if _SORT_DIRECTION.get(field) == "desc" else int(val))
-    if isinstance(val, (int, float)):
+    if isinstance(val, int | float):
         return (0, -val if _SORT_DIRECTION.get(field, "desc") == "desc" else val)
     return (0, str(val))
 
@@ -123,17 +123,17 @@ def _sort_rows(rows: list[dict], field: str) -> list[dict]:
 # --------------------------------------------------------------------------
 
 _MD_COLS = [
-    ("name",                "Run"),
-    ("frontend_type",       "Frontend"),
-    ("morlet_use_phase",    "Phase"),
-    ("stage2",              "Stage2"),
-    ("epochs_completed",    "Ep"),
-    ("best_pres_f1",        "pres_f1"),
-    ("best_type_f1",        "type_f1"),
-    ("best_val_ref_elbo",   "ELBO"),
+    ("name", "Run"),
+    ("frontend_type", "Frontend"),
+    ("morlet_use_phase", "Phase"),
+    ("stage2", "Stage2"),
+    ("epochs_completed", "Ep"),
+    ("best_pres_f1", "pres_f1"),
+    ("best_type_f1", "type_f1"),
+    ("best_val_ref_elbo", "ELBO"),
     ("min_dataset_type_f1", "min-ds F1"),
-    ("worst_dataset",       "worst"),
-    ("mcc",                 "MCC"),
+    ("worst_dataset", "worst"),
+    ("mcc", "MCC"),
 ]
 
 
@@ -154,9 +154,7 @@ def render_markdown(rows: list[dict], title: str) -> str:
             cells.append(str(val))
         lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
-    lines.append(
-        f"- ✓ = shippable (pres_f1 ≥ {A.SHIP_PRES_F1}, type_f1 ≥ {A.SHIP_TYPE_F1})"
-    )
+    lines.append(f"- ✓ = shippable (pres_f1 ≥ {A.SHIP_PRES_F1}, type_f1 ≥ {A.SHIP_TYPE_F1})")
     lines.append(f"- ⚠ = diverged (val_ref_elbo > {A.DIVERGED_ELBO_THRESHOLD})")
     return "\n".join(lines)
 
@@ -165,20 +163,31 @@ def render_markdown(rows: list[dict], title: str) -> str:
 # CLI
 # --------------------------------------------------------------------------
 
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--root",    default="saved_crl/runs", type=Path)
-    p.add_argument("--out",     default="saved_crl/analysis", type=Path)
-    p.add_argument("--filter",  action="append", default=[], metavar="key=val",
-                   help="Filter runs by config field (repeatable).")
-    p.add_argument("--include-diverged", action="store_true",
-                   help="Include runs where best_val_ref_elbo > "
-                        f"{A.DIVERGED_ELBO_THRESHOLD} (dropped by default).")
-    p.add_argument("--sort", default="best_type_f1",
-                   help="Column name to sort by. Direction inferred from "
-                        "column semantics (F1s desc, ELBO asc).")
-    p.add_argument("--top", type=int, default=None,
-                   help="Keep only the top N rows after sorting.")
+    p.add_argument("--root", default="saved_crl/runs", type=Path)
+    p.add_argument("--out", default="saved_crl/analysis", type=Path)
+    p.add_argument(
+        "--filter",
+        action="append",
+        default=[],
+        metavar="key=val",
+        help="Filter runs by config field (repeatable).",
+    )
+    p.add_argument(
+        "--include-diverged",
+        action="store_true",
+        help="Include runs where best_val_ref_elbo > "
+        f"{A.DIVERGED_ELBO_THRESHOLD} (dropped by default).",
+    )
+    p.add_argument(
+        "--sort",
+        default="best_type_f1",
+        help="Column name to sort by. Direction inferred from "
+        "column semantics (F1s desc, ELBO asc).",
+    )
+    p.add_argument("--top", type=int, default=None, help="Keep only the top N rows after sorting.")
     return p.parse_args()
 
 
@@ -195,11 +204,11 @@ def main() -> int:
     rows = [_row(rm) for rm in runs]
     rows = _sort_rows(rows, args.sort)
     if args.top is not None:
-        rows = rows[:args.top]
+        rows = rows[: args.top]
 
     args.out.mkdir(parents=True, exist_ok=True)
     csv_path = args.out / "leaderboard.csv"
-    md_path  = args.out / "leaderboard.md"
+    md_path = args.out / "leaderboard.md"
 
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=COLUMNS)

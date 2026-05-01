@@ -1,9 +1,9 @@
+import config
 import pytest
 import torch
-import config
+from preprocess import preprocess_for_training
 
 from models import MODEL_REGISTRY
-from preprocess import preprocess_for_training, extract_mel_spectrogram
 
 
 @pytest.mark.parametrize(

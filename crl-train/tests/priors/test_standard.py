@@ -1,6 +1,5 @@
 import pytest
 import torch
-
 from crl_vehicle.losses.crl_loss import kl_divergence
 from crl_vehicle.priors import Prior, StandardPrior
 

@@ -1,10 +1,11 @@
 import fcntl
-import os
 import hashlib
 import json
+import os
+
+import pandas as pd
 import torch
 import torchaudio.transforms
-import pandas as pd
 from torch.utils.data import Dataset
 
 
@@ -55,7 +56,7 @@ class VehicleDataset(Dataset):
             step = self.config.WINDOW_STEP if self.split == "train" else self.config.SAMPLE_SECONDS
             start = round(time * step * sample_rate)
             cached = self.table_cache[(table, run_id)]
-            sensor_data = cached[:, start:start + expected_window].clone()
+            sensor_data = cached[:, start : start + expected_window].clone()
 
             if sensor_data.shape[1] < expected_window:
                 pad_amount = expected_window - sensor_data.shape[1]
@@ -65,9 +66,7 @@ class VehicleDataset(Dataset):
 
             target_freq = int(max_time_steps / self.config.SAMPLE_SECONDS)
             if sample_rate < target_freq:
-                sensor_data = self._upsample_signal(
-                    sensor_data, sample_rate, target_freq
-                )
+                sensor_data = self._upsample_signal(sensor_data, sample_rate, target_freq)
 
             if sensor_data.shape[1] > max_time_steps:
                 sensor_data = sensor_data[:, :max_time_steps]
@@ -139,21 +138,17 @@ class VehicleDataset(Dataset):
                     self.table_run_min_time[key] = float(grp["time_stamp"].min())
                     self.table_run_max_time[key] = float(grp["time_stamp"].max())
                     sec_groups = grp.groupby(grp["time_stamp"].astype(int))["present"].all()
-                    self.present_maps[key] = {
-                        int(k): bool(v) for k, v in sec_groups.items()
-                    }
+                    self.present_maps[key] = {int(k): bool(v) for k, v in sec_groups.items()}
             else:
                 key = (table, None)
                 self.table_run_min_time[key] = float(df["time_stamp"].min())
                 self.table_run_max_time[key] = float(df["time_stamp"].max())
                 sec_groups = df.groupby(df["time_stamp"].astype(int))["present"].all()
-                self.present_maps[key] = {
-                    int(k): bool(v) for k, v in sec_groups.items()
-                }
+                self.present_maps[key] = {int(k): bool(v) for k, v in sec_groups.items()}
 
     def _align_max_time(self):
         groups = {}
-        for (table, run_id), max_t in self.table_run_max_time.items():
+        for (table, run_id), _max_t in self.table_run_max_time.items():
             parts = table.split("_")
             dataset = parts[0]
             instance = "_".join(parts[2:-1])
@@ -171,11 +166,9 @@ class VehicleDataset(Dataset):
         # regardless of which TRAIN_SENSORS this run uses.
         REQUIRED_SENSORS = {"audio", "seismic"}
 
-        for group_key, table_runs in groups.items():
+        for _group_key, table_runs in groups.items():
             present_signals = [tr[0].split("_")[1] for tr in table_runs]
-            has_all_signals = all(
-                signal in present_signals for signal in REQUIRED_SENSORS
-            )
+            has_all_signals = all(signal in present_signals for signal in REQUIRED_SENSORS)
 
             if not has_all_signals:
                 for tr in table_runs:
@@ -211,13 +204,11 @@ class VehicleDataset(Dataset):
 
             parts = table.split("_")
             dataset = parts[0]
-            signal = parts[1]
+            parts[1]
             instance = "_".join(parts[2:-1])
             sensor_node = parts[-1]
 
-            vehicle_info = self.config.DATASET_VEHICLE_MAP.get(dataset, {}).get(
-                instance, None
-            )
+            vehicle_info = self.config.DATASET_VEHICLE_MAP.get(dataset, {}).get(instance, None)
             if vehicle_info is None:
                 continue
             category_str = vehicle_info[0]
@@ -233,18 +224,7 @@ class VehicleDataset(Dataset):
             ref_signal = "seismic"
             ref_table = f"{dataset}_{ref_signal}_{instance}_{sensor_node}"
             present_map = self.present_maps.get((ref_table, run_id), {})
-            is_m3nvc_bg = (dataset == "m3nvc" and instance == "background")
-
-            def _effective_label(step_idx):
-                if is_m3nvc_bg:
-                    return "background", True
-                start_sec = int(step_idx * STEP)
-                present_flag = present_map.get(start_sec, False)
-                if self.config.TRAINING_MODE == "detection":
-                    label = category_str if present_flag else "background"
-                    return label, True
-                else:
-                    return category_str, present_flag
+            is_m3nvc_bg = dataset == "m3nvc" and instance == "background"
 
             split_rule = vehicle_info[2]
             WINDOW = self.config.SAMPLE_SECONDS
@@ -253,10 +233,29 @@ class VehicleDataset(Dataset):
             max_step_idx = int((valid_duration - WINDOW) / STEP)
             mid_time = valid_duration / 2.0
 
-            def _in_test(step_idx):
+            # Bind loop-scoped values via default args so each iteration's
+            # closures capture this iteration's values, not whatever the
+            # loop variable holds when the closure is later called.
+            def _effective_label(
+                step_idx,
+                is_m3nvc_bg=is_m3nvc_bg,
+                STEP=STEP,
+                present_map=present_map,
+                category_str=category_str,
+            ):
+                if is_m3nvc_bg:
+                    return "background", True
+                start_sec = int(step_idx * STEP)
+                present_flag = present_map.get(start_sec, False)
+                if self.config.TRAINING_MODE == "detection":
+                    label = category_str if present_flag else "background"
+                    return label, True
+                return category_str, present_flag
+
+            def _in_test(step_idx, STEP=STEP, mid_time=mid_time):
                 return step_idx * STEP < mid_time
 
-            def _in_val(step_idx):
+            def _in_val(step_idx, STEP=STEP, mid_time=mid_time):
                 return step_idx * STEP >= mid_time
 
             if split_rule in ("train", "val", "test"):
@@ -265,7 +264,14 @@ class VehicleDataset(Dataset):
                         label, include = _effective_label(step_idx)
                         if include:
                             unique_samples.add(
-                                (dataset, instance, sensor_node, run_id, step_idx, label)
+                                (
+                                    dataset,
+                                    instance,
+                                    sensor_node,
+                                    run_id,
+                                    step_idx,
+                                    label,
+                                )
                             )
 
             elif split_rule == "split":
@@ -273,11 +279,12 @@ class VehicleDataset(Dataset):
                     label, include = _effective_label(step_idx)
                     if not include:
                         continue
-                    if self.split == "test" and _in_test(step_idx):
-                        unique_samples.add(
-                            (dataset, instance, sensor_node, run_id, step_idx, label)
-                        )
-                    elif self.split == "val" and _in_val(step_idx):
+                    if (
+                        self.split == "test"
+                        and _in_test(step_idx)
+                        or self.split == "val"
+                        and _in_val(step_idx)
+                    ):
                         unique_samples.add(
                             (dataset, instance, sensor_node, run_id, step_idx, label)
                         )
@@ -294,20 +301,35 @@ class VehicleDataset(Dataset):
                             label, include = _effective_label(step_idx)
                             if include:
                                 unique_samples.add(
-                                    (dataset, instance, sensor_node, run_id, step_idx, label)
+                                    (
+                                        dataset,
+                                        instance,
+                                        sensor_node,
+                                        run_id,
+                                        step_idx,
+                                        label,
+                                    )
                                 )
                 else:
                     for step_idx in range(max_step_idx + 1):
                         label, include = _effective_label(step_idx)
                         if not include:
                             continue
-                        if self.split == "test" and _in_test(step_idx):
+                        if (
+                            self.split == "test"
+                            and _in_test(step_idx)
+                            or self.split == "val"
+                            and _in_val(step_idx)
+                        ):
                             unique_samples.add(
-                                (dataset, instance, sensor_node, run_id, step_idx, label)
-                            )
-                        elif self.split == "val" and _in_val(step_idx):
-                            unique_samples.add(
-                                (dataset, instance, sensor_node, run_id, step_idx, label)
+                                (
+                                    dataset,
+                                    instance,
+                                    sensor_node,
+                                    run_id,
+                                    step_idx,
+                                    label,
+                                )
                             )
 
             else:
@@ -316,7 +338,7 @@ class VehicleDataset(Dataset):
                     f"{dataset}/{instance}. Skipping."
                 )
 
-        self.samples = sorted(list(unique_samples))
+        self.samples = sorted(unique_samples)
 
     def _get_cache_path(self):
         # Cache stores raw waveforms only. Mel params (N_FFT, HOP_LENGTH) are
@@ -329,9 +351,7 @@ class VehicleDataset(Dataset):
             "split": self.split,
             "data_dir": getattr(self.config, "DATA_DIR", ""),
         }
-        key_hash = hashlib.md5(
-            json.dumps(key_data, sort_keys=True).encode()
-        ).hexdigest()[:12]
+        key_hash = hashlib.md5(json.dumps(key_data, sort_keys=True).encode()).hexdigest()[:12]
         cache_dir = getattr(self.config, "CACHE_DIR", "cache")
         return os.path.join(cache_dir, f"table_cache_{self.split}_{key_hash}.pt")
 
@@ -394,7 +414,7 @@ class VehicleDataset(Dataset):
                 else:
                     data_cols = ["amplitude"]
 
-                read_cols = ["time_stamp"] + data_cols
+                read_cols = ["time_stamp", *data_cols]
                 if run_id is not None:
                     read_cols.append("run_id")
 
@@ -407,9 +427,7 @@ class VehicleDataset(Dataset):
                 df = df.sort_values("time_stamp")
 
                 if not df.empty:
-                    data = torch.tensor(
-                        df[data_cols].to_numpy(), dtype=torch.float32
-                    ).T
+                    data = torch.tensor(df[data_cols].to_numpy(), dtype=torch.float32).T
                     self.table_cache[(table, run_id)] = data
 
                 if (i + 1) % 20 == 0 or (i + 1) == total:

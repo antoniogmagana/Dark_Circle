@@ -24,6 +24,7 @@ CLI:
     python export_for_inference.py --save-dir saved_crl/runs/<frontend>/<mode>/<run> \\
         --out-dir /path/to/model/folder
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,10 +33,8 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-
 from crl_vehicle.config import CRLConfig
 from training.trainer import CRLModel
-
 
 PER_SENSOR_FRONTENDS = {"morlet", "morlet_per_sensor", "morlet_learnable"}
 FUSED_FRONTENDS = {"multiscale", "morlet_fused", "morlet_learnable_fused"}
@@ -47,6 +46,7 @@ FUSED_FRONTENDS = {"multiscale", "morlet_fused", "morlet_learnable_fused"}
 # ---------------------------------------------------------------------------
 
 import math
+
 import torch.nn.functional as F
 
 
@@ -57,9 +57,7 @@ class _MorletPostprocess(nn.Module):
         super().__init__()
         self.use_phase = use_phase
 
-    def forward(
-        self, re_out: torch.Tensor, im_out: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, re_out: torch.Tensor, im_out: torch.Tensor) -> torch.Tensor:
         if self.use_phase:
             mag = torch.sqrt(re_out.pow(2) + im_out.pow(2) + 1e-8)
             cos_phase = re_out / mag
@@ -105,7 +103,10 @@ def _build_learnable_kernels(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     scales = log_scales.exp()
     t = torch.linspace(
-        -kernel_size // 2, kernel_size // 2, kernel_size, device=scales.device,
+        -kernel_size // 2,
+        kernel_size // 2,
+        kernel_size,
+        device=scales.device,
     ).float() / float(sample_rate)
     s = scales.unsqueeze(-1)
     if w0_per_filter is not None:
@@ -114,12 +115,8 @@ def _build_learnable_kernels(
         w0 = torch.full_like(s, w0_scalar)
     norm = (math.pi * s) ** -0.25
     gauss = torch.exp(-0.5 * (t / s) ** 2)
-    kernel_re = (norm * gauss * torch.cos(w0 * t / s)).unsqueeze(1).expand(
-        -1, in_channels, -1
-    )
-    kernel_im = (norm * gauss * torch.sin(w0 * t / s)).unsqueeze(1).expand(
-        -1, in_channels, -1
-    )
+    kernel_re = (norm * gauss * torch.cos(w0 * t / s)).unsqueeze(1).expand(-1, in_channels, -1)
+    kernel_im = (norm * gauss * torch.sin(w0 * t / s)).unsqueeze(1).expand(-1, in_channels, -1)
     return kernel_re, kernel_im
 
 
@@ -180,8 +177,12 @@ class _LearnableConvBank(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.float()
         kernel_re, kernel_im = _build_learnable_kernels(
-            self.log_scales, self.w0_per_filter, self.w0_scalar,
-            self.kernel_size, self.sample_rate, self.in_channels,
+            self.log_scales,
+            self.w0_per_filter,
+            self.w0_scalar,
+            self.kernel_size,
+            self.sample_rate,
+            self.in_channels,
         )
         re_out = F.conv1d(x, kernel_re, padding=self.padding)
         im_out = F.conv1d(x, kernel_im, padding=self.padding)
@@ -209,8 +210,12 @@ class _LearnableFFTBank(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.float()
         kernel_re, kernel_im = _build_learnable_kernels(
-            self.log_scales, self.w0_per_filter, self.w0_scalar,
-            self.kernel_size, self.sample_rate, self.in_channels,
+            self.log_scales,
+            self.w0_per_filter,
+            self.w0_scalar,
+            self.kernel_size,
+            self.sample_rate,
+            self.in_channels,
         )
         re_out, im_out = _fft_apply(x, kernel_re, kernel_im, self.kernel_size)
         return self.post(re_out, im_out)
@@ -219,6 +224,7 @@ class _LearnableFFTBank(nn.Module):
 def _learnable_cls():
     """Lazy import to avoid pulling crl_vehicle into module-load if not needed."""
     from crl_vehicle.models.frontend import LearnableMorletFilterbank
+
     return LearnableMorletFilterbank
 
 
@@ -228,6 +234,7 @@ def _resolve_morlet_bank(bank: nn.Module) -> nn.Module:
     branches on bank type or kernel size, so TorchScript compiles cleanly.
     """
     from crl_vehicle.models.frontend import MorletFilterbank
+
     fft_threshold = MorletFilterbank.FFT_CONV_THRESHOLD
     use_fft = int(bank.kernel_size) >= fft_threshold
     is_learnable = isinstance(bank, _learnable_cls())
@@ -244,6 +251,7 @@ def _resolve_morlet_in_frontend(seq: nn.Module) -> nn.Module:
     """Walk a frontend's children, swap any MorletFilterbank for its
     resolved equivalent. Returns a new nn.Sequential-like module."""
     from crl_vehicle.models.frontend import MorletFilterbank
+
     if not isinstance(seq, nn.Sequential):
         return seq
     new_children = []
@@ -277,14 +285,14 @@ def _verify_morlet_resolution(
     diff = (y0 - y1).abs().max().item()
     if diff > atol:
         raise RuntimeError(
-            f"Morlet resolution numeric mismatch: max diff = {diff:.2e} "
-            f"(atol={atol:.0e})"
+            f"Morlet resolution numeric mismatch: max diff = {diff:.2e} " f"(atol={atol:.0e})"
         )
 
 
 # ---------------------------------------------------------------------------
 # Wrapper modules — flat, no string-keyed ModuleDict, scriptable
 # ---------------------------------------------------------------------------
+
 
 class EncoderPresencePerSensor(nn.Module):
     """One sensor's frontend → encoder → pres_head pipeline.
@@ -382,11 +390,13 @@ class TypeOnZ(nn.Module):
 # Slicing math
 # ---------------------------------------------------------------------------
 
+
 def resolve_type_slice(probe_mode: str, cfg: CRLConfig) -> tuple[int, int]:
     """Return (start, end) indices into z for the type head's input."""
     if probe_mode == "linear_ztype" or probe_mode == "mlp_ztype":
         # CausalLatentSpace type slice = [D_PRES : D_PRES + D_TYPE].
         from crl_vehicle.models.latent import CausalLatentSpace
+
         start = CausalLatentSpace.D_PRES
         return start, start + CausalLatentSpace.D_TYPE
     if probe_mode == "linear_fullz":
@@ -399,6 +409,7 @@ def resolve_type_slice(probe_mode: str, cfg: CRLConfig) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
+
 
 def _infer_multiscale_kernels_from_checkpoint(
     state: dict, sensors: list[str]
@@ -416,8 +427,9 @@ def _infer_multiscale_kernels_from_checkpoint(
     for sensor in sensors:
         prefix = f"frontends.{sensor}.0.branches."
         branch_keys = sorted(
-            int(k[len(prefix):].split(".")[0])
-            for k in state if k.startswith(prefix) and k.endswith(".0.weight")
+            int(k[len(prefix) :].split(".")[0])
+            for k in state
+            if k.startswith(prefix) and k.endswith(".0.weight")
         )
         if not branch_keys:
             continue
@@ -429,9 +441,7 @@ def _infer_multiscale_kernels_from_checkpoint(
     return out
 
 
-def _rebuild_morlet_frontends_from_meta(
-    model: CRLModel, derived: dict, sensors: list[str]
-) -> None:
+def _rebuild_morlet_frontends_from_meta(model: CRLModel, derived: dict, sensors: list[str]) -> None:
     """Replace the live morlet frontends with ones whose kernel_size and
     pool_stride match the values recorded at training time.
 
@@ -441,7 +451,8 @@ def _rebuild_morlet_frontends_from_meta(
     live formula's shapes. The saved `morlet_derived_params` block records
     the actual values used during training — trust those.
     """
-    from crl_vehicle.models.frontend import MorletFilterbank, LearnableMorletFilterbank
+    from crl_vehicle.models.frontend import LearnableMorletFilterbank, MorletFilterbank
+
     cfg = model.cfg
     use_phase = cfg.morlet_use_phase
     is_learnable = cfg.frontend_bank == "morlet_learnable"
@@ -467,7 +478,8 @@ def _rebuild_morlet_frontends_from_meta(
         )
         pool_stride = int(d["pool_stride"])
         model.frontends[sensor] = nn.Sequential(
-            bank, nn.AvgPool1d(pool_stride, pool_stride),
+            bank,
+            nn.AvgPool1d(pool_stride, pool_stride),
         )
 
 
@@ -482,10 +494,7 @@ def load_trained_model(save_dir: Path, ckpt_name: str) -> tuple[CRLModel, dict]:
     sensors = meta.get("sensors", ["audio", "seismic"])
     probe_mode = meta.get("probe_mode", "linear_ztype")
 
-    cfg_kwargs = {
-        k: v for k, v in cfg_dict.items()
-        if k in CRLConfig.__dataclass_fields__
-    }
+    cfg_kwargs = {k: v for k, v in cfg_dict.items() if k in CRLConfig.__dataclass_fields__}
 
     ckpt_path = save_dir / ckpt_name
     if not ckpt_path.exists():
@@ -512,9 +521,7 @@ def load_trained_model(save_dir: Path, ckpt_name: str) -> tuple[CRLModel, dict]:
             # like ``target_tokens`` and ``out_channels_frac``.
             default_params = CRLConfig().frontend_per_sensor_params
             existing = cfg_kwargs.get("frontend_per_sensor_params") or {}
-            params: dict[str, dict] = {
-                s: dict(default_params.get(s, {})) for s in inferred
-            }
+            params: dict[str, dict] = {s: dict(default_params.get(s, {})) for s in inferred}
             for s, p in existing.items():
                 params.setdefault(s, {}).update(p)
             for sensor, ks in inferred.items():
@@ -533,7 +540,7 @@ def load_trained_model(save_dir: Path, ckpt_name: str) -> tuple[CRLModel, dict]:
     derived = meta.get("morlet_derived_params") or {}
     if derived and frontend_type in ("morlet_per_sensor", "morlet_learnable"):
         _rebuild_morlet_frontends_from_meta(model, derived, sensors)
-        print(f"  Rebuilt morlet frontends from saved morlet_derived_params")
+        print("  Rebuilt morlet frontends from saved morlet_derived_params")
 
     model.load_state_dict(state)
     model.eval()
@@ -544,8 +551,11 @@ def load_trained_model(save_dir: Path, ckpt_name: str) -> tuple[CRLModel, dict]:
 # Wrapper construction (per mode)
 # ---------------------------------------------------------------------------
 
+
 def build_per_sensor_wrappers(
-    model: CRLModel, sensor: str, type_slice: tuple[int, int],
+    model: CRLModel,
+    sensor: str,
+    type_slice: tuple[int, int],
 ) -> tuple[EncoderPresencePerSensor, TypeOnZ]:
     original_frontend = model.frontends[sensor]
     resolved_frontend = _resolve_morlet_in_frontend(original_frontend)
@@ -567,7 +577,8 @@ def build_per_sensor_wrappers(
 
 
 def build_fused_wrappers(
-    model: CRLModel, type_slice: tuple[int, int],
+    model: CRLModel,
+    type_slice: tuple[int, int],
 ) -> tuple[EncoderPresenceFused, TypeOnZ]:
     sensors = list(model.sensors)
     if sensors != ["audio", "seismic"]:
@@ -580,7 +591,8 @@ def build_fused_wrappers(
         resolved = _resolve_morlet_in_frontend(original)
         if resolved is not original:
             _verify_morlet_resolution(
-                original, resolved,
+                original,
+                resolved,
                 window_size=model.cfg.modality_cfg(s).window_size,
             )
     enc_pres = EncoderPresenceFused(
@@ -601,6 +613,7 @@ def build_fused_wrappers(
 # ---------------------------------------------------------------------------
 # Scripting + parity check
 # ---------------------------------------------------------------------------
+
 
 def script_and_save(module: nn.Module, path: Path) -> torch.jit.ScriptModule:
     scripted = torch.jit.script(module)
@@ -623,9 +636,7 @@ def parity_check_per_sensor(
         t_e = type_on_z_eager(z_e)
         t_s = scripted_type(z_s)
     if not torch.allclose(z_e, z_s, atol=atol):
-        raise RuntimeError(
-            f"z parity failed: max diff = {(z_e - z_s).abs().max().item():.2e}"
-        )
+        raise RuntimeError(f"z parity failed: max diff = {(z_e - z_s).abs().max().item():.2e}")
     if not torch.allclose(p_e, p_s, atol=atol):
         raise RuntimeError(
             f"pres_logit parity failed: max diff = {(p_e - p_s).abs().max().item():.2e}"
@@ -689,7 +700,7 @@ def build_deployment_meta(
     """
     meta: dict = {
         "frontend_type": cfg.frontend_type,
-        "mode": mode,                          # "per_sensor" | "fused"
+        "mode": mode,  # "per_sensor" | "fused"
         "sensors": sensors,
         "probe_mode": probe_mode,
         "class_names": CLASS_NAMES,
@@ -707,22 +718,49 @@ def build_deployment_meta(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--save-dir", required=True, type=Path,
-                    help="Saved-run directory (contains meta.json + downstream_best.pth)")
-    ap.add_argument("--out-dir", required=True, type=Path,
-                    help="Output directory for TorchScript artifacts and meta.json")
-    ap.add_argument("--ckpt-name", default="downstream_best.pth",
-                    help="Checkpoint filename inside --save-dir (default: downstream_best.pth)")
-    ap.add_argument("--threshold-audio", type=float, default=0.5,
-                    help="Per-sensor mode: sigmoid threshold for audio presence (default: 0.5)")
-    ap.add_argument("--threshold-seismic", type=float, default=0.5,
-                    help="Per-sensor mode: sigmoid threshold for seismic presence (default: 0.5)")
-    ap.add_argument("--threshold-fused", type=float, default=0.5,
-                    help="Fused mode: sigmoid threshold for fused presence (default: 0.5)")
-    ap.add_argument("--skip-parity", action="store_true",
-                    help="Skip parity check between eager and scripted modules")
+    ap.add_argument(
+        "--save-dir",
+        required=True,
+        type=Path,
+        help="Saved-run directory (contains meta.json + downstream_best.pth)",
+    )
+    ap.add_argument(
+        "--out-dir",
+        required=True,
+        type=Path,
+        help="Output directory for TorchScript artifacts and meta.json",
+    )
+    ap.add_argument(
+        "--ckpt-name",
+        default="downstream_best.pth",
+        help="Checkpoint filename inside --save-dir (default: downstream_best.pth)",
+    )
+    ap.add_argument(
+        "--threshold-audio",
+        type=float,
+        default=0.5,
+        help="Per-sensor mode: sigmoid threshold for audio presence (default: 0.5)",
+    )
+    ap.add_argument(
+        "--threshold-seismic",
+        type=float,
+        default=0.5,
+        help="Per-sensor mode: sigmoid threshold for seismic presence (default: 0.5)",
+    )
+    ap.add_argument(
+        "--threshold-fused",
+        type=float,
+        default=0.5,
+        help="Fused mode: sigmoid threshold for fused presence (default: 0.5)",
+    )
+    ap.add_argument(
+        "--skip-parity",
+        action="store_true",
+        help="Skip parity check between eager and scripted modules",
+    )
     return ap.parse_args()
 
 
@@ -759,16 +797,19 @@ def main() -> None:
             print(f"  wrote {enc_path.name} and {type_path.name}")
             if not args.skip_parity:
                 parity_check_per_sensor(
-                    enc_eager, type_eager, scripted_enc, scripted_type,
+                    enc_eager,
+                    type_eager,
+                    scripted_enc,
+                    scripted_type,
                     window_size=mc.window_size,
                 )
-                print(f"  parity OK (atol=1e-5)")
+                print("  parity OK (atol=1e-5)")
 
     elif cfg.frontend_type in FUSED_FRONTENDS:
         mode = "fused"
         presence_threshold = float(args.threshold_fused)
 
-        print(f"\nExporting fused encoder (audio + seismic)")
+        print("\nExporting fused encoder (audio + seismic)")
         enc_eager, type_eager = build_fused_wrappers(model, type_slice)
         enc_path = args.out_dir / "encoder_fused.ts"
         type_path = args.out_dir / "type_head_fused.ts"
@@ -779,10 +820,14 @@ def main() -> None:
             audio_window = cfg.modality_cfg("audio").window_size
             seismic_window = cfg.modality_cfg("seismic").window_size
             parity_check_fused(
-                enc_eager, type_eager, scripted_enc, scripted_type,
-                audio_window=audio_window, seismic_window=seismic_window,
+                enc_eager,
+                type_eager,
+                scripted_enc,
+                scripted_type,
+                audio_window=audio_window,
+                seismic_window=seismic_window,
             )
-            print(f"  parity OK (atol=1e-5)")
+            print("  parity OK (atol=1e-5)")
 
     else:
         raise NotImplementedError(
@@ -792,8 +837,11 @@ def main() -> None:
         )
 
     deploy_meta = build_deployment_meta(
-        cfg=cfg, sensors=sensors, mode=mode,
-        presence_threshold=presence_threshold, probe_mode=probe_mode,
+        cfg=cfg,
+        sensors=sensors,
+        mode=mode,
+        presence_threshold=presence_threshold,
+        probe_mode=probe_mode,
     )
     meta_path = args.out_dir / "meta.json"
     meta_path.write_text(json.dumps(deploy_meta, indent=2) + "\n")

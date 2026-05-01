@@ -8,8 +8,11 @@ The intervention generators come in two API shapes:
   vectorized on whatever device the input lives on. Use this in training code:
   per-sample interventions on CPU FFTs were the dominant bottleneck.
 """
+
 from __future__ import annotations
+
 import math
+
 import torch
 
 N_INTERVENTIONS = 7
@@ -25,6 +28,7 @@ def remove_dc(x: torch.Tensor) -> torch.Tensor:
 # and by the dataset's worker fallback path. New training code should call
 # the batched generators below.
 # ---------------------------------------------------------------------------
+
 
 def _white_noise(n: int, sr: int) -> torch.Tensor:
     return torch.randn(n)
@@ -58,7 +62,7 @@ def _high_freq_chirp(n: int, sr: int) -> torch.Tensor:
     t = torch.linspace(0, n / sr, n)
     f0, f1 = 1000.0, min(sr / 2 - 1, 8000.0)
     k = (f1 - f0) / (n / sr)
-    return torch.cos(2 * math.pi * (f0 * t + 0.5 * k * t ** 2))
+    return torch.cos(2 * math.pi * (f0 * t + 0.5 * k * t**2))
 
 
 def _bird_chirps(n: int, sr: int) -> torch.Tensor:
@@ -82,15 +86,13 @@ _GENERATORS = [
 ]
 
 
-def apply_intervention(
-    x: torch.Tensor, intervention_id: int, sample_rate: int
-) -> torch.Tensor:
+def apply_intervention(x: torch.Tensor, intervention_id: int, sample_rate: int) -> torch.Tensor:
     """Add noise type `intervention_id` (1-7) at 20% RMS of signal. x: (C, W)."""
     C, W = x.shape
     gen = _GENERATORS[intervention_id - 1]
     noise = gen(W, sample_rate)
     signal_rms = x.pow(2).mean().sqrt().clamp(min=1e-8)
-    noise_rms  = noise.pow(2).mean().sqrt().clamp(min=1e-8)
+    noise_rms = noise.pow(2).mean().sqrt().clamp(min=1e-8)
     noise = noise * (0.2 * signal_rms / noise_rms)
     return x + noise.unsqueeze(0).expand(C, -1)
 
@@ -99,6 +101,7 @@ def apply_intervention(
 # Batched generators. Each takes (B, W) and returns (B, W) on the input
 # device. These are the ones the training loop should call.
 # ---------------------------------------------------------------------------
+
 
 def _white_noise_b(B: int, W: int, sr: int, device, dtype) -> torch.Tensor:
     return torch.randn(B, W, device=device, dtype=dtype)
@@ -132,8 +135,8 @@ def _high_freq_chirp_b(B: int, W: int, sr: int, device, dtype) -> torch.Tensor:
     t = torch.linspace(0, W / sr, W, device=device, dtype=dtype)
     f0 = 1000.0
     f1 = min(sr / 2 - 1, 8000.0)
-    k  = (f1 - f0) / (W / sr)
-    chirp = torch.cos(2 * math.pi * (f0 * t + 0.5 * k * t ** 2))
+    k = (f1 - f0) / (W / sr)
+    chirp = torch.cos(2 * math.pi * (f0 * t + 0.5 * k * t**2))
     return chirp.unsqueeze(0).expand(B, W).contiguous()
 
 
@@ -193,13 +196,13 @@ def apply_intervention_batch(
     sig_rms = x.pow(2).mean(dim=(1, 2)).sqrt().clamp(min=1e-8)  # (B,)
 
     for k, gen in enumerate(_BATCH_GENERATORS, start=1):
-        mask = (interv_ids == k)
+        mask = interv_ids == k
         if not mask.any():
             continue
-        noise = gen(B, W, sample_rate, device, dtype)             # (B, W)
+        noise = gen(B, W, sample_rate, device, dtype)  # (B, W)
         noise_rms = noise.pow(2).mean(dim=1).sqrt().clamp(min=1e-8)  # (B,)
-        scale = (0.2 * sig_rms / noise_rms).unsqueeze(-1)            # (B, 1)
-        scaled = (noise * scale).unsqueeze(1).expand(B, C, W)        # (B, C, W)
+        scale = (0.2 * sig_rms / noise_rms).unsqueeze(-1)  # (B, 1)
+        scaled = (noise * scale).unsqueeze(1).expand(B, C, W)  # (B, C, W)
         # Apply only to rows assigned this intervention id.
         m = mask.view(B, 1, 1).to(dtype)
         out = out + m * scaled

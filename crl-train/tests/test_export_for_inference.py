@@ -6,35 +6,37 @@ frontend types. These tests run with small CRLConfig values so they fit in
 unit-test time without saved checkpoints — they construct fresh models and
 export them in-process.
 """
+
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 import torch
-
 from crl_vehicle.config import CRLConfig
-from training.trainer import CRLModel
-
 from export_for_inference import (
-    PER_SENSOR_FRONTENDS,
     FUSED_FRONTENDS,
-    build_per_sensor_wrappers,
-    build_fused_wrappers,
+    PER_SENSOR_FRONTENDS,
     build_deployment_meta,
-    parity_check_per_sensor,
+    build_fused_wrappers,
+    build_per_sensor_wrappers,
     parity_check_fused,
+    parity_check_per_sensor,
     resolve_type_slice,
     script_and_save,
 )
+from training.trainer import CRLModel
 
 
 def _small_multiscale_cfg() -> CRLConfig:
     # Small enough to run fast; mirrors the production frontend type.
     return CRLConfig(
-        d_model=32, n_layers=1, n_heads=4,
-        frontend_type="multiscale", fused_seq_len=8, d_z=24,
+        d_model=32,
+        n_layers=1,
+        n_heads=4,
+        frontend_type="multiscale",
+        fused_seq_len=8,
+        d_z=24,
         multiscale_pool_stride=16,
     )
 
@@ -45,16 +47,29 @@ def _small_morlet_per_sensor_cfg(use_phase: bool) -> CRLConfig:
     # and FFT path when use_phase=True wouldn't change since both depend
     # on kernel_size only).
     return CRLConfig(
-        d_model=16, n_layers=1, n_heads=4,
-        frontend_type="morlet_per_sensor", d_z=24,
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        frontend_type="morlet_per_sensor",
+        d_z=24,
         morlet_use_phase=use_phase,
         morlet_per_sensor_params={
-            "audio":   {"freq_min": 50.0, "freq_max": 8000.0,
-                        "out_channels_frac": 1.0, "w0": 6.0,
-                        "target_tokens": 16, "receptive_cycles": 2.0},
-            "seismic": {"freq_min": 5.0,  "freq_max": 40.0,
-                        "out_channels_frac": 1.0, "w0": 6.0,
-                        "target_tokens": 16, "receptive_cycles": 2.0},
+            "audio": {
+                "freq_min": 50.0,
+                "freq_max": 8000.0,
+                "out_channels_frac": 1.0,
+                "w0": 6.0,
+                "target_tokens": 16,
+                "receptive_cycles": 2.0,
+            },
+            "seismic": {
+                "freq_min": 5.0,
+                "freq_max": 40.0,
+                "out_channels_frac": 1.0,
+                "w0": 6.0,
+                "target_tokens": 16,
+                "receptive_cycles": 2.0,
+            },
         },
     )
 
@@ -62,6 +77,7 @@ def _small_morlet_per_sensor_cfg(use_phase: bool) -> CRLConfig:
 # ---------------------------------------------------------------------------
 # Per-sensor (morlet_per_sensor)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("use_phase", [False, True])
 def test_per_sensor_export_parity(tmp_path: Path, use_phase: bool) -> None:
@@ -79,7 +95,10 @@ def test_per_sensor_export_parity(tmp_path: Path, use_phase: bool) -> None:
 
         window_size = cfg.modality_cfg(sensor).window_size
         parity_check_per_sensor(
-            enc_eager, type_eager, scripted_enc, scripted_type,
+            enc_eager,
+            type_eager,
+            scripted_enc,
+            scripted_type,
             window_size=window_size,
         )
 
@@ -99,6 +118,7 @@ def test_per_sensor_export_parity(tmp_path: Path, use_phase: bool) -> None:
 # Fused (multiscale)
 # ---------------------------------------------------------------------------
 
+
 def test_fused_multiscale_export_parity(tmp_path: Path) -> None:
     cfg = _small_multiscale_cfg()
     model = CRLModel(cfg, sensors=["audio", "seismic"], probe_mode="linear_ztype")
@@ -114,8 +134,12 @@ def test_fused_multiscale_export_parity(tmp_path: Path) -> None:
     audio_window = cfg.modality_cfg("audio").window_size
     seismic_window = cfg.modality_cfg("seismic").window_size
     parity_check_fused(
-        enc_eager, type_eager, scripted_enc, scripted_type,
-        audio_window=audio_window, seismic_window=seismic_window,
+        enc_eager,
+        type_eager,
+        scripted_enc,
+        scripted_type,
+        audio_window=audio_window,
+        seismic_window=seismic_window,
     )
 
     # Reload and verify shapes.
@@ -135,10 +159,13 @@ def test_fused_multiscale_export_parity(tmp_path: Path) -> None:
 # Deployment meta.json
 # ---------------------------------------------------------------------------
 
+
 def test_deployment_meta_per_sensor_includes_dict_threshold() -> None:
     cfg = _small_morlet_per_sensor_cfg(use_phase=False)
     meta = build_deployment_meta(
-        cfg=cfg, sensors=["audio", "seismic"], mode="per_sensor",
+        cfg=cfg,
+        sensors=["audio", "seismic"],
+        mode="per_sensor",
         presence_threshold={"audio": 0.4, "seismic": 0.6},
         probe_mode="linear_ztype",
     )
@@ -157,8 +184,11 @@ def test_deployment_meta_per_sensor_includes_dict_threshold() -> None:
 def test_deployment_meta_fused_includes_scalar_threshold() -> None:
     cfg = _small_multiscale_cfg()
     meta = build_deployment_meta(
-        cfg=cfg, sensors=["audio", "seismic"], mode="fused",
-        presence_threshold=0.55, probe_mode="linear_ztype",
+        cfg=cfg,
+        sensors=["audio", "seismic"],
+        mode="fused",
+        presence_threshold=0.55,
+        probe_mode="linear_ztype",
     )
     assert meta["mode"] == "fused"
     assert meta["frontend_type"] == "multiscale"
@@ -168,6 +198,7 @@ def test_deployment_meta_fused_includes_scalar_threshold() -> None:
 # ---------------------------------------------------------------------------
 # Slice math
 # ---------------------------------------------------------------------------
+
 
 def test_resolve_type_slice_modes() -> None:
     cfg = CRLConfig(d_z=24, d_signal=12)
@@ -184,6 +215,7 @@ def test_resolve_type_slice_modes() -> None:
 # ---------------------------------------------------------------------------
 # Frontend coverage
 # ---------------------------------------------------------------------------
+
 
 def test_frontend_set_membership_is_disjoint() -> None:
     """Sanity check that no frontend type is in both sets — would cause

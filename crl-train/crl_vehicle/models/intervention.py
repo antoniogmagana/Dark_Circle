@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import torch
 import torch.nn as nn
+
 from crl_vehicle.models.latent import CausalLatentSpace
 
 
@@ -21,9 +23,7 @@ class UnknownInterventionClassifier(nn.Module):
     """MLP predicting which latent block changed between t and t+1.
     Operates on the ENV block (D_ENV=6 dims)."""
 
-    def __init__(
-        self, d_env: int = CausalLatentSpace.D_ENV, hidden_dim: int = 64
-    ) -> None:
+    def __init__(self, d_env: int = CausalLatentSpace.D_ENV, hidden_dim: int = 64) -> None:
         super().__init__()
         self.classifier = nn.Sequential(
             nn.Linear(2 * d_env, hidden_dim),
@@ -33,7 +33,5 @@ class UnknownInterventionClassifier(nn.Module):
             nn.Linear(hidden_dim, 2),
         )
 
-    def forward(
-        self, z_env_t: torch.Tensor, z_env_tn: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, z_env_t: torch.Tensor, z_env_tn: torch.Tensor) -> torch.Tensor:
         return self.classifier(torch.cat([z_env_t, z_env_tn], dim=-1))

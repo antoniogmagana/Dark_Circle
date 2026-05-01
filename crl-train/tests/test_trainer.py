@@ -7,14 +7,19 @@ from training.trainer import CRLModel, Trainer
 
 @pytest.fixture
 def cfg_ms():
-    return CRLConfig(d_model=32, n_layers=1, n_heads=4,
-                     frontend_type="multiscale", fused_seq_len=16, d_z=24)
+    return CRLConfig(
+        d_model=32,
+        n_layers=1,
+        n_heads=4,
+        frontend_type="multiscale",
+        fused_seq_len=16,
+        d_z=24,
+    )
 
 
 @pytest.fixture
 def cfg_morlet():
-    return CRLConfig(d_model=32, n_layers=1, n_heads=4,
-                     frontend_type="morlet", d_z=24)
+    return CRLConfig(d_model=32, n_layers=1, n_heads=4, frontend_type="morlet", d_z=24)
 
 
 def _synthetic_batch(B=4, n_partners=4):
@@ -24,25 +29,24 @@ def _synthetic_batch(B=4, n_partners=4):
     W_a = cfg.modality_cfg("audio").window_size
     W_s = cfg.modality_cfg("seismic").window_size
     batch = {
-        "x_audio_t":         torch.randn(B, 1, W_a) * 0.01,
-        "x_seismic_t":       torch.randn(B, 1, W_s) * 0.01,
-        "audio_avail":       torch.ones(B, dtype=torch.bool),
-        "seismic_avail":     torch.ones(B, dtype=torch.bool),
+        "x_audio_t": torch.randn(B, 1, W_a) * 0.01,
+        "x_seismic_t": torch.randn(B, 1, W_s) * 0.01,
+        "audio_avail": torch.ones(B, dtype=torch.bool),
+        "seismic_avail": torch.ones(B, dtype=torch.bool),
         "detection_label_t": torch.randint(0, 2, (B,)),
-        "vehicle_type_t":    torch.randint(0, 4, (B,)),
+        "vehicle_type_t": torch.randint(0, 4, (B,)),
         "n_partners": n_partners,
     }
     for p in range(n_partners):
-        batch[f"x_audio_p{p}"]         = torch.randn(B, 1, W_a) * 0.01
-        batch[f"x_seismic_p{p}"]       = torch.randn(B, 1, W_s) * 0.01
+        batch[f"x_audio_p{p}"] = torch.randn(B, 1, W_a) * 0.01
+        batch[f"x_seismic_p{p}"] = torch.randn(B, 1, W_s) * 0.01
         batch[f"detection_label_p{p}"] = torch.randint(0, 2, (B,))
-        batch[f"vehicle_type_p{p}"]    = torch.randint(0, 4, (B,))
+        batch[f"vehicle_type_p{p}"] = torch.randint(0, 4, (B,))
         batch[f"partner_stratum_p{p}"] = torch.full((B,), p % 4)
     return batch
 
 
 class TestCRLModelMultiscale:
-
     def test_shared_encoder_exists(self, cfg_ms):
         model = CRLModel(cfg_ms)
         assert hasattr(model, "encoder") and model.encoder is not None
@@ -54,9 +58,9 @@ class TestCRLModelMultiscale:
     def test_frontends_have_adaptive_pool(self, cfg_ms):
         model = CRLModel(cfg_ms)
         for sensor in ["audio", "seismic"]:
-            assert any(isinstance(m, nn.AdaptiveAvgPool1d)
-                       for m in model.frontends[sensor].modules()), \
-                f"{sensor} frontend missing AdaptiveAvgPool1d"
+            assert any(
+                isinstance(m, nn.AdaptiveAvgPool1d) for m in model.frontends[sensor].modules()
+            ), f"{sensor} frontend missing AdaptiveAvgPool1d"
 
     def test_encode_fused_output_shape(self, cfg_ms):
         model = CRLModel(cfg_ms)
@@ -74,9 +78,7 @@ class TestCRLModelMultiscale:
         model = CRLModel(cfg_ms)
         model.eval()
         with torch.no_grad():
-            features, z, _, _ = model.encode_fused(
-                torch.zeros(4, 1, 16000), torch.zeros(4, 1, 200)
-            )
+            features, z, _, _ = model.encode_fused(torch.zeros(4, 1, 16000), torch.zeros(4, 1, 200))
             x_hat = model.decode_fused(z)
         assert x_hat.shape == features.shape
 
@@ -91,7 +93,6 @@ class TestCRLModelMultiscale:
 
 
 class TestCRLModelMorlet:
-
     def test_per_sensor_encoders(self, cfg_morlet):
         model = CRLModel(cfg_morlet)
         assert "audio" in model.encoders and "seismic" in model.encoders
@@ -121,22 +122,52 @@ class TestCRLModelMorlet:
 
 
 class TestCRLModelShared:
-
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
+    @pytest.mark.parametrize(
+        "fe",
+        [
+            "multiscale",
+            "morlet",
+            "morlet_per_sensor",
+            "morlet_fused",
+            "morlet_learnable",
+            "morlet_learnable_fused",
+        ],
+    )
     def test_has_latent(self, fe):
         from crl_vehicle.models.latent import CausalLatentSpace
+
         model = CRLModel(CRLConfig(frontend_type=fe, d_model=32, n_layers=1))
         assert isinstance(model.latent, CausalLatentSpace)
 
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
+    @pytest.mark.parametrize(
+        "fe",
+        [
+            "multiscale",
+            "morlet",
+            "morlet_per_sensor",
+            "morlet_fused",
+            "morlet_learnable",
+            "morlet_learnable_fused",
+        ],
+    )
     def test_has_interv_classifier(self, fe):
         model = CRLModel(CRLConfig(frontend_type=fe, d_model=32, n_layers=1))
         assert hasattr(model, "interv_classifier")
 
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
+    @pytest.mark.parametrize(
+        "fe",
+        [
+            "multiscale",
+            "morlet",
+            "morlet_per_sensor",
+            "morlet_fused",
+            "morlet_learnable",
+            "morlet_learnable_fused",
+        ],
+    )
     def test_backbone_excludes_downstream_heads(self, fe):
         model = CRLModel(CRLConfig(frontend_type=fe, d_model=32, n_layers=1))
-        backbone_ids = set(id(p) for p in model.backbone_parameters())
+        backbone_ids = {id(p) for p in model.backbone_parameters()}
         for hd in [model.pres_heads, model.type_heads, model.prox_heads]:
             for p in hd.parameters():
                 assert id(p) not in backbone_ids
@@ -147,8 +178,17 @@ class TestCRLModelShared:
 
 
 class TestForwardPair:
-
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
+    @pytest.mark.parametrize(
+        "fe",
+        [
+            "multiscale",
+            "morlet",
+            "morlet_per_sensor",
+            "morlet_fused",
+            "morlet_learnable",
+            "morlet_learnable_fused",
+        ],
+    )
     def test_finite_loss(self, fe, tmp_path):
         cfg = CRLConfig(frontend_type=fe, d_model=32, n_layers=1, fused_seq_len=16)
         model = CRLModel(cfg)
@@ -157,7 +197,17 @@ class TestForwardPair:
         loss, metrics = trainer._forward_pair(_synthetic_batch(), beta=0.5)
         assert loss.isfinite(), f"Loss not finite: {loss.item()}"
 
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
+    @pytest.mark.parametrize(
+        "fe",
+        [
+            "multiscale",
+            "morlet",
+            "morlet_per_sensor",
+            "morlet_fused",
+            "morlet_learnable",
+            "morlet_learnable_fused",
+        ],
+    )
     def test_metrics_keys(self, fe, tmp_path):
         cfg = CRLConfig(frontend_type=fe, d_model=32, n_layers=1, fused_seq_len=16)
         trainer = Trainer(CRLModel(cfg), cfg, torch.device("cpu"), tmp_path)
@@ -165,7 +215,17 @@ class TestForwardPair:
         for k in ("recon", "kl", "raw_kl", "interv", "total"):
             assert k in metrics
 
-    @pytest.mark.parametrize("fe", ["multiscale", "morlet", "morlet_per_sensor", "morlet_fused", "morlet_learnable", "morlet_learnable_fused"])
+    @pytest.mark.parametrize(
+        "fe",
+        [
+            "multiscale",
+            "morlet",
+            "morlet_per_sensor",
+            "morlet_fused",
+            "morlet_learnable",
+            "morlet_learnable_fused",
+        ],
+    )
     def test_finite_grads(self, fe, tmp_path):
         cfg = CRLConfig(frontend_type=fe, d_model=32, n_layers=1, fused_seq_len=16)
         model = CRLModel(cfg)
@@ -174,8 +234,11 @@ class TestForwardPair:
         trainer.optimizer.zero_grad()
         loss, _ = trainer._forward_pair(_synthetic_batch(), beta=0.5)
         loss.backward()
-        bad = [n for n, p in model.named_parameters()
-               if p.grad is not None and not p.grad.isfinite().all()]
+        bad = [
+            n
+            for n, p in model.named_parameters()
+            if p.grad is not None and not p.grad.isfinite().all()
+        ]
         assert not bad, f"Non-finite grads: {bad}"
 
 
@@ -186,8 +249,14 @@ class TestBetaAnnealing:
 
     @pytest.fixture
     def trainer(self, tmp_path):
-        cfg = CRLConfig(d_model=32, n_layers=1, frontend_type="morlet",
-                        kl_floor=0.01, kl_target=0.5, beta_step=0.1)
+        cfg = CRLConfig(
+            d_model=32,
+            n_layers=1,
+            frontend_type="morlet",
+            kl_floor=0.01,
+            kl_target=0.5,
+            beta_step=0.1,
+        )
         return Trainer(CRLModel(cfg), cfg, torch.device("cpu"), tmp_path)
 
     def _step(self, trainer, val_m):
@@ -231,33 +300,57 @@ class TestLinearSignalProbe:
     """linear_signal builds a Linear(d_signal, 4) head; eval slices z[:d_signal]."""
 
     def test_builds_head_sized_to_d_signal(self):
-        cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
-                        frontend_type="multiscale", fused_seq_len=16,
-                        d_z=24, d_signal=12)
+        cfg = CRLConfig(
+            d_model=32,
+            n_layers=1,
+            n_heads=4,
+            frontend_type="multiscale",
+            fused_seq_len=16,
+            d_z=24,
+            d_signal=12,
+        )
         model = CRLModel(cfg, probe_mode="linear_signal")
         head = model.type_heads["fused"].head
         assert head.weight.shape == (4, 12)
 
     def test_d_signal_16_makes_16_dim_head(self):
-        cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
-                        frontend_type="multiscale", fused_seq_len=16,
-                        d_z=24, d_signal=16)
+        cfg = CRLConfig(
+            d_model=32,
+            n_layers=1,
+            n_heads=4,
+            frontend_type="multiscale",
+            fused_seq_len=16,
+            d_z=24,
+            d_signal=16,
+        )
         model = CRLModel(cfg, probe_mode="linear_signal")
         head = model.type_heads["fused"].head
         assert head.weight.shape == (4, 16)
 
     def test_per_sensor_frontend_also_works(self):
-        cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
-                        frontend_type="morlet_per_sensor", fused_seq_len=16,
-                        d_z=24, d_signal=12)
+        cfg = CRLConfig(
+            d_model=32,
+            n_layers=1,
+            n_heads=4,
+            frontend_type="morlet_per_sensor",
+            fused_seq_len=16,
+            d_z=24,
+            d_signal=12,
+        )
         model = CRLModel(cfg, probe_mode="linear_signal")
         for sensor in ("audio", "seismic"):
             head = model.type_heads[sensor].head
             assert head.weight.shape == (4, 12)
 
     def test_invalid_probe_mode_still_rejected(self):
-        cfg = CRLConfig(d_model=32, n_layers=1, n_heads=4,
-                        frontend_type="multiscale", fused_seq_len=16, d_z=24)
+        cfg = CRLConfig(
+            d_model=32,
+            n_layers=1,
+            n_heads=4,
+            frontend_type="multiscale",
+            fused_seq_len=16,
+            d_z=24,
+        )
         with pytest.raises(ValueError, match="probe_mode must be one of"):
             CRLModel(cfg, probe_mode="bogus")
 
@@ -271,17 +364,23 @@ class TestSR4000GraduatedExperiment:
 
     def _cfg(self):
         return CRLConfig(
-            d_model=16, n_layers=1, n_heads=4,
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
             audio_target_rate=4000,
             frontend_per_sensor_params={
-                "audio":   {"target_tokens": 32,
-                            "kernel_sizes": [201, 41, 9, 5],
-                            "strides": [67, 13, 3, 1],
-                            "out_channels_frac": 1.0},
-                "seismic": {"target_tokens": 32,
-                            "kernel_sizes": [51, 21, 7, 3],
-                            "strides": [17, 7, 2, 1],
-                            "out_channels_frac": 1.0},
+                "audio": {
+                    "target_tokens": 32,
+                    "kernel_sizes": [201, 41, 9, 5],
+                    "strides": [67, 13, 3, 1],
+                    "out_channels_frac": 1.0,
+                },
+                "seismic": {
+                    "target_tokens": 32,
+                    "kernel_sizes": [51, 21, 7, 3],
+                    "strides": [17, 7, 2, 1],
+                    "out_channels_frac": 1.0,
+                },
             },
         )
 

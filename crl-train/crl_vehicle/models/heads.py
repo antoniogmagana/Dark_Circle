@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import torch
 import torch.nn as nn
+
 from crl_vehicle.models.latent import CausalLatentSpace
 
 
@@ -14,9 +16,7 @@ class LinearPresenceHead(nn.Module):
 
 
 class LinearTypeHead(nn.Module):
-    def __init__(
-        self, d_in: int = CausalLatentSpace.D_TYPE, n_classes: int = 4
-    ) -> None:
+    def __init__(self, d_in: int = CausalLatentSpace.D_TYPE, n_classes: int = 4) -> None:
         super().__init__()
         self.head = nn.Linear(d_in, n_classes)
 

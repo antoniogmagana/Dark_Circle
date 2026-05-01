@@ -5,30 +5,30 @@ morlet_fused) into a learnable model (morlet_learnable or
 morlet_learnable_fused) and fine-tunes scales against the already-trained
 encoder, instead of chasing a moving target from scratch.
 """
+
 from __future__ import annotations
 
 import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
-
 
 # Topology pairs: target learnable frontend → source fixed frontend(s) that
 # are compatible for stage-2 loading. Must match on late-fusion vs
 # early-fusion structure (encoder/decoder shape differs).
 _TOPOLOGY_PAIRS = {
-    "morlet_learnable":        ("morlet_per_sensor",),
-    "morlet_learnable_fused":  ("morlet_fused",),
+    "morlet_learnable": ("morlet_per_sensor",),
+    "morlet_learnable_fused": ("morlet_fused",),
 }
 
 
 @dataclass
 class CandidateEvaluation:
     """Result of checking one candidate run against the target config."""
+
     path: Path
     frontend: str | None
-    reasons: list[str]           # empty == compatible
+    reasons: list[str]  # empty == compatible
 
     @property
     def compatible(self) -> bool:
@@ -44,11 +44,11 @@ def _params_equal(a: dict, b: dict) -> tuple[bool, str]:
     """Deep-equal morlet_per_sensor_params dicts with tolerant floats."""
     if set(a.keys()) != set(b.keys()):
         return False, f"sensor keys differ: {sorted(a.keys())} vs {sorted(b.keys())}"
-    for sensor in a.keys():
+    for sensor in a:
         sa, sb = a[sensor], b[sensor]
         if set(sa.keys()) != set(sb.keys()):
             return False, f"{sensor}: field keys differ"
-        for k in sa.keys():
+        for k in sa:
             va, vb = sa[k], sb[k]
             if isinstance(va, float) and isinstance(vb, float):
                 if not _floats_close(va, vb):
@@ -71,7 +71,8 @@ def _evaluate_candidate(
         meta = json.loads(meta_path.read_text())
     except Exception as e:
         return CandidateEvaluation(
-            path=run_path, frontend=None,
+            path=run_path,
+            frontend=None,
             reasons=[f"could not parse meta.json: {e}"],
         )
 
@@ -91,9 +92,7 @@ def _evaluate_candidate(
         reasons.append(f"sensors differ: {src_sensors} vs {target_sensors}")
 
     if src_cfg.get("d_model") != target_cfg.get("d_model"):
-        reasons.append(
-            f"d_model differs: {src_cfg.get('d_model')} vs {target_cfg.get('d_model')}"
-        )
+        reasons.append(f"d_model differs: {src_cfg.get('d_model')} vs {target_cfg.get('d_model')}")
 
     if bool(src_cfg.get("morlet_use_phase")) != bool(target_cfg.get("morlet_use_phase")):
         reasons.append(
@@ -108,7 +107,9 @@ def _evaluate_candidate(
         reasons.append(f"morlet_per_sensor_params differ: {reason}")
 
     return CandidateEvaluation(
-        path=run_path, frontend=src_frontend, reasons=reasons,
+        path=run_path,
+        frontend=src_frontend,
+        reasons=reasons,
     )
 
 
@@ -134,14 +135,16 @@ def find_compatible_run(
     )
     if not candidates:
         raise FileNotFoundError(
-            f"No candidate runs found under {search_root} "
-            f"(expected <run>/crl/meta.json)"
+            f"No candidate runs found under {search_root} " f"(expected <run>/crl/meta.json)"
         )
 
     evaluations: list[CandidateEvaluation] = []
     for meta_path in candidates:
         ev = _evaluate_candidate(
-            meta_path, target_frontend, target_sensors, target_cfg,
+            meta_path,
+            target_frontend,
+            target_sensors,
+            target_cfg,
         )
         evaluations.append(ev)
         if verbose:
@@ -176,6 +179,5 @@ def resolve_source_checkpoint(run_dir: Path) -> Path:
         if p.exists():
             return p
     raise FileNotFoundError(
-        f"No CRL checkpoint found in {crl_dir} "
-        f"(looked for crl_best.pth, crl_final.pth)"
+        f"No CRL checkpoint found in {crl_dir} " f"(looked for crl_best.pth, crl_final.pth)"
     )

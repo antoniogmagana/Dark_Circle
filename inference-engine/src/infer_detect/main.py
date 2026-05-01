@@ -11,6 +11,7 @@ For each ``sensor.data`` window we publish a ``DetectionResult`` whose
 ``z_fused`` (or ``z_audio`` + ``z_seismic``) field carries the latent so
 the classification node can apply the type head without re-encoding.
 """
+
 import asyncio
 import json
 import os
@@ -18,9 +19,7 @@ from pathlib import Path
 
 import nats
 import torch
-
 from inference_protos import inference_pb2
-
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/model"))
 
@@ -67,9 +66,7 @@ def _to_tensor(values, expected_len: int) -> torch.Tensor:
     """Pack a flat list/array into shape (1, 1, expected_len) float32."""
     t = torch.as_tensor(list(values), dtype=torch.float32)
     if t.numel() != expected_len:
-        raise ValueError(
-            f"expected {expected_len} samples, got {t.numel()}"
-        )
+        raise ValueError(f"expected {expected_len} samples, got {t.numel()}")
     return t.view(1, 1, expected_len)
 
 
@@ -116,12 +113,8 @@ class InferDetectNode:
             return
 
         try:
-            x_audio = _to_tensor(
-                sd.acoustic_data.data, self.meta["audio_window_size"]
-            )
-            x_seismic = _to_tensor(
-                sd.seismic_data.data, self.meta["seismic_window_size"]
-            )
+            x_audio = _to_tensor(sd.acoustic_data.data, self.meta["audio_window_size"])
+            x_seismic = _to_tensor(sd.seismic_data.data, self.meta["seismic_window_size"])
         except ValueError as exc:
             print(f"[infer_detect] shape mismatch: {exc}", flush=True)
             return
@@ -151,7 +144,7 @@ class InferDetectNode:
 
 async def main_async():
     if "NATS_URL" not in os.environ:
-        raise EnvironmentError("Required environment variable 'NATS_URL' is not set")
+        raise OSError("Required environment variable 'NATS_URL' is not set")
 
     encoders, meta, device = _load_artifacts(MODEL_DIR)
 

@@ -8,12 +8,12 @@ the ``SENSOR_ROLE_MAP`` JSON env var produced by Discovery. Pure logic
 imported directly. ROS2 / NATS plumbing is exercised through inline
 simulation.
 """
+
 import json
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
-
 from dispatch import (
     InvalidRoleMapError,
     UnknownRoleError,
@@ -21,20 +21,22 @@ from dispatch import (
     parse_role_map,
 )
 
-
 # ---------------------------------------------------------------------------
 # parse_role_map
 # ---------------------------------------------------------------------------
+
 
 class TestParseRoleMap:
     """``parse_role_map`` validates and decodes the SENSOR_ROLE_MAP env var."""
 
     @pytest.mark.unit
     def test_audio_seismic_only(self):
-        env = json.dumps({
-            "acoustic": "/shake_001/aud",
-            "seismic": "/shake_001/ehz",
-        })
+        env = json.dumps(
+            {
+                "acoustic": "/shake_001/aud",
+                "seismic": "/shake_001/ehz",
+            }
+        )
         assert parse_role_map(env) == {
             "acoustic": "/shake_001/aud",
             "seismic": "/shake_001/ehz",
@@ -42,13 +44,15 @@ class TestParseRoleMap:
 
     @pytest.mark.unit
     def test_with_accel(self):
-        env = json.dumps({
-            "acoustic": "/a/aud",
-            "seismic": "/a/ehz",
-            "accel_x": "/a/ene",
-            "accel_y": "/a/enn",
-            "accel_z": "/a/enz",
-        })
+        env = json.dumps(
+            {
+                "acoustic": "/a/aud",
+                "seismic": "/a/ehz",
+                "accel_x": "/a/ene",
+                "accel_y": "/a/enn",
+                "accel_z": "/a/enz",
+            }
+        )
         result = parse_role_map(env)
         assert result["accel_x"] == "/a/ene"
         assert result["accel_y"] == "/a/enn"
@@ -73,23 +77,27 @@ class TestParseRoleMap:
 
     @pytest.mark.unit
     def test_unknown_role_rejected(self):
-        env = json.dumps({
-            "acoustic": "/a/aud",
-            "seismic": "/a/ehz",
-            "lidar": "/a/lidar",  # not a valid buffer channel
-        })
+        env = json.dumps(
+            {
+                "acoustic": "/a/aud",
+                "seismic": "/a/ehz",
+                "lidar": "/a/lidar",  # not a valid buffer channel
+            }
+        )
         with pytest.raises(UnknownRoleError):
             parse_role_map(env)
 
     @pytest.mark.unit
     def test_partial_accel_rejected(self):
         """If any accel role is present, all three must be."""
-        env = json.dumps({
-            "acoustic": "/a/aud",
-            "seismic": "/a/ehz",
-            "accel_x": "/a/ene",
-            "accel_y": "/a/enn",
-        })
+        env = json.dumps(
+            {
+                "acoustic": "/a/aud",
+                "seismic": "/a/ehz",
+                "accel_x": "/a/ene",
+                "accel_y": "/a/enn",
+            }
+        )
         with pytest.raises(InvalidRoleMapError):
             parse_role_map(env)
 
@@ -97,6 +105,7 @@ class TestParseRoleMap:
 # ---------------------------------------------------------------------------
 # make_role_callback
 # ---------------------------------------------------------------------------
+
 
 class TestRoleCallback:
     """``make_role_callback`` returns a closure that dispatches msg -> role."""
@@ -118,9 +127,7 @@ class TestRoleCallback:
         msg.amplitude_readings = [1, 2, 3]
         cb(msg)
 
-        buffer.load_buffer.assert_called_once_with(
-            "acoustic", 1700000000.0, [1, 2, 3]
-        )
+        buffer.load_buffer.assert_called_once_with("acoustic", 1700000000.0, [1, 2, 3])
         publish.assert_not_called()
 
     @pytest.mark.unit
@@ -189,6 +196,7 @@ class TestRoleCallback:
 # End-to-end: env -> subscriptions -> dispatch
 # ---------------------------------------------------------------------------
 
+
 class TestSubscriptionWiring:
     """One subscription created per role; each callback bound to its role."""
 
@@ -247,6 +255,7 @@ class TestSubscriptionWiring:
 # regressions in the unchanged buffer math).
 # ---------------------------------------------------------------------------
 
+
 class TestADCNormalization:
     @pytest.mark.unit
     def test_16bit_audio_scale(self):
@@ -267,6 +276,7 @@ class TestADCNormalization:
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 class TestIngestorConfiguration:
     @pytest.mark.unit
     def test_node_name_translates_hyphens_to_underscores(self):
@@ -278,12 +288,14 @@ class TestIngestorConfiguration:
     @pytest.mark.unit
     def test_nats_subject_constant(self):
         from dispatch import NATS_SUBJECT
+
         assert NATS_SUBJECT == "sensor.data"
 
 
 # ---------------------------------------------------------------------------
 # NATS publish (mocked)
 # ---------------------------------------------------------------------------
+
 
 class TestNATSPublishing:
     @pytest.mark.integration
@@ -304,27 +316,24 @@ class TestNATSPublishing:
 # End-to-end happy path
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 def test_ingestor_end_to_end():
-    role_map = {
-        "acoustic": "/shake_001/aud",
-        "seismic": "/shake_001/ehz",
-    }
     buffer = Mock()
     payload = Mock()
     payload.SerializeToString.return_value = b"e2e_payload"
     buffer.load_buffer.return_value = payload
 
     published = []
-    publish = lambda p: published.append(p.SerializeToString())
+
+    def publish(p):
+        return published.append(p.SerializeToString())
 
     cb = make_role_callback("acoustic", buffer, publish)
     msg = Mock(start_time=1700000000.0, amplitude_readings=list(range(100)))
     cb(msg)
 
-    buffer.load_buffer.assert_called_once_with(
-        "acoustic", 1700000000.0, list(range(100))
-    )
+    buffer.load_buffer.assert_called_once_with("acoustic", 1700000000.0, list(range(100)))
     assert published == [b"e2e_payload"]
 
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as F
 
 
 def nt_xent_loss(
@@ -30,8 +29,10 @@ def nt_xent_loss(
 
     # Positive mask in flat index space: (B, B*P)
     pos_mask = torch.zeros(B, B * P, dtype=torch.bool, device=anchor.device)
-    own_cols = torch.arange(P, device=anchor.device).unsqueeze(0) + \
-               torch.arange(B, device=anchor.device).unsqueeze(1) * P
+    own_cols = (
+        torch.arange(P, device=anchor.device).unsqueeze(0)
+        + torch.arange(B, device=anchor.device).unsqueeze(1) * P
+    )
     pos_mask.scatter_(1, own_cols, is_positive)
 
     has_pos = pos_mask.any(dim=1)

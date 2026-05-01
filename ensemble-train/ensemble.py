@@ -13,32 +13,34 @@ Usage:
     poetry run python ensemble.py          # runs all three modes
 """
 
+import json
 import os
 import sys
-import json
-import re
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+import warnings
 from datetime import datetime
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+from sklearn.exceptions import UndefinedMetricWarning
 from sklearn.metrics import (
     accuracy_score,
-    matthews_corrcoef,
-    roc_auc_score,
     confusion_matrix,
+    f1_score,
+    matthews_corrcoef,
     precision_score,
     recall_score,
-    f1_score,
+    roc_auc_score,
 )
-import warnings
-from sklearn.exceptions import UndefinedMetricWarning
+
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 
 # =====================================================================
 # 1. Discovery — find the best evaluated run per model architecture
 # =====================================================================
+
 
 def _parse_f1_from_report(report_path):
     """Return the F1-Score float from an evaluation_report.txt, or None."""
@@ -60,7 +62,7 @@ def discover_members(mode, base_dir="saved_models"):
     Returns a list of dicts:
         {model_name, run_id, run_dir (Path), f1}
     """
-    pattern = Path(base_dir) / mode / "*" / "*" / "evaluation_report.txt"
+    Path(base_dir) / mode / "*" / "*" / "evaluation_report.txt"
     candidates = {}
 
     for report_path in Path(base_dir).glob(f"{mode}/*/*/evaluation_report.txt"):
@@ -97,6 +99,7 @@ def discover_members(mode, base_dir="saved_models"):
 # 2. Weight computation
 # =====================================================================
 
+
 def compute_weights(members):
     """
     Linear F1-normalised weights: w_i = f1_i / sum(f1_j).
@@ -112,6 +115,7 @@ def compute_weights(members):
 # =====================================================================
 # 3. Ensemble evaluation (offline — from predictions.npz)
 # =====================================================================
+
 
 def evaluate_ensemble(members, mode):
     """
@@ -130,7 +134,7 @@ def evaluate_ensemble(members, mode):
     for m in members:
         data = np.load(m["run_dir"] / "predictions.npz")
         labels = data["labels"]
-        probs = data["probs"]   # [N, C]
+        probs = data["probs"]  # [N, C]
         preds = data["preds"]
 
         # Verify all models evaluated on the same test set
@@ -147,12 +151,8 @@ def evaluate_ensemble(members, mode):
         f1_ind = f1_score(labels, preds, average="weighted", zero_division=0)
         acc_ind = accuracy_score(labels, preds)
         mcc_ind = matthews_corrcoef(labels, preds)
-        prec_ind = precision_score(
-            labels, preds, average="weighted", zero_division=0
-        )
-        rec_ind = recall_score(
-            labels, preds, average="weighted", zero_division=0
-        )
+        prec_ind = precision_score(labels, preds, average="weighted", zero_division=0)
+        rec_ind = recall_score(labels, preds, average="weighted", zero_division=0)
         try:
             num_classes = probs.shape[1]
             if num_classes == 2:
@@ -162,16 +162,18 @@ def evaluate_ensemble(members, mode):
         except ValueError:
             auc_ind = float("nan")
 
-        individual_metrics.append({
-            "model_name": m["model_name"],
-            "run_id": m["run_id"],
-            "f1": f1_ind,
-            "accuracy": acc_ind,
-            "mcc": mcc_ind,
-            "precision": prec_ind,
-            "recall": rec_ind,
-            "auc": auc_ind,
-        })
+        individual_metrics.append(
+            {
+                "model_name": m["model_name"],
+                "run_id": m["run_id"],
+                "f1": f1_ind,
+                "accuracy": acc_ind,
+                "mcc": mcc_ind,
+                "precision": prec_ind,
+                "recall": rec_ind,
+                "auc": auc_ind,
+            }
+        )
 
         # Weighted accumulation
         if pooled_probs is None:
@@ -184,15 +186,9 @@ def evaluate_ensemble(members, mode):
     # Ensemble metrics
     acc = accuracy_score(labels_ref, pooled_preds)
     mcc = matthews_corrcoef(labels_ref, pooled_preds)
-    precision = precision_score(
-        labels_ref, pooled_preds, average="weighted", zero_division=0
-    )
-    recall = recall_score(
-        labels_ref, pooled_preds, average="weighted", zero_division=0
-    )
-    f1 = f1_score(
-        labels_ref, pooled_preds, average="weighted", zero_division=0
-    )
+    precision = precision_score(labels_ref, pooled_preds, average="weighted", zero_division=0)
+    recall = recall_score(labels_ref, pooled_preds, average="weighted", zero_division=0)
+    f1 = f1_score(labels_ref, pooled_preds, average="weighted", zero_division=0)
 
     num_classes = pooled_probs.shape[1]
     try:
@@ -240,6 +236,7 @@ def evaluate_ensemble(members, mode):
 # 4. Report generation
 # =====================================================================
 
+
 def _axis_labels_for_mode(mode, num_classes, members):
     """Derive human-readable class names from the mode."""
     if mode == "detection":
@@ -285,9 +282,7 @@ def build_report(mode, members, result, output_path):
         # --- Composition ---
         f.write("ENSEMBLE COMPOSITION\n")
         f.write("-" * 60 + "\n")
-        f.write(
-            f"{'Model':<30} {'Run ID':<20} {'F1':>6}  {'Weight':>7}\n"
-        )
+        f.write(f"{'Model':<30} {'Run ID':<20} {'F1':>6}  {'Weight':>7}\n")
         f.write("-" * 60 + "\n")
         for m in sorted(members, key=lambda x: -x["f1"]):
             f.write(
@@ -299,9 +294,7 @@ def build_report(mode, members, result, output_path):
         # --- Individual model metrics ---
         f.write("INDIVIDUAL MODEL TEST METRICS\n")
         f.write("-" * 60 + "\n")
-        f.write(
-            f"{'Model':<30} {'Acc':>6}  {'F1':>6}  {'MCC':>6}  {'AUC':>6}\n"
-        )
+        f.write(f"{'Model':<30} {'Acc':>6}  {'F1':>6}  {'MCC':>6}  {'AUC':>6}\n")
         f.write("-" * 60 + "\n")
         for m in sorted(ind, key=lambda x: -x["f1"]):
             auc_str = f"{m['auc']:>6.4f}" if not np.isnan(m["auc"]) else "   N/A"
@@ -319,9 +312,7 @@ def build_report(mode, members, result, output_path):
         f.write(f"Precision:   {em['precision']:.4f}\n")
         f.write(f"Recall:      {em['recall']:.4f}\n")
         f.write(f"F1-Score:    {em['f1']:.4f}\n")
-        auc_str = (
-            f"{em['auc']:.4f}" if not np.isnan(em["auc"]) else "N/A"
-        )
+        auc_str = f"{em['auc']:.4f}" if not np.isnan(em["auc"]) else "N/A"
         f.write(f"ROC-AUC:     {auc_str}\n")
 
         if em["far"] is not None:
@@ -338,10 +329,7 @@ def build_report(mode, members, result, output_path):
         # --- Lift ---
         f.write("ENSEMBLE LIFT\n")
         f.write("-" * 60 + "\n")
-        f.write(
-            f"Best Individual:  {best_ind['model_name']} "
-            f"(F1: {best_ind['f1']:.4f})\n"
-        )
+        f.write(f"Best Individual:  {best_ind['model_name']} " f"(F1: {best_ind['f1']:.4f})\n")
         f.write(f"Ensemble F1:      {em['f1']:.4f}\n")
         sign = "+" if lift >= 0 else ""
         pct = lift / best_ind["f1"] * 100 if best_ind["f1"] > 0 else 0.0
@@ -372,9 +360,7 @@ def save_conf_matrix(mode, members, result, output_path):
         xticklabels=axis_labels,
         yticklabels=axis_labels,
     )
-    plt.title(
-        f"Ensemble Confusion Matrix ({mode})", fontsize=26, pad=20
-    )
+    plt.title(f"Ensemble Confusion Matrix ({mode})", fontsize=26, pad=20)
     plt.ylabel("True Label", fontsize=22, labelpad=14)
     plt.xlabel("Predicted Label", fontsize=22, labelpad=14)
 
@@ -396,6 +382,7 @@ def save_conf_matrix(mode, members, result, output_path):
 # 5. Entry point
 # =====================================================================
 
+
 def run_ensemble(mode):
     print(f"\n{'='*60}")
     print(f"  ENSEMBLE — mode: {mode}")
@@ -404,10 +391,7 @@ def run_ensemble(mode):
     members = discover_members(mode)
 
     if len(members) == 0:
-        print(
-            f"  [!] No evaluated runs found for mode '{mode}'. "
-            "Run eval.py first."
-        )
+        print(f"  [!] No evaluated runs found for mode '{mode}'. " "Run eval.py first.")
         return
 
     if len(members) == 1:
@@ -440,9 +424,7 @@ def run_ensemble(mode):
 
     em = result["ensemble_metrics"]
     print(
-        f"\n  Ensemble F1: {em['f1']:.4f}  "
-        f"Acc: {em['accuracy']:.4f}  "
-        f"MCC: {em['mcc']:.4f}"
+        f"\n  Ensemble F1: {em['f1']:.4f}  " f"Acc: {em['accuracy']:.4f}  " f"MCC: {em['mcc']:.4f}"
     )
 
 

@@ -1,16 +1,13 @@
 import pytest
 import torch
-
 from crl_vehicle.priors import ConditionalPrior, Prior
-from crl_vehicle.priors.conditional import _encode_labels, _LABEL_DIM
+from crl_vehicle.priors.conditional import _LABEL_DIM, _encode_labels
 
 
 def _y(presence: list, types: list) -> torch.Tensor:
     """Build (B, 2) label tensor. types is raw {-2, -1, 0, 1, 2, 3}."""
     assert len(presence) == len(types)
-    return torch.tensor(
-        [[float(p), float(t)] for p, t in zip(presence, types)]
-    )
+    return torch.tensor([[float(p), float(t)] for p, t in zip(presence, types, strict=False)])
 
 
 class TestLabelEncoding:
@@ -111,7 +108,7 @@ class TestConditionalPriorKL:
         mu = torch.randn(4, 16)
         logvar = torch.randn(4, 16).clamp(-4, 4)
         kl_cond = p.kl_to_posterior(mu, logvar, y=y)
-        kl_std  = sp.kl_to_posterior(mu, logvar, y=y)
+        kl_std = sp.kl_to_posterior(mu, logvar, y=y)
         assert torch.allclose(kl_cond, kl_std, atol=1e-5)
 
     def test_kl_differs_between_labels_after_training(self):
@@ -140,8 +137,11 @@ class TestConditionalPriorTraining:
         logvar = torch.zeros(2, 8, requires_grad=True)
         kl = p.kl_to_posterior(mu, logvar, y=y)
         kl.backward()
-        bad = [n for n, prm in p.named_parameters()
-               if prm.grad is not None and not prm.grad.isfinite().all()]
+        bad = [
+            n
+            for n, prm in p.named_parameters()
+            if prm.grad is not None and not prm.grad.isfinite().all()
+        ]
         assert not bad, f"Non-finite prior-MLP grads: {bad}"
 
     def test_gradients_flow_into_posterior(self):

@@ -6,12 +6,13 @@ unit-tested without the ROS2 or Kubernetes runtime. ``discovery.main``
 imports from here and adds the ROS2 graph poll + Kubernetes API plumbing on
 top.
 """
+
 import copy
 import json
 import re
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 import yaml
 
@@ -26,6 +27,7 @@ MAX_ARRAY_ID_LEN = 63 - len("ingestor-")
 # Errors
 # ---------------------------------------------------------------------------
 
+
 class InvalidConfigError(ValueError):
     """The ConfigMap YAML is malformed or missing required keys."""
 
@@ -38,6 +40,7 @@ class PartialAccelError(InvalidConfigError):
 # Data shapes
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ArraySpec:
     """One configured sensor array.
@@ -45,6 +48,7 @@ class ArraySpec:
     ``accel`` is None when the operator chose not to include accelerometer
     data; when present it must contain all three of x/y/z.
     """
+
     audio: str
     seismic: str
     accel: dict | None = None
@@ -53,6 +57,7 @@ class ArraySpec:
 @dataclass
 class PollDecision:
     """The action set the manager should apply this tick."""
+
     to_spawn: set = field(default_factory=set)
     to_teardown: set = field(default_factory=set)
     log_awaiting: dict = field(default_factory=dict)
@@ -61,6 +66,7 @@ class PollDecision:
 # ---------------------------------------------------------------------------
 # Config loading
 # ---------------------------------------------------------------------------
+
 
 def load_config(yaml_text: str) -> dict[str, ArraySpec]:
     """Parse the expected-sensors ConfigMap into ``{array_id: ArraySpec}``."""
@@ -103,9 +109,7 @@ def load_config(yaml_text: str) -> dict[str, ArraySpec]:
         accel = entry.get("accel")
         if accel is not None:
             if not isinstance(accel, dict):
-                raise InvalidConfigError(
-                    f"{array_id}: 'accel' must be a mapping with x/y/z"
-                )
+                raise InvalidConfigError(f"{array_id}: 'accel' must be a mapping with x/y/z")
             missing = {"x", "y", "z"} - set(accel)
             if missing:
                 raise PartialAccelError(
@@ -121,6 +125,7 @@ def load_config(yaml_text: str) -> dict[str, ArraySpec]:
 # ---------------------------------------------------------------------------
 # Completeness checks
 # ---------------------------------------------------------------------------
+
 
 def required_topics(spec: ArraySpec) -> set[str]:
     """Topics that must be on the ROS2 graph for ``spec`` to spawn."""
@@ -142,6 +147,7 @@ def missing_topics(spec: ArraySpec, visible: Iterable[str]) -> set[str]:
 # Role-map injection (env var sent to the Ingestor)
 # ---------------------------------------------------------------------------
 
+
 def build_role_map(spec: ArraySpec) -> dict[str, str]:
     """``{role: topic}`` mapping consumed by the Ingestor at startup."""
     role_map = {
@@ -159,8 +165,11 @@ def build_role_map(spec: ArraySpec) -> dict[str, str]:
 # Ingestor manifest construction
 # ---------------------------------------------------------------------------
 
+
 def build_ingestor_manifest(
-    template_yaml: str, sensor_array: str, spec: ArraySpec,
+    template_yaml: str,
+    sensor_array: str,
+    spec: ArraySpec,
 ) -> dict:
     """Render the ingestor Deployment for ``sensor_array``.
 
@@ -204,6 +213,7 @@ def _set_env(env_list: list, name: str, value: str) -> None:
 # ---------------------------------------------------------------------------
 # Poll state machine
 # ---------------------------------------------------------------------------
+
 
 class PollState:
     """Stateful decision engine for one Discovery node.

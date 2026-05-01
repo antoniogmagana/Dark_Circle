@@ -27,15 +27,14 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from crl_vehicle.config import CRLConfig, MODALITIES
+from crl_vehicle.config import MODALITIES, CRLConfig
 from crl_vehicle.data.dataset import SensorDataset, collate_single
 from training.trainer import CRLModel
-
 
 # ---------------------------------------------------------------------------
 # Result tracking
@@ -76,6 +75,7 @@ def _check_above(value: float, threshold: float, name: str, fmt: str = ".4f") ->
 # Embedding collection
 # ---------------------------------------------------------------------------
 
+
 @torch.no_grad()
 def _collect_embeddings(
     model: CRLModel,
@@ -96,13 +96,18 @@ def _collect_embeddings(
         vtypes.append(batch["vehicle_type"].numpy())
         dets.append(batch["detection_label"].numpy())
 
-    return {"z_pres": np.concatenate(z_pres_list), "z_type": np.concatenate(z_type_list),
-            "vtype": np.concatenate(vtypes), "det": np.concatenate(dets)}
+    return {
+        "z_pres": np.concatenate(z_pres_list),
+        "z_type": np.concatenate(z_type_list),
+        "vtype": np.concatenate(vtypes),
+        "det": np.concatenate(dets),
+    }
 
 
 # ---------------------------------------------------------------------------
 # §8.1  Unit-level checks
 # ---------------------------------------------------------------------------
+
 
 @torch.no_grad()
 def check_unit_level(
@@ -114,13 +119,14 @@ def check_unit_level(
     _header("§8.1  Unit-Level Checks")
 
     all_shapes_ok = True
-    all_finite    = True
+    all_finite = True
 
     for sensor in model.sensors:
-        x   = batch[f"x_{sensor}"].to(device)
-        if not x.any(): continue
-        B   = x.shape[0]
-        mod = cfg.modality_cfg(sensor)
+        x = batch[f"x_{sensor}"].to(device)
+        if not x.any():
+            continue
+        B = x.shape[0]
+        cfg.modality_cfg(sensor)
 
         features, z, mu, logvar = model.encode(sensor, x)
         if not features.isfinite().all():
@@ -134,7 +140,11 @@ def check_unit_level(
 
         x_hat = model.decode(sensor, z)
         if tuple(x_hat.shape) != tuple(features.shape):
-            _result(FAIL, f"decoder shape [{sensor}]", f"got {tuple(x_hat.shape)}, expected {tuple(features.shape)}")
+            _result(
+                FAIL,
+                f"decoder shape [{sensor}]",
+                f"got {tuple(x_hat.shape)}, expected {tuple(features.shape)}",
+            )
 
         for name, t in [("z", z), ("mu", mu), ("logvar", logvar), ("x_hat", x_hat)]:
             if not t.isfinite().all():
@@ -154,6 +164,7 @@ def check_unit_level(
 # §8.2  Embedding quality
 # ---------------------------------------------------------------------------
 
+
 def check_embedding_quality(
     train_embeds: dict[str, np.ndarray],
     val_embeds: dict[str, np.ndarray],
@@ -162,27 +173,43 @@ def check_embedding_quality(
     metrics: dict = {}
 
     def linear_probe_accuracy(X_tr, y_tr, X_val, y_val, label_name):
-        clf = LogisticRegression(max_iter=500, C=1.0, class_weight='balanced')
+        clf = LogisticRegression(max_iter=500, C=1.0, class_weight="balanced")
         clf.fit(X_tr, y_tr)
         y_pred = clf.predict(X_val)
         acc = accuracy_score(y_val, y_pred)
-        f1 = f1_score(y_val, y_pred, average='weighted', zero_division=0)
+        f1 = f1_score(y_val, y_pred, average="weighted", zero_division=0)
         return {f"{label_name}_acc": acc, f"{label_name}_f1": f1}
 
     # Presence embedding: should predict detection label
-    m_pres = linear_probe_accuracy(train_embeds["z_pres"], train_embeds["det"],
-                                   val_embeds["z_pres"], val_embeds["det"], label_name="probe_pres")
+    m_pres = linear_probe_accuracy(
+        train_embeds["z_pres"],
+        train_embeds["det"],
+        val_embeds["z_pres"],
+        val_embeds["det"],
+        label_name="probe_pres",
+    )
     metrics.update(m_pres)
-    _check_above(m_pres["probe_pres_acc"], 0.6,
-                 "presence embedding probe acc > 0.60 (binary detection)")
+    _check_above(
+        m_pres["probe_pres_acc"],
+        0.6,
+        "presence embedding probe acc > 0.60 (binary detection)",
+    )
     _result(INFO, "presence probe F1", f"{m_pres['probe_pres_f1']:.4f}")
 
     # Type embedding: should predict vehicle type
-    m_type = linear_probe_accuracy(train_embeds["z_type"], train_embeds["vtype"],
-                                   val_embeds["z_type"], val_embeds["vtype"], label_name="probe_type")
+    m_type = linear_probe_accuracy(
+        train_embeds["z_type"],
+        train_embeds["vtype"],
+        val_embeds["z_type"],
+        val_embeds["vtype"],
+        label_name="probe_type",
+    )
     metrics.update(m_type)
-    _check_above(m_type["probe_type_acc"], 0.25,
-                 "type embedding probe acc > 0.25 (4-class random baseline)")
+    _check_above(
+        m_type["probe_type_acc"],
+        0.25,
+        "type embedding probe acc > 0.25 (4-class random baseline)",
+    )
     _result(INFO, "type probe F1", f"{m_type['probe_type_f1']:.4f}")
 
     # Instance embedding: should predict instance type
@@ -213,6 +240,7 @@ def check_embedding_quality(
 # §8.4  Downstream task performance
 # ---------------------------------------------------------------------------
 
+
 @torch.no_grad()
 def check_downstream_performance(
     model: CRLModel,
@@ -225,17 +253,17 @@ def check_downstream_performance(
     _header("§8.4  Downstream Task Performance")
 
     probe_pres_acc = eval_metrics.get("probe_pres_acc", 0.0)
-    probe_pres_f1  = eval_metrics.get("probe_pres_f1",  0.0)
+    probe_pres_f1 = eval_metrics.get("probe_pres_f1", 0.0)
     probe_type_acc = eval_metrics.get("probe_type_acc", 0.0)
-    probe_type_f1  = eval_metrics.get("probe_type_f1",  0.0)
-    det_auc        = eval_metrics.get("detection_auc",  0.0)
+    probe_type_f1 = eval_metrics.get("probe_type_f1", 0.0)
+    det_auc = eval_metrics.get("detection_auc", 0.0)
 
     print("\n  Linear probe on frozen backbone embeddings:")
-    _check_above(det_auc,        0.7,  "  detection AUC > 0.70")
-    _check_above(probe_pres_acc, 0.6,  "  presence probe acc > 0.60")
+    _check_above(det_auc, 0.7, "  detection AUC > 0.70")
+    _check_above(probe_pres_acc, 0.6, "  presence probe acc > 0.60")
     _check_above(probe_type_acc, 0.25, "  type probe acc > 0.25 (4-class random baseline)")
     _result(INFO, "  presence probe F1", f"{probe_pres_f1:.4f}")
-    _result(INFO, "  type probe F1",     f"{probe_type_f1:.4f}")
+    _result(INFO, "  type probe F1", f"{probe_type_f1:.4f}")
 
     # Fine-tuned head — trainer saves sub-heads separately
     pres_ckpt = save_dir / f"pres_head_{primary_sensor}_best.pth"
@@ -243,33 +271,32 @@ def check_downstream_performance(
 
     missing = [p.name for p in (pres_ckpt, type_ckpt) if not p.exists()]
     if missing:
-        _result(WARN, "Phase 2 head checkpoint(s) not found",
-                f"missing: {', '.join(missing)} — run --phase downstream first")
+        _result(
+            WARN,
+            "Phase 2 head checkpoint(s) not found",
+            f"missing: {', '.join(missing)} — run --phase downstream first",
+        )
         return
 
     pres_head = model.pres_heads[primary_sensor]
     type_head = model.type_heads[primary_sensor]
-    pres_head.load_state_dict(
-        torch.load(pres_ckpt, map_location=device, weights_only=True)
-    )
-    type_head.load_state_dict(
-        torch.load(type_ckpt, map_location=device, weights_only=True)
-    )
+    pres_head.load_state_dict(torch.load(pres_ckpt, map_location=device, weights_only=True))
+    type_head.load_state_dict(torch.load(type_ckpt, map_location=device, weights_only=True))
 
-    det_true, det_pred, det_scores = [], [], []
+    det_true, det_pred, _det_scores = [], [], []
     cls_true, cls_pred = [], []
 
     for batch in val_loader:
-        x     = batch[f"x_{primary_sensor}"].to(device)
+        x = batch[f"x_{primary_sensor}"].to(device)
         vtype = batch["vehicle_type"]
-        det   = batch["detection_label"]
+        det = batch["detection_label"]
 
         _, z, _, _ = model.encode(primary_sensor, x)
         z_pres, z_type, _, _ = model.latent.split(z)
         pres_logit = pres_head(z_pres)
         type_logits = type_head(z_type)
 
-        scores = torch.sigmoid(pres_logit).cpu().numpy()
+        torch.sigmoid(pres_logit).cpu().numpy()
         det_pred.extend((pres_logit > 0).long().cpu().tolist())
         det_true.extend(det.tolist())
 
@@ -289,13 +316,16 @@ def check_downstream_performance(
 
     if cls_true:
         cls_acc_2 = float(accuracy_score(cls_true, cls_pred))
-        cls_f1_2  = float(f1_score(cls_true, cls_pred, average="weighted", zero_division=0))
+        cls_f1_2 = float(f1_score(cls_true, cls_pred, average="weighted", zero_division=0))
         _check_above(cls_acc_2, 0.25, "  vehicle type accuracy > 0.25 (Phase 2)")
         _result(INFO, "  vehicle type F1 (Phase 2)", f"{cls_f1_2:.4f}")
 
-        _result(INFO, "  probe vs head type accuracy",
-                f"probe={probe_type_acc:.4f}  head={cls_acc_2:.4f}  "
-                f"Δ={cls_acc_2 - probe_type_acc:+.4f}")
+        _result(
+            INFO,
+            "  probe vs head type accuracy",
+            f"probe={probe_type_acc:.4f}  head={cls_acc_2:.4f}  "
+            f"Δ={cls_acc_2 - probe_type_acc:+.4f}",
+        )
         _result(
             PASS if cls_acc_2 >= probe_type_acc else WARN,
             "  fine-tuning adds value beyond linear decodability",
@@ -305,6 +335,7 @@ def check_downstream_performance(
 # ---------------------------------------------------------------------------
 # §8.6  Training integrity
 # ---------------------------------------------------------------------------
+
 
 def check_training_integrity(save_dir: Path) -> None:
     _header("§8.6  Training Integrity")
@@ -336,29 +367,36 @@ def check_training_integrity(save_dir: Path) -> None:
     # Presence loss should be lower than initial
     pres_cols = [float(r["val_pres"]) for r in rows if r.get("val_pres")]
     if len(pres_cols) >= 2:
-        _result(INFO, "val presence loss trend",
-                f"initial={pres_cols[0]:.4f}  final={pres_cols[-1]:.4f}")
+        _result(
+            INFO,
+            "val presence loss trend",
+            f"initial={pres_cols[0]:.4f}  final={pres_cols[-1]:.4f}",
+        )
 
     best_row = min(rows, key=lambda r: float(r.get("val_total") or float("inf")))
-    _result(INFO, f"best checkpoint at epoch {best_row['epoch']}",
-            f"val_total={float(best_row['val_total']):.4f}")
+    _result(
+        INFO,
+        f"best checkpoint at epoch {best_row['epoch']}",
+        f"val_total={float(best_row['val_total']):.4f}",
+    )
 
 
 # ---------------------------------------------------------------------------
 # CLI + main
 # ---------------------------------------------------------------------------
 
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Post-run validation")
-    p.add_argument("--save-dir",    default="./saved_crl")
-    p.add_argument("--checkpoint",  default="crl_best.pth")
-    p.add_argument("--data-dir",    default="../data_files/parsed/train")
-    p.add_argument("--val-dir",     default="../data_files/parsed/val")
-    p.add_argument("--sensors",     nargs="+", default=None, choices=MODALITIES)
-    p.add_argument("--batch-size",  type=int, default=64)
+    p.add_argument("--save-dir", default="./saved_crl")
+    p.add_argument("--checkpoint", default="crl_best.pth")
+    p.add_argument("--data-dir", default="../data_files/parsed/train")
+    p.add_argument("--val-dir", default="../data_files/parsed/val")
+    p.add_argument("--sensors", nargs="+", default=None, choices=MODALITIES)
+    p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--num-workers", type=int, default=4)
-    p.add_argument("--device",      default=None)
-    p.add_argument("--out",         default=None)
+    p.add_argument("--device", default=None)
+    p.add_argument("--out", default=None)
     return p.parse_args()
 
 
@@ -393,7 +431,7 @@ def main() -> None:
     # Build with frontend_type set so __post_init__ reconciles the new
     # (frontend_bank, frontend_fusion) schema correctly.
     cfg = CRLConfig(frontend_type=frontend)
-    cfg.batch_size  = args.batch_size
+    cfg.batch_size = args.batch_size
     cfg.num_workers = args.num_workers
 
     ckpt_path = save_dir / args.checkpoint
@@ -408,22 +446,28 @@ def main() -> None:
 
     try:
         train_ds = SensorDataset(args.data_dir, cfg, is_train=True)
-        val_ds   = SensorDataset(args.val_dir,  cfg, is_train=False)
+        val_ds = SensorDataset(args.val_dir, cfg, is_train=False)
     except Exception as e:
         print(f"ERROR loading datasets: {e}", file=sys.stderr)
         sys.exit(1)
 
     train_loader = torch.utils.data.DataLoader(
-        train_ds, batch_size=cfg.batch_size, shuffle=False,
-        num_workers=cfg.num_workers, collate_fn=collate_single,
+        train_ds,
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        num_workers=cfg.num_workers,
+        collate_fn=collate_single,
     )
     val_loader = torch.utils.data.DataLoader(
-        val_ds, batch_size=cfg.batch_size, shuffle=False,
-        num_workers=cfg.num_workers, collate_fn=collate_single,
+        val_ds,
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        num_workers=cfg.num_workers,
+        collate_fn=collate_single,
     )
 
-    sample_batch = next(iter(val_loader))
-    primary      = "seismic" if "seismic" in sensors else sensors[0]
+    next(iter(val_loader))
+    primary = "seismic" if "seismic" in sensors else sensors[0]
 
     # ----------------------------------------------------------------
     print("\n  Collecting embeddings over train and val splits...")
@@ -438,9 +482,7 @@ def main() -> None:
     )
 
     # ----------------------------------------------------------------
-    check_downstream_performance(
-        model, val_loader, device, save_dir, primary, eval_metrics
-    )
+    check_downstream_performance(model, val_loader, device, save_dir, primary, eval_metrics)
 
     # ----------------------------------------------------------------
     check_training_integrity(save_dir)
@@ -476,10 +518,7 @@ def main() -> None:
         "passed": counts[PASS],
         "failed": counts[FAIL],
         "warned": counts[WARN],
-        "results": [
-            {"status": s, "name": n, "detail": d}
-            for s, n, d in _results
-        ],
+        "results": [{"status": s, "name": n, "detail": d} for s, n, d in _results],
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:

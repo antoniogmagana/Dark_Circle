@@ -8,17 +8,16 @@ One ROS2 message per inference window:
   classifier emits the authoritative payload on ``classification.result``;
   publishing both would duplicate every positive on /inference_result.
 """
+
 import asyncio
 import os
 import threading
 
 import nats
 import rclpy
-from rclpy.node import Node
-
 from inference_protos import inference_pb2
+from rclpy.node import Node
 from ros2_interfaces.msg import InferenceResult
-
 
 QUEUE_GROUP = "egress"
 
@@ -62,7 +61,7 @@ async def start_nats():
 
 def main():
     if "NATS_URL" not in os.environ:
-        raise EnvironmentError("Required environment variable 'NATS_URL' is not set")
+        raise OSError("Required environment variable 'NATS_URL' is not set")
 
     loop = asyncio.new_event_loop()
     nc = loop.run_until_complete(start_nats())

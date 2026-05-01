@@ -4,6 +4,7 @@ Covers the parts that don't require real training: YAML loading/validation,
 argv construction, summary writing. Actual subprocess execution is out of
 scope for unit tests — that's a smoke-test responsibility (Task #19).
 """
+
 from __future__ import annotations
 
 import csv
@@ -17,20 +18,21 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import run_experiments as runner
 
-
 # ---------------------------------------------------------------------------
 # load_sweep_yaml
 # ---------------------------------------------------------------------------
 
-class TestLoadSweepYaml:
 
+class TestLoadSweepYaml:
     def _write(self, tmp_path: Path, content: str) -> Path:
         p = tmp_path / "sweep.yaml"
         p.write_text(content)
         return p
 
     def test_roundtrip_valid_yaml(self, tmp_path):
-        p = self._write(tmp_path, """
+        p = self._write(
+            tmp_path,
+            """
 base_config:
   n_epochs: 50
   lr: 0.001
@@ -39,7 +41,8 @@ runs:
     overrides: {frontend_type: multiscale}
   - name: b
     overrides: {frontend_type: morlet_learnable, morlet_learnable_w0: true}
-""")
+""",
+        )
         base, runs = runner.load_sweep_yaml(p)
         assert base == {"n_epochs": 50, "lr": 0.001}
         assert len(runs) == 2
@@ -58,29 +61,38 @@ runs:
 
     def test_base_config_optional(self, tmp_path):
         """Missing base_config is fine — empty dict default."""
-        p = self._write(tmp_path, """
+        p = self._write(
+            tmp_path,
+            """
 runs:
   - name: solo
     overrides: {frontend_type: multiscale}
-""")
+""",
+        )
         base, runs = runner.load_sweep_yaml(p)
         assert base == {}
         assert len(runs) == 1
 
     def test_run_missing_name_raises(self, tmp_path):
-        p = self._write(tmp_path, """
+        p = self._write(
+            tmp_path,
+            """
 runs:
   - overrides: {frontend_type: multiscale}
-""")
+""",
+        )
         with pytest.raises(ValueError, match="missing 'name'"):
             runner.load_sweep_yaml(p)
 
     def test_overrides_must_be_dict(self, tmp_path):
-        p = self._write(tmp_path, """
+        p = self._write(
+            tmp_path,
+            """
 runs:
   - name: bad
     overrides: not_a_dict
-""")
+""",
+        )
         with pytest.raises(ValueError, match="must be a dict"):
             runner.load_sweep_yaml(p)
 
@@ -89,8 +101,8 @@ runs:
 # _build_train_argv
 # ---------------------------------------------------------------------------
 
-class TestBuildTrainArgv:
 
+class TestBuildTrainArgv:
     def test_flagged_fields_go_to_named_flags(self, tmp_path):
         argv = runner._build_train_argv(
             python_exe="python",
@@ -112,9 +124,9 @@ class TestBuildTrainArgv:
             train_script=Path("train.py"),
             # morlet_use_phase and lambda_interv have no dedicated flag in train.py
             merged_cfg={
-                "frontend_type":    "morlet_per_sensor",
+                "frontend_type": "morlet_per_sensor",
                 "morlet_use_phase": True,
-                "lambda_interv":    2.0,
+                "lambda_interv": 2.0,
             },
             run_save_dir=tmp_path / "run1",
             extra_cli={},
@@ -150,8 +162,11 @@ class TestBuildTrainArgv:
             train_script=Path("train.py"),
             merged_cfg={},
             run_save_dir=tmp_path / "r",
-            extra_cli={"--steps-per-epoch": 2, "--ds-epochs": 1,
-                       "--cache-dir": "/tmp/cache"},
+            extra_cli={
+                "--steps-per-epoch": 2,
+                "--ds-epochs": 1,
+                "--cache-dir": "/tmp/cache",
+            },
         )
         assert "--steps-per-epoch" in argv
         assert argv[argv.index("--steps-per-epoch") + 1] == "2"
@@ -174,16 +189,26 @@ class TestBuildTrainArgv:
 # write_sweep_summary
 # ---------------------------------------------------------------------------
 
-class TestWriteSweepSummary:
 
+class TestWriteSweepSummary:
     def test_csv_has_one_row_per_run(self, tmp_path):
         summaries = [
-            {"name": "a", "overrides": {"frontend_type": "multiscale"},
-             "best_val_ref_elbo": 0.5, "val_type_f1": 0.7, "returncode": 0,
-             "elapsed_min": 1.0},
-            {"name": "b", "overrides": {"frontend_type": "morlet_learnable"},
-             "best_val_ref_elbo": 0.6, "val_type_f1": 0.65, "returncode": 0,
-             "elapsed_min": 1.2},
+            {
+                "name": "a",
+                "overrides": {"frontend_type": "multiscale"},
+                "best_val_ref_elbo": 0.5,
+                "val_type_f1": 0.7,
+                "returncode": 0,
+                "elapsed_min": 1.0,
+            },
+            {
+                "name": "b",
+                "overrides": {"frontend_type": "morlet_learnable"},
+                "best_val_ref_elbo": 0.6,
+                "val_type_f1": 0.65,
+                "returncode": 0,
+                "elapsed_min": 1.2,
+            },
         ]
         runner.write_sweep_summary(summaries, tmp_path)
 
@@ -208,11 +233,11 @@ class TestWriteSweepSummary:
     def test_missing_metrics_write_empty_string(self, tmp_path):
         """A failed run has no metrics — CSV row should be fine with blanks,
         not crash."""
-        summaries = [{"name": "failed", "overrides": {}, "returncode": 1,
-                      "error": "NaN in loss"}]
+        summaries = [{"name": "failed", "overrides": {}, "returncode": 1, "error": "NaN in loss"}]
         runner.write_sweep_summary(summaries, tmp_path)
 
-        rows = list(csv.DictReader(open(tmp_path / "summary.csv")))
+        with open(tmp_path / "summary.csv") as f:
+            rows = list(csv.DictReader(f))
         assert rows[0]["name"] == "failed"
         assert rows[0]["returncode"] == "1"
         assert rows[0]["val_type_f1"] == ""
@@ -222,18 +247,14 @@ class TestWriteSweepSummary:
 # Pre-existing helpers (sanity coverage)
 # ---------------------------------------------------------------------------
 
+
 class TestMetricReaders:
     """Sanity-check the metric readers the sweep runner uses to pull summaries
     from completed run dirs."""
 
     def test_best_crl_elbo_from_csv(self, tmp_path):
         csv_path = tmp_path / "crl_metrics.csv"
-        csv_path.write_text(
-            "epoch,val_ref_elbo\n"
-            "0,2.5\n"
-            "1,1.8\n"
-            "2,2.0\n"
-        )
+        csv_path.write_text("epoch,val_ref_elbo\n" "0,2.5\n" "1,1.8\n" "2,2.0\n")
         best, epoch = runner._best_crl_elbo(tmp_path)
         assert best == 1.8
         assert epoch == 1

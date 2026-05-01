@@ -19,6 +19,7 @@ Configuration (env):
   FAKE_RATE_HZ   Tick rate for the publisher loop. Default 10. Each topic
                  emits ``rate / FAKE_RATE_HZ`` samples per tick.
 """
+
 import math
 import os
 import random
@@ -26,7 +27,6 @@ import time
 
 import rclpy
 from rclpy.node import Node
-
 from ros2_interfaces.msg import RawSensorReading
 
 # Sample rates per channel suffix, matching the buffer's defaults.
@@ -68,13 +68,12 @@ class FakePublisher(Node):
 
     def _tick(self):
         now = time.time()
-        for topic, (pub, sensor_id, n) in self.publishers_by_topic.items():
+        for _topic, (pub, sensor_id, n) in self.publishers_by_topic.items():
             msg = RawSensorReading()
             msg.sensor_id = sensor_id
             msg.start_time = now
             msg.amplitude_readings = [
-                int(1000 * math.sin(2 * math.pi * 5 * (i / max(n, 1)))
-                    + random.randint(-50, 50))
+                int(1000 * math.sin(2 * math.pi * 5 * (i / max(n, 1))) + random.randint(-50, 50))
                 for i in range(n)
             ]
             pub.publish(msg)
@@ -84,7 +83,7 @@ def main():
     raw = os.environ.get("FAKE_TOPICS", "")
     topics = [t.strip() for t in raw.split(",") if t.strip()]
     if not topics:
-        raise EnvironmentError("FAKE_TOPICS is required (comma-separated topics)")
+        raise OSError("FAKE_TOPICS is required (comma-separated topics)")
     rate = float(os.environ.get("FAKE_RATE_HZ", "10"))
 
     rclpy.init()

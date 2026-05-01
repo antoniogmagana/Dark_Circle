@@ -13,18 +13,19 @@ import torchaudio
 # across multiple batch evaluation runs.
 _mel_transforms = {}
 
+
 def get_mel_transform(device, config):
     global _mel_transforms
-    
+
     # Create a unique key based on the parameters that define the transform
     key = (
-        device, 
-        config.REF_SAMPLE_RATE, 
-        config.N_FFT, 
-        config.HOP_LENGTH, 
-        config.MEL_BINS
+        device,
+        config.REF_SAMPLE_RATE,
+        config.N_FFT,
+        config.HOP_LENGTH,
+        config.MEL_BINS,
     )
-    
+
     if key not in _mel_transforms:
         _mel_transforms[key] = torchaudio.transforms.MelSpectrogram(
             sample_rate=config.REF_SAMPLE_RATE,
@@ -32,7 +33,7 @@ def get_mel_transform(device, config):
             hop_length=config.HOP_LENGTH,
             n_mels=config.MEL_BINS,
         ).to(device)
-        
+
     return _mel_transforms[key]
 
 
@@ -65,6 +66,7 @@ def extract_mel_spectrogram(batch_tensor, config):
 # 2. Main Training Wrapper
 # ============================================================
 
+
 def preprocess_for_training(batch_tensor, config):
     """
     Preprocessing pipeline for training and inference.
@@ -72,9 +74,11 @@ def preprocess_for_training(batch_tensor, config):
     and limits transient spikes.
     """
     # 1. ADC SCALE NORMALIZATION (maps raw counts to [-1, 1] based on bit depth)
-    adc_scales = torch.tensor(
-        config.CHANNEL_ADC_SCALES, dtype=batch_tensor.dtype
-    ).view(1, -1, 1).to(batch_tensor.device)
+    adc_scales = (
+        torch.tensor(config.CHANNEL_ADC_SCALES, dtype=batch_tensor.dtype)
+        .view(1, -1, 1)
+        .to(batch_tensor.device)
+    )
     batch_tensor = batch_tensor / adc_scales
 
     # 2. PER-WINDOW MEAN SUBTRACTION (DC drift correction)

@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -38,10 +40,16 @@ class MultiScale1DFrontend(nn.Module):
                 f"length {len(kernel_sizes)}"
             )
         self.branches = nn.ModuleList()
-        for ks, s in zip(kernel_sizes, strides):
+        for ks, s in zip(kernel_sizes, strides, strict=False):
             layers: list[nn.Module] = [
-                nn.Conv1d(in_channels, out_channels, kernel_size=ks, stride=s,
-                          padding=ks // 2, bias=False),
+                nn.Conv1d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=ks,
+                    stride=s,
+                    padding=ks // 2,
+                    bias=False,
+                ),
                 nn.GroupNorm(min(8, out_channels), out_channels),
                 nn.GELU(),
             ]
@@ -84,25 +92,23 @@ class MorletFilterbank(nn.Module):
         use_phase: bool = False,
     ) -> None:
         super().__init__()
-        self.in_channels  = in_channels
+        self.in_channels = in_channels
         self.out_channels = out_channels
-        self.kernel_size  = kernel_size
-        self.padding      = kernel_size // 2
-        self.use_phase    = use_phase
+        self.kernel_size = kernel_size
+        self.padding = kernel_size // 2
+        self.use_phase = use_phase
 
         if freq_min is None:
             freq_min = 2.0 if sample_rate <= 200 else 20.0
         if freq_max is None:
             freq_max = sample_rate / 4.0
         if freq_min <= 0 or freq_max <= freq_min:
-            raise ValueError(
-                f"Invalid freq range: freq_min={freq_min}, freq_max={freq_max}"
-            )
+            raise ValueError(f"Invalid freq range: freq_min={freq_min}, freq_max={freq_max}")
 
         self.sample_rate = sample_rate
-        self.w0        = w0
-        self.freq_min  = freq_min
-        self.freq_max  = freq_max
+        self.w0 = w0
+        self.freq_min = freq_min
+        self.freq_max = freq_max
         scales = (w0 / (2 * math.pi)) / torch.logspace(
             math.log10(freq_min), math.log10(freq_max), steps=out_channels
         )
@@ -122,9 +128,10 @@ class MorletFilterbank(nn.Module):
         """Kernel-support time grid in seconds. Shared between fixed and
         learnable paths. Separated so subclasses can rebuild kernels on
         every forward pass."""
-        t = torch.linspace(
-            -self.kernel_size // 2, self.kernel_size // 2, self.kernel_size
-        ).float() / self.sample_rate
+        t = (
+            torch.linspace(-self.kernel_size // 2, self.kernel_size // 2, self.kernel_size).float()
+            / self.sample_rate
+        )
         return t
 
     def _build_kernels(
@@ -147,15 +154,15 @@ class MorletFilterbank(nn.Module):
         which caused kernels to underflow to zero at SR ≥ ~400 with any
         non-default freq range — see commit message for details.
         """
-        t = self._time_grid().to(scales.device)           # (ks,)
-        s = scales.unsqueeze(-1)                           # (out, 1)
+        t = self._time_grid().to(scales.device)  # (ks,)
+        s = scales.unsqueeze(-1)  # (out, 1)
         # w0 broadcasts: either scalar or (out,) → (out, 1)
         if isinstance(w0, torch.Tensor):
             w0 = w0.to(scales.device).unsqueeze(-1) if w0.ndim == 1 else w0
-        norm = (math.pi * s) ** -0.25                      # (out, 1)
-        gauss = torch.exp(-0.5 * (t / s) ** 2)             # (out, ks)
-        kernel_re = norm * gauss * torch.cos(w0 * t / s)   # (out, ks)
-        kernel_im = norm * gauss * torch.sin(w0 * t / s)   # (out, ks)
+        norm = (math.pi * s) ** -0.25  # (out, 1)
+        gauss = torch.exp(-0.5 * (t / s) ** 2)  # (out, ks)
+        kernel_re = norm * gauss * torch.cos(w0 * t / s)  # (out, ks)
+        kernel_im = norm * gauss * torch.sin(w0 * t / s)  # (out, ks)
         # Broadcast to (out, in, ks) to match conv1d weight shape.
         kernel_re = kernel_re.unsqueeze(1).expand(-1, self.in_channels, -1)
         kernel_im = kernel_im.unsqueeze(1).expand(-1, self.in_channels, -1)
@@ -235,7 +242,7 @@ class MorletFilterbank(nn.Module):
 
         # rFFT of the real input and both real kernels. Using rFFT (not FFT)
         # saves ~half the cost on real signals. Shape (..., n_fft // 2 + 1).
-        X      = torch.fft.rfft(x,         n=n_fft, dim=-1)
+        X = torch.fft.rfft(x, n=n_fft, dim=-1)
         K_re_f = torch.fft.rfft(kernel_re, n=n_fft, dim=-1)
         K_im_f = torch.fft.rfft(kernel_im, n=n_fft, dim=-1)
 
@@ -319,9 +326,7 @@ class LearnableMorletFilterbank(MorletFilterbank):
 
         self.learnable_w0 = learnable_w0
         if learnable_w0:
-            self.w0_per_filter = nn.Parameter(
-                torch.full((out_channels,), float(w0))
-            )
+            self.w0_per_filter = nn.Parameter(torch.full((out_channels,), float(w0)))
         # else: use self.w0 (scalar float) inherited from parent __init__.
 
     def current_scales(self) -> torch.Tensor:
@@ -338,8 +343,7 @@ class LearnableMorletFilterbank(MorletFilterbank):
         with torch.no_grad():
             scales = self.current_scales()
             w0_vec = (
-                self.w0_per_filter if self.learnable_w0
-                else torch.full_like(scales, float(self.w0))
+                self.w0_per_filter if self.learnable_w0 else torch.full_like(scales, float(self.w0))
             )
             return w0_vec / (2 * math.pi * scales)
 

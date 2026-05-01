@@ -1,17 +1,18 @@
 """Unit tests for ID split manifest builder."""
+
 import pytest
 from crl_vehicle.config import CRLConfig
 from crl_vehicle.data.id_split import compute_split_intervals
 
 
-def test_use_id_split_field_defaults_false():
+def test_use_id_split_field_defaults_true():
     cfg = CRLConfig()
-    assert cfg.use_id_split is False
+    assert cfg.use_id_split is True
 
 
 def test_use_id_split_field_settable():
-    cfg = CRLConfig(use_id_split=True)
-    assert cfg.use_id_split is True
+    cfg = CRLConfig(use_id_split=False)
+    assert cfg.use_id_split is False
 
 
 class TestComputeSplitIntervalsEvenSplit:
@@ -45,13 +46,15 @@ class TestComputeSplitIntervalsTooSmall:
 
 
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from crl_vehicle.data.id_split import extract_runs
 
 
 def _write_split_runs_parquet(
-    path: Path, scene_run_lengths: list[tuple[int, int, int]],
+    path: Path,
+    scene_run_lengths: list[tuple[int, int, int]],
 ) -> None:
     """Write a parquet with scene_id/run_id/amplitude columns.
 
@@ -61,12 +64,14 @@ def _write_split_runs_parquet(
     rows = []
     for scene_id, run_id, n in scene_run_lengths:
         for _ in range(n):
-            rows.append({
-                "scene_id": scene_id,
-                "run_id": run_id,
-                "amplitude": 0.0,
-                "present": True,
-            })
+            rows.append(
+                {
+                    "scene_id": scene_id,
+                    "run_id": run_id,
+                    "amplitude": 0.0,
+                    "present": True,
+                }
+            )
     df = pd.DataFrame(rows)
     df["amplitude"] = df["amplitude"].astype("float32")
     df["present"] = df["present"].astype(bool)
@@ -116,7 +121,7 @@ class TestExtractRuns:
         _write_split_runs_parquet(p, [(1, 6, 3), (1, 7, 8)])
         runs = extract_runs(p, window_size=4)
         assert (1, 6) in runs
-        assert runs[(1, 6)] == (0, 0)   # empty range, but the key is still returned
+        assert runs[(1, 6)] == (0, 0)  # empty range, but the key is still returned
         assert runs[(1, 7)] == (1, 2)
 
     def test_missing_columns_raises(self, tmp_path):
@@ -139,28 +144,28 @@ from crl_vehicle.data.id_split import pair_runs
 
 class TestPairRuns:
     def test_simple_intersection(self):
-        audio   = {(1, 6): (0, 100), (1, 7): (100, 150)}
+        audio = {(1, 6): (0, 100), (1, 7): (100, 150)}
         seismic = {(1, 6): (0, 100), (1, 7): (100, 150)}
         paired, dropped = pair_runs(audio, seismic)
         assert paired == {(1, 6): (0, 100), (1, 7): (100, 150)}
         assert dropped == []
 
     def test_intersection_smaller_than_either(self):
-        audio   = {(1, 6): (0, 100)}
+        audio = {(1, 6): (0, 100)}
         seismic = {(1, 6): (10, 90)}
         paired, dropped = pair_runs(audio, seismic)
         assert paired == {(1, 6): (10, 90)}
         assert dropped == []
 
     def test_run_only_in_audio_dropped_with_reason(self):
-        audio   = {(1, 6): (0, 100), (1, 7): (100, 150)}
+        audio = {(1, 6): (0, 100), (1, 7): (100, 150)}
         seismic = {(1, 6): (0, 100)}
         paired, dropped = pair_runs(audio, seismic)
         assert paired == {(1, 6): (0, 100)}
         assert dropped == [{"run_key": (1, 7), "reason": "single_sensor"}]
 
     def test_run_only_in_seismic_dropped(self):
-        audio   = {(1, 6): (0, 100)}
+        audio = {(1, 6): (0, 100)}
         seismic = {(1, 6): (0, 100), (2, 7): (100, 200)}
         paired, dropped = pair_runs(audio, seismic)
         assert paired == {(1, 6): (0, 100)}
@@ -168,7 +173,7 @@ class TestPairRuns:
 
     def test_empty_intersection_dropped(self):
         # Audio range [0, 50), seismic range [50, 100) → intersection empty
-        audio   = {(1, 6): (0, 50)}
+        audio = {(1, 6): (0, 50)}
         seismic = {(1, 6): (50, 100)}
         paired, dropped = pair_runs(audio, seismic)
         assert paired == {}
@@ -176,7 +181,7 @@ class TestPairRuns:
 
     def test_drop_does_not_cascade_across_scenes(self):
         # run_id=6 has empty intersection in scene 1 but valid in scene 2
-        audio   = {(1, 6): (0, 50), (2, 6): (100, 200)}
+        audio = {(1, 6): (0, 50), (2, 6): (100, 200)}
         seismic = {(1, 6): (50, 100), (2, 6): (100, 200)}
         paired, dropped = pair_runs(audio, seismic)
         assert paired == {(2, 6): (100, 200)}
@@ -184,7 +189,7 @@ class TestPairRuns:
 
     def test_drop_does_not_cascade_across_run_ids(self):
         # scene_id=1 has run_id=6 empty, but run_id=7 is valid
-        audio   = {(1, 6): (0, 50), (1, 7): (100, 200)}
+        audio = {(1, 6): (0, 50), (1, 7): (100, 200)}
         seismic = {(1, 6): (50, 100), (1, 7): (100, 200)}
         paired, dropped = pair_runs(audio, seismic)
         assert paired == {(1, 7): (100, 200)}
@@ -233,10 +238,10 @@ class TestPartitionRuns502525:
             totals[split] += e - s
         # Within ±15% of target ratios is fine.
         assert 0.40 <= totals["train"] / 1019 <= 0.60
-        assert 0.15 <= totals["val"]   / 1019 <= 0.35
-        assert 0.15 <= totals["test"]  / 1019 <= 0.35
+        assert 0.15 <= totals["val"] / 1019 <= 0.35
+        assert 0.15 <= totals["test"] / 1019 <= 0.35
         # All three buckets must be non-empty (floor)
-        assert totals["val"]  > 0
+        assert totals["val"] > 0
         assert totals["test"] > 0
 
     def test_deterministic_across_calls(self):
@@ -251,11 +256,11 @@ class TestPartitionRuns502525:
         runs = {(1, 6): (0, 1000), (1, 7): (1000, 1010), (2, 6): (1010, 1020)}
         result = partition_runs_50_25_25(runs)
         splits = set(result.values())
-        assert "val"  in splits
+        assert "val" in splits
         assert "test" in splits
 
 
-from crl_vehicle.data.id_split import compute_manifest_hash, build_manifest
+from crl_vehicle.data.id_split import build_manifest, compute_manifest_hash
 
 
 class TestComputeManifestHash:
@@ -273,51 +278,57 @@ class TestComputeManifestHash:
     def test_same_inputs_same_hash(self, tmp_path):
         p = tmp_path / "f.parquet"
         p.write_text("dummy")
-        kwargs = dict(
-            mapping={"iobt": {"x": ["light", "y", "split"]}},
-            window_sizes={"audio": 16000, "seismic": 200},
-            source_files=[("iobt_audio_x_rs1", p)],
-        )
+        kwargs = {
+            "mapping": {"iobt": {"x": ["light", "y", "split"]}},
+            "window_sizes": {"audio": 16000, "seismic": 200},
+            "source_files": [("iobt_audio_x_rs1", p)],
+        }
         assert compute_manifest_hash(**kwargs) == compute_manifest_hash(**kwargs)
 
     def test_changed_mapping_changes_hash(self, tmp_path):
         p = tmp_path / "f.parquet"
         p.write_text("dummy")
-        common = dict(
-            window_sizes={"audio": 16000, "seismic": 200},
-            source_files=[("iobt_audio_x_rs1", p)],
-        )
+        common = {
+            "window_sizes": {"audio": 16000, "seismic": 200},
+            "source_files": [("iobt_audio_x_rs1", p)],
+        }
         h1 = compute_manifest_hash(
-            mapping={"iobt": {"x": ["light", "y", "split"]}}, **common,
+            mapping={"iobt": {"x": ["light", "y", "split"]}},
+            **common,
         )
         h2 = compute_manifest_hash(
-            mapping={"iobt": {"x": ["light", "y", "split_runs"]}}, **common,
+            mapping={"iobt": {"x": ["light", "y", "split_runs"]}},
+            **common,
         )
         assert h1 != h2
 
     def test_changed_window_size_changes_hash(self, tmp_path):
         p = tmp_path / "f.parquet"
         p.write_text("dummy")
-        common = dict(
-            mapping={"iobt": {"x": ["light", "y", "split"]}},
-            source_files=[("iobt_audio_x_rs1", p)],
-        )
+        common = {
+            "mapping": {"iobt": {"x": ["light", "y", "split"]}},
+            "source_files": [("iobt_audio_x_rs1", p)],
+        }
         h1 = compute_manifest_hash(
-            window_sizes={"audio": 16000, "seismic": 200}, **common,
+            window_sizes={"audio": 16000, "seismic": 200},
+            **common,
         )
         h2 = compute_manifest_hash(
-            window_sizes={"audio": 16000, "seismic": 400}, **common,
+            window_sizes={"audio": 16000, "seismic": 400},
+            **common,
         )
         assert h1 != h2
 
     def test_changed_mtime_changes_hash(self, tmp_path):
-        import os, time
+        import os
+        import time
+
         p = tmp_path / "f.parquet"
         p.write_text("v1")
-        common = dict(
-            mapping={"iobt": {"x": ["light", "y", "split"]}},
-            window_sizes={"audio": 16000, "seismic": 200},
-        )
+        common = {
+            "mapping": {"iobt": {"x": ["light", "y", "split"]}},
+            "window_sizes": {"audio": 16000, "seismic": 200},
+        }
         h1 = compute_manifest_hash(source_files=[("iobt_audio_x_rs1", p)], **common)
         # Touch with a future mtime
         os.utime(p, (time.time() + 100, time.time() + 100))
@@ -325,12 +336,14 @@ class TestComputeManifestHash:
         assert h1 != h2
 
     def test_source_file_order_invariant(self, tmp_path):
-        a = tmp_path / "a.parquet"; a.write_text("a")
-        b = tmp_path / "b.parquet"; b.write_text("b")
-        common = dict(
-            mapping={"iobt": {"x": ["light", "y", "split"]}},
-            window_sizes={"audio": 16000, "seismic": 200},
-        )
+        a = tmp_path / "a.parquet"
+        a.write_text("a")
+        b = tmp_path / "b.parquet"
+        b.write_text("b")
+        common = {
+            "mapping": {"iobt": {"x": ["light", "y", "split"]}},
+            "window_sizes": {"audio": 16000, "seismic": 200},
+        }
         h1 = compute_manifest_hash(source_files=[("a", a), ("b", b)], **common)
         h2 = compute_manifest_hash(source_files=[("b", b), ("a", a)], **common)
         assert h1 == h2
@@ -341,10 +354,12 @@ import logging
 
 def _write_simple_parquet(path: Path, n_samples: int) -> None:
     """Write a parquet with amplitude/present (no scene_id/run_id)."""
-    df = pd.DataFrame({
-        "amplitude": np.zeros(n_samples, dtype="float32"),
-        "present":   np.ones(n_samples, dtype=bool),
-    })
+    df = pd.DataFrame(
+        {
+            "amplitude": np.zeros(n_samples, dtype="float32"),
+            "present": np.ones(n_samples, dtype=bool),
+        }
+    )
     df.to_parquet(path, index=False)
 
 
@@ -354,10 +369,8 @@ class TestBuildManifest:
         train_dir = tmp_path / "train"
         train_dir.mkdir()
         # 10 windows of audio (window_size=16000) and 10 of seismic (200)
-        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
-                              n_samples=160_000)
-        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
-                              n_samples=2_000)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet", n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet", n_samples=2_000)
 
         mapping = {"iobt": {"silverado": ["heavy", "pickup", "split"]}}
         manifest = build_manifest(
@@ -371,7 +384,7 @@ class TestBuildManifest:
         g = manifest["groups"][gkey]
         assert g["marker"] == "split"
         assert g["split_assignments"] == {
-            "val":  [[0, 5]],
+            "val": [[0, 5]],
             "test": [[5, 10]],
         }
 
@@ -379,8 +392,7 @@ class TestBuildManifest:
         train_dir = tmp_path / "train"
         train_dir.mkdir()
         # Only audio, no seismic → N = audio_n_windows = 8
-        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
-                              n_samples=128_000)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet", n_samples=128_000)
         mapping = {"iobt": {"silverado": ["heavy", "pickup", "split"]}}
         manifest = build_manifest(
             id_root=tmp_path,
@@ -389,7 +401,7 @@ class TestBuildManifest:
         )
         g = manifest["groups"]["iobt__silverado__rs1"]
         assert g["split_assignments"] == {
-            "val":  [[0, 4]],
+            "val": [[0, 4]],
             "test": [[4, 8]],
         }
 
@@ -397,8 +409,7 @@ class TestBuildManifest:
         train_dir = tmp_path / "train"
         train_dir.mkdir()
         # 1 window only (16000 samples) → N_pair = 1, can't split
-        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
-                              n_samples=16_000)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet", n_samples=16_000)
         mapping = {"iobt": {"silverado": ["heavy", "pickup", "split"]}}
         with caplog.at_level(logging.INFO):
             manifest = build_manifest(
@@ -407,19 +418,21 @@ class TestBuildManifest:
                 window_sizes={"audio": 16000, "seismic": 200},
             )
         assert "iobt__silverado__rs1" not in manifest["groups"]
-        assert any("too few windows" in r.message.lower() or
-                   "skipping" in r.message.lower() for r in caplog.records)
+        assert any(
+            "too few windows" in r.message.lower() or "skipping" in r.message.lower()
+            for r in caplog.records
+        )
 
     def test_train_val_test_markers_no_routing_computation(self, tmp_path):
         # "train" / "val" / "test" markers don't produce manifest groups —
         # they're handled at index-build time, not at manifest time.
         train_dir = tmp_path / "train"
         train_dir.mkdir()
-        _write_simple_parquet(train_dir / "iobt_audio_polaris_rs1.parquet",
-                              n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_audio_polaris_rs1.parquet", n_samples=160_000)
         mapping = {"iobt": {"polaris": ["light", "polaris", "train"]}}
         manifest = build_manifest(
-            id_root=tmp_path, mapping=mapping,
+            id_root=tmp_path,
+            mapping=mapping,
             window_sizes={"audio": 16000, "seismic": 200},
         )
         # No group entry needed for plain train/val/test markers
@@ -430,30 +443,29 @@ class TestBuildManifest:
         for sub in ("train", "val"):
             d = tmp_path / sub
             d.mkdir()
-            _write_simple_parquet(d / "iobt_audio_silverado_rs1.parquet",
-                                  n_samples=160_000)
-            _write_simple_parquet(d / "iobt_seismic_silverado_rs1.parquet",
-                                  n_samples=2_000)
+            _write_simple_parquet(d / "iobt_audio_silverado_rs1.parquet", n_samples=160_000)
+            _write_simple_parquet(d / "iobt_seismic_silverado_rs1.parquet", n_samples=2_000)
         mapping = {"iobt": {"silverado": ["heavy", "pickup", "split"]}}
         manifest = build_manifest(
-            id_root=tmp_path, mapping=mapping,
+            id_root=tmp_path,
+            mapping=mapping,
             window_sizes={"audio": 16000, "seismic": 200},
         )
         # Exactly one group, regardless of which subdir we picked from
         assert len(manifest["groups"]) == 1
 
     def test_manifest_includes_metadata(self, tmp_path):
-        train_dir = tmp_path / "train"; train_dir.mkdir()
-        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
-                              n_samples=160_000)
-        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
-                              n_samples=2_000)
+        train_dir = tmp_path / "train"
+        train_dir.mkdir()
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet", n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet", n_samples=2_000)
         mapping = {"iobt": {"silverado": ["heavy", "pickup", "split"]}}
         manifest = build_manifest(
-            id_root=tmp_path, mapping=mapping,
+            id_root=tmp_path,
+            mapping=mapping,
             window_sizes={"audio": 16000, "seismic": 200},
         )
-        assert manifest["schema_version"] == 1
+        assert manifest["schema_version"] == 2
         assert manifest["config_window_sizes"] == {"audio": 16000, "seismic": 200}
         assert "created_unix" in manifest
 
@@ -463,11 +475,10 @@ from crl_vehicle.data.id_split import load_or_build_manifest
 
 class TestLoadOrBuildManifest:
     def test_first_call_writes_manifest(self, tmp_path):
-        train_dir = tmp_path / "data" / "train"; train_dir.mkdir(parents=True)
-        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
-                              n_samples=160_000)
-        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
-                              n_samples=2_000)
+        train_dir = tmp_path / "data" / "train"
+        train_dir.mkdir(parents=True)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet", n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet", n_samples=2_000)
 
         cache_dir = tmp_path / "id_cache"
         manifest = load_or_build_manifest(
@@ -482,23 +493,23 @@ class TestLoadOrBuildManifest:
         assert len(cache_files) == 1
 
     def test_second_call_hits_cache(self, tmp_path):
-        train_dir = tmp_path / "data" / "train"; train_dir.mkdir(parents=True)
-        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
-                              n_samples=160_000)
-        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
-                              n_samples=2_000)
+        train_dir = tmp_path / "data" / "train"
+        train_dir.mkdir(parents=True)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet", n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet", n_samples=2_000)
 
         cache_dir = tmp_path / "id_cache"
-        kwargs = dict(
-            id_root=tmp_path / "data",
-            mapping={"iobt": {"silverado": ["heavy", "pickup", "split"]}},
-            window_sizes={"audio": 16000, "seismic": 200},
-            cache_dir=cache_dir,
-        )
-        m1 = load_or_build_manifest(**kwargs)
+        kwargs = {
+            "id_root": tmp_path / "data",
+            "mapping": {"iobt": {"silverado": ["heavy", "pickup", "split"]}},
+            "window_sizes": {"audio": 16000, "seismic": 200},
+            "cache_dir": cache_dir,
+        }
+        load_or_build_manifest(**kwargs)
         # Tamper with manifest to detect cache hit
         cache_file = next(cache_dir.glob("manifest_*.json"))
         import json as _json
+
         data = _json.loads(cache_file.read_text())
         data["sentinel"] = "i was here"
         cache_file.write_text(_json.dumps(data))
@@ -507,11 +518,10 @@ class TestLoadOrBuildManifest:
         assert m2.get("sentinel") == "i was here"
 
     def test_changed_mapping_invalidates_cache(self, tmp_path):
-        train_dir = tmp_path / "data" / "train"; train_dir.mkdir(parents=True)
-        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
-                              n_samples=160_000)
-        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
-                              n_samples=2_000)
+        train_dir = tmp_path / "data" / "train"
+        train_dir.mkdir(parents=True)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet", n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet", n_samples=2_000)
         cache_dir = tmp_path / "id_cache"
 
         load_or_build_manifest(
@@ -531,18 +541,17 @@ class TestLoadOrBuildManifest:
         assert len(cache_files) == 2
 
     def test_corrupt_cache_recomputes(self, tmp_path):
-        train_dir = tmp_path / "data" / "train"; train_dir.mkdir(parents=True)
-        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet",
-                              n_samples=160_000)
-        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet",
-                              n_samples=2_000)
+        train_dir = tmp_path / "data" / "train"
+        train_dir.mkdir(parents=True)
+        _write_simple_parquet(train_dir / "iobt_audio_silverado_rs1.parquet", n_samples=160_000)
+        _write_simple_parquet(train_dir / "iobt_seismic_silverado_rs1.parquet", n_samples=2_000)
         cache_dir = tmp_path / "id_cache"
-        kwargs = dict(
-            id_root=tmp_path / "data",
-            mapping={"iobt": {"silverado": ["heavy", "pickup", "split"]}},
-            window_sizes={"audio": 16000, "seismic": 200},
-            cache_dir=cache_dir,
-        )
+        kwargs = {
+            "id_root": tmp_path / "data",
+            "mapping": {"iobt": {"silverado": ["heavy", "pickup", "split"]}},
+            "window_sizes": {"audio": 16000, "seismic": 200},
+            "cache_dir": cache_dir,
+        }
         load_or_build_manifest(**kwargs)
         cache_file = next(cache_dir.glob("manifest_*.json"))
         cache_file.write_text("{not valid json")

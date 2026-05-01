@@ -1,7 +1,6 @@
 import pytest
 import torch
 import torch.nn.functional as F
-
 from crl_vehicle.losses.contrastive import nt_xent_loss
 
 
@@ -10,7 +9,6 @@ def _normed(x: torch.Tensor) -> torch.Tensor:
 
 
 class TestNTXentBasics:
-
     def test_scalar_shape(self):
         a = _normed(torch.randn(4, 16))
         p = _normed(torch.randn(4, 3, 16))
@@ -41,14 +39,13 @@ class TestNTXentBasics:
 
 
 class TestNTXentSemantics:
-
     def test_perfectly_aligned_positive_is_low(self):
         # Positive partner exactly equals anchor → highest similarity; loss low.
         B, P, D = 4, 3, 16
         a = _normed(torch.randn(B, D))
         p = torch.zeros(B, P, D)
-        p[:, 0] = a                        # partner 0 == anchor (positive)
-        p[:, 1:] = _normed(torch.randn(B, P - 1, D)) * 0.01   # near-orthogonal noise
+        p[:, 0] = a  # partner 0 == anchor (positive)
+        p[:, 1:] = _normed(torch.randn(B, P - 1, D)) * 0.01  # near-orthogonal noise
         p = _normed(p)
         m = torch.zeros(B, P, dtype=torch.bool)
         m[:, 0] = True
@@ -75,8 +72,10 @@ class TestNTXentSemantics:
         a = _normed(torch.randn(B, D))
         p = _normed(torch.randn(B, P, D))
 
-        m1 = torch.zeros(B, P, dtype=torch.bool); m1[:, 0] = True
-        m2 = torch.zeros(B, P, dtype=torch.bool); m2[:, 1] = True
+        m1 = torch.zeros(B, P, dtype=torch.bool)
+        m1[:, 0] = True
+        m2 = torch.zeros(B, P, dtype=torch.bool)
+        m2[:, 1] = True
         m_both = m1 | m2
 
         l_both = nt_xent_loss(a, p, m_both, temperature=0.1).item()
@@ -93,8 +92,10 @@ class TestNTXentSemantics:
         a = _normed(torch.randn(B, D))
         p = _normed(torch.randn(B, P, D))
 
-        m_row0 = torch.zeros(B, P, dtype=torch.bool); m_row0[0, 0] = True
-        m_row1 = torch.zeros(B, P, dtype=torch.bool); m_row1[1, 0] = True
+        m_row0 = torch.zeros(B, P, dtype=torch.bool)
+        m_row0[0, 0] = True
+        m_row1 = torch.zeros(B, P, dtype=torch.bool)
+        m_row1[1, 0] = True
 
         # If row 1 were folded in as zero, swapping which row has the positive
         # would give identical loss only by coincidence. Losses should differ

@@ -23,6 +23,7 @@ Run directory layout (what's expected on disk):
 `<split>` is one of {iobt, focal, m3nvc, full} — identifies which dataset
 the eval ran on.
 """
+
 from __future__ import annotations
 
 import csv
@@ -51,20 +52,20 @@ SHIP_TYPE_F1 = 0.70
 # Frontend → color family (for plotting). Ordered so related variants get
 # adjacent hues.
 FRONTEND_COLORS = {
-    "multiscale":              "#1f77b4",   # blue
-    "morlet":                  "#ff7f0e",   # orange
-    "morlet_per_sensor":       "#d62728",   # red
-    "morlet_fused":            "#9467bd",   # purple
-    "morlet_learnable":        "#2ca02c",   # green
-    "morlet_learnable_fused":  "#8c564b",   # brown
+    "multiscale": "#1f77b4",  # blue
+    "morlet": "#ff7f0e",  # orange
+    "morlet_per_sensor": "#d62728",  # red
+    "morlet_fused": "#9467bd",  # purple
+    "morlet_learnable": "#2ca02c",  # green
+    "morlet_learnable_fused": "#8c564b",  # brown
 }
 
 _FRONTEND_FAMILY = {
-    "multiscale":             "multiscale",
-    "morlet":                 "morlet",
-    "morlet_per_sensor":      "morlet",
-    "morlet_fused":           "morlet",
-    "morlet_learnable":       "morlet_learnable",
+    "multiscale": "multiscale",
+    "morlet": "morlet",
+    "morlet_per_sensor": "morlet",
+    "morlet_fused": "morlet",
+    "morlet_learnable": "morlet_learnable",
     "morlet_learnable_fused": "morlet_learnable",
 }
 
@@ -86,6 +87,7 @@ ABLATION_AXES = (
 # Dataclass
 # --------------------------------------------------------------------------
 
+
 @dataclass
 class RunMetrics:
     """One run's aggregated metrics. All fields optional — missing files
@@ -93,7 +95,7 @@ class RunMetrics:
 
     name: str
     path: Path
-    config: dict                          # cfg fields from meta.json
+    config: dict  # cfg fields from meta.json
     sensors: list[str]
 
     # CRL training-time metrics (from crl_metrics.csv + checkpoint_summary.json)
@@ -110,7 +112,7 @@ class RunMetrics:
     best_pres_acc: float | None = None
     best_type_acc: float | None = None
     final_val_loss: float | None = None
-    probe_mode_used: str | None = None    # which probe config was canonical
+    probe_mode_used: str | None = None  # which probe config was canonical
 
     # Cross-location eval (from eval/<probe>/<split>/eval_report.json)
     per_dataset_type_f1: dict[str, float] = field(default_factory=dict)
@@ -136,6 +138,7 @@ class RunMetrics:
 # Discovery
 # --------------------------------------------------------------------------
 
+
 def discover_runs(root: Path) -> list[Path]:
     """Find all <run>/ dirs anywhere under `root` that have crl/meta.json.
     Recurses arbitrarily deep so the canonical
@@ -152,6 +155,7 @@ def discover_runs(root: Path) -> list[Path]:
 # --------------------------------------------------------------------------
 # Loaders
 # --------------------------------------------------------------------------
+
 
 def _read_json(path: Path) -> dict:
     if not path.exists():
@@ -201,11 +205,13 @@ def _best_from_ds_metrics(cols: dict) -> dict:
     if not cols:
         return out
     for key, op in [
-        ("val_pres_f1", max), ("val_pres_acc", max),
-        ("val_type_f1", max), ("val_type_acc", max),
-        ("val_loss",    min),
+        ("val_pres_f1", max),
+        ("val_pres_acc", max),
+        ("val_type_f1", max),
+        ("val_type_acc", max),
+        ("val_loss", min),
     ]:
-        values = [v for v in cols.get(key, []) if isinstance(v, (int, float))]
+        values = [v for v in cols.get(key, []) if isinstance(v, int | float)]
         if values:
             out[key] = op(values)
     return out
@@ -278,8 +284,12 @@ def load_run_metrics(run_dir: Path) -> RunMetrics:
     init_from_run = meta.get("init_from_run")
 
     rm = RunMetrics(
-        name=name, path=run_dir, config=config, sensors=list(sensors),
-        stage2=stage2, init_from_run=init_from_run,
+        name=name,
+        path=run_dir,
+        config=config,
+        sensors=list(sensors),
+        stage2=stage2,
+        init_from_run=init_from_run,
     )
 
     # CRL metrics — summary.json is easier than parsing the CSV.
@@ -299,7 +309,7 @@ def load_run_metrics(run_dir: Path) -> RunMetrics:
             rm.final_val_raw_kl = _last_numeric(crl_csv["val_raw_kl"])
         # Summary may lack ref_elbo best (older runs); recompute from CSV.
         if rm.best_val_ref_elbo is None and crl_csv.get("val_ref_elbo"):
-            vals = [v for v in crl_csv["val_ref_elbo"] if isinstance(v, (int, float))]
+            vals = [v for v in crl_csv["val_ref_elbo"] if isinstance(v, int | float)]
             if vals:
                 rm.best_val_ref_elbo = min(vals)
 
@@ -309,9 +319,9 @@ def load_run_metrics(run_dir: Path) -> RunMetrics:
         rm.probe_mode_used = probe_dir.name
         ds_cols = _read_csv_columns(probe_dir / "downstream_metrics.csv")
         best = _best_from_ds_metrics(ds_cols)
-        rm.best_pres_f1  = best.get("val_pres_f1")
+        rm.best_pres_f1 = best.get("val_pres_f1")
         rm.best_pres_acc = best.get("val_pres_acc")
-        rm.best_type_f1  = best.get("val_type_f1")
+        rm.best_type_f1 = best.get("val_type_f1")
         rm.best_type_acc = best.get("val_type_acc")
         rm.final_val_loss = best.get("val_loss")
 
@@ -332,10 +342,7 @@ def load_run_metrics(run_dir: Path) -> RunMetrics:
     if rm.best_val_ref_elbo is not None:
         rm.diverged = rm.best_val_ref_elbo > DIVERGED_ELBO_THRESHOLD
     if rm.best_pres_f1 is not None and rm.best_type_f1 is not None:
-        rm.shippable = (
-            rm.best_pres_f1 >= SHIP_PRES_F1
-            and rm.best_type_f1 >= SHIP_TYPE_F1
-        )
+        rm.shippable = rm.best_pres_f1 >= SHIP_PRES_F1 and rm.best_type_f1 >= SHIP_TYPE_F1
 
     return rm
 
@@ -343,7 +350,7 @@ def load_run_metrics(run_dir: Path) -> RunMetrics:
 def _last_numeric(seq: list) -> float | None:
     """Last numeric value in a list (some rows may have stringified NaN)."""
     for v in reversed(seq):
-        if isinstance(v, (int, float)):
+        if isinstance(v, int | float):
             return float(v)
     return None
 
@@ -352,18 +359,17 @@ def _last_numeric(seq: list) -> float | None:
 # Time series (for plotting)
 # --------------------------------------------------------------------------
 
+
 def load_crl_timeseries(run_dir: Path) -> dict[str, list[float]]:
     """Return per-epoch training curves from crl_metrics.csv. Non-numeric
     columns (like beta_event) are dropped. Empty dict on missing file."""
     cols = _read_csv_columns(Path(run_dir) / "crl" / "crl_metrics.csv")
-    return {
-        k: [v for v in vs if isinstance(v, (int, float))]
-        for k, vs in cols.items()
-    }
+    return {k: [v for v in vs if isinstance(v, int | float)] for k, vs in cols.items()}
 
 
 def load_downstream_timeseries(
-    run_dir: Path, probe: str = CANONICAL_PROBE,
+    run_dir: Path,
+    probe: str = CANONICAL_PROBE,
 ) -> dict[str, list[float]]:
     """Per-epoch downstream probe curves. Falls back to any available probe
     if the preferred one is absent."""
@@ -371,10 +377,7 @@ def load_downstream_timeseries(
     if probe_dir is None:
         return {}
     cols = _read_csv_columns(probe_dir / "downstream_metrics.csv")
-    return {
-        k: [v for v in vs if isinstance(v, (int, float))]
-        for k, vs in cols.items()
-    }
+    return {k: [v for v in vs if isinstance(v, int | float)] for k, vs in cols.items()}
 
 
 def load_morlet_freq_history(run_dir: Path) -> dict[str, dict[int, list[float]]] | None:
@@ -398,6 +401,7 @@ def load_morlet_freq_history(run_dir: Path) -> dict[str, dict[int, list[float]]]
 # --------------------------------------------------------------------------
 # Filtering
 # --------------------------------------------------------------------------
+
 
 def _parse_filter_value(raw: str):
     """Try to interpret a CLI --filter value as bool/int/float/str."""
@@ -462,6 +466,7 @@ def apply_filters(
 # --------------------------------------------------------------------------
 # Ablation axis extraction
 # --------------------------------------------------------------------------
+
 
 def axis_signature(rm: RunMetrics) -> dict:
     """Return the {axis: value} dict for a run across all ABLATION_AXES.

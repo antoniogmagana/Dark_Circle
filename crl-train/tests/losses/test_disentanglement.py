@@ -1,16 +1,15 @@
 import pytest
 import torch
-
 from crl_vehicle.losses.disentanglement import (
     cross_modal_alignment_loss,
     intervention_invariance_loss,
     temporal_stability_loss,
 )
 
-
 # ---------------------------------------------------------------------------
 # cross_modal_alignment_loss
 # ---------------------------------------------------------------------------
+
 
 def test_alignment_zero_when_identical():
     mu = torch.randn(8, 12)
@@ -48,6 +47,7 @@ def test_alignment_finite_on_large_inputs():
 # temporal_stability_loss
 # ---------------------------------------------------------------------------
 
+
 def test_stability_zero_when_identical():
     mu = torch.randn(8, 12)
     mask = torch.ones(8, dtype=torch.bool)
@@ -56,7 +56,7 @@ def test_stability_zero_when_identical():
 
 
 def test_stability_zero_when_no_valid_rows():
-    mu_t  = torch.randn(8, 12, requires_grad=True)
+    mu_t = torch.randn(8, 12, requires_grad=True)
     mu_tn = torch.randn(8, 12)
     mask = torch.zeros(8, dtype=torch.bool)
     loss = temporal_stability_loss(mu_t, mu_tn, mask)
@@ -66,8 +66,8 @@ def test_stability_zero_when_no_valid_rows():
 
 
 def test_stability_only_counts_valid_rows():
-    mu_t  = torch.tensor([[0.0, 0.0], [0.0, 0.0], [10.0, 10.0]])
-    mu_tn = torch.tensor([[0.0, 0.0], [0.0, 0.0], [0.0,  0.0]])
+    mu_t = torch.tensor([[0.0, 0.0], [0.0, 0.0], [10.0, 10.0]])
+    mu_tn = torch.tensor([[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]])
     # Only row 0 valid → diff is zero
     mask_zero = torch.tensor([True, False, False])
     assert temporal_stability_loss(mu_t, mu_tn, mask_zero).item() == 0.0
@@ -77,7 +77,7 @@ def test_stability_only_counts_valid_rows():
 
 
 def test_stability_grad_flows_to_both():
-    mu_t  = torch.randn(4, 12, requires_grad=True)
+    mu_t = torch.randn(4, 12, requires_grad=True)
     mu_tn = torch.randn(4, 12, requires_grad=True)
     mask = torch.ones(4, dtype=torch.bool)
     temporal_stability_loss(mu_t, mu_tn, mask).backward()
@@ -89,6 +89,7 @@ def test_stability_grad_flows_to_both():
 # intervention_invariance_loss
 # ---------------------------------------------------------------------------
 
+
 def test_invariance_zero_when_identical():
     mu = torch.randn(8, 12)
     loss = intervention_invariance_loss(mu, mu)
@@ -97,7 +98,7 @@ def test_invariance_zero_when_identical():
 
 def test_invariance_positive_when_different():
     mu_clean = torch.randn(8, 12)
-    mu_int   = torch.randn(8, 12)
+    mu_int = torch.randn(8, 12)
     assert intervention_invariance_loss(mu_clean, mu_int).item() > 0
 
 

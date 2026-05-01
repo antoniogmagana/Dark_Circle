@@ -6,6 +6,7 @@ CUDA) and cache-friendly.
 
 See docs/superpowers/specs/2026-04-25-id-split-schema-design.md.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -29,8 +30,8 @@ _KNOWN_DATASETS = {"focal", "iobt", "m3nvc"}
 # directly comparable in seconds regardless of post-load resampling.
 _SOURCE_RATES = {
     "focal": {"audio": 16000, "seismic": 100},
-    "iobt":  {"audio": 16000, "seismic": 100},
-    "m3nvc": {"audio": 1600,  "seismic": 200},
+    "iobt": {"audio": 16000, "seismic": 100},
+    "m3nvc": {"audio": 1600, "seismic": 200},
 }
 
 
@@ -38,8 +39,9 @@ def _source_rate_for_stem(stem: str, sensor: str) -> int:
     dataset = stem.split("_", 1)[0]
     rates = _SOURCE_RATES.get(dataset)
     if rates is None:
-        raise ValueError(f"Unknown dataset prefix in stem {stem!r}; "
-                         f"expected one of {sorted(_SOURCE_RATES)}")
+        raise ValueError(
+            f"Unknown dataset prefix in stem {stem!r}; " f"expected one of {sorted(_SOURCE_RATES)}"
+        )
     return rates[sensor]
 
 
@@ -56,7 +58,7 @@ def compute_split_intervals(n_paired: int) -> dict[str, list[tuple[int, int]]] |
         return None
     half = n_paired // 2
     return {
-        "val":  [(0, half)],
+        "val": [(0, half)],
         "test": [(half, n_paired)],
     }
 
@@ -90,27 +92,26 @@ def extract_runs(
     for col in ("scene_id", "run_id"):
         if col not in schema_cols:
             raise ValueError(
-                f"{parquet_path.name}: missing required column {col!r} "
-                f"for split_runs marker"
+                f"{parquet_path.name}: missing required column {col!r} " f"for split_runs marker"
             )
     table = pq.read_table(parquet_path, columns=["scene_id", "run_id"])
-    cols = set(table.column_names)
+    set(table.column_names)
 
     scene = table.column("scene_id").to_numpy()
-    run   = table.column("run_id").to_numpy()
-    n     = len(scene)
+    run = table.column("run_id").to_numpy()
+    n = len(scene)
     if n == 0:
         return {}
 
     # Find block boundaries: positions where (scene, run) changes.
     key_changed = (scene[1:] != scene[:-1]) | (run[1:] != run[:-1])
-    boundaries  = np.flatnonzero(key_changed) + 1  # start indices of new blocks
+    boundaries = np.flatnonzero(key_changed) + 1  # start indices of new blocks
     block_starts = np.concatenate(([0], boundaries))
-    block_ends   = np.concatenate((boundaries, [n]))
+    block_ends = np.concatenate((boundaries, [n]))
 
     # Verify contiguity: each (scene, run) appears in exactly one block
     seen: dict[tuple[int, int], tuple[int, int]] = {}
-    for s, e in zip(block_starts, block_ends):
+    for s, e in zip(block_starts, block_ends, strict=False):
         key = (int(scene[s]), int(run[s]))
         if key in seen:
             raise ValueError(
@@ -124,13 +125,13 @@ def extract_runs(
     out: dict[tuple[int, int], tuple[int, int]] = {}
     for key, (s, e) in seen.items():
         w_start = math.ceil(s / window_size)
-        w_end   = e // window_size  # floor of e
+        w_end = e // window_size  # floor of e
         out[key] = (w_start, w_end)
     return out
 
 
 def pair_runs(
-    audio_runs:   dict[tuple[int, int], tuple[int, int]],
+    audio_runs: dict[tuple[int, int], tuple[int, int]],
     seismic_runs: dict[tuple[int, int], tuple[int, int]],
 ) -> tuple[
     dict[tuple[int, int], tuple[int, int]],
@@ -158,7 +159,7 @@ def pair_runs(
             dropped.append({"run_key": key, "reason": "single_sensor"})
             continue
         start = max(a[0], s[0])
-        end   = min(a[1], s[1])
+        end = min(a[1], s[1])
         if start >= end:
             dropped.append({"run_key": key, "reason": "empty_intersection"})
             continue
@@ -204,10 +205,7 @@ def partition_runs_50_25_25(
     for key, (s, e) in items:
         n = e - s
         # Pick bucket with largest deficit; break ties by _TIE_ORDER
-        deficits = {
-            b: _TARGET_RATIOS[b] * total - bucket_totals[b]
-            for b in _TIE_ORDER
-        }
+        deficits = {b: _TARGET_RATIOS[b] * total - bucket_totals[b] for b in _TIE_ORDER}
         max_deficit = max(deficits.values())
         choice = next(b for b in _TIE_ORDER if deficits[b] == max_deficit)
         assignment[key] = choice
@@ -246,15 +244,13 @@ def compute_manifest_hash(
     """
     # Sort source files by stem for order invariance
     sources_sorted = sorted(source_files, key=lambda kv: kv[0])
-    mtimes = [
-        (stem, Path(p).stat().st_mtime_ns) for stem, p in sources_sorted
-    ]
+    mtimes = [(stem, Path(p).stat().st_mtime_ns) for stem, p in sources_sorted]
 
     payload = {
-        "mapping":       mapping,
-        "window_sizes":  window_sizes,
-        "sources":       mtimes,
-        "source_rates":  _SOURCE_RATES,  # invalidates cache when rates change
+        "mapping": mapping,
+        "window_sizes": window_sizes,
+        "sources": mtimes,
+        "source_rates": _SOURCE_RATES,  # invalidates cache when rates change
         "schema_version": 2,
     }
     blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
@@ -319,7 +315,7 @@ def build_manifest(
         all_files.setdefault(parquet.stem, parquet)
 
     # Group by (dataset, vehicle, rs)
-    audio_files:   dict[tuple[str, str, str], Path] = {}
+    audio_files: dict[tuple[str, str, str], Path] = {}
     seismic_files: dict[tuple[str, str, str], Path] = {}
     for stem, path in all_files.items():
         for sensor, dest in (("audio", audio_files), ("seismic", seismic_files)):
@@ -333,7 +329,7 @@ def build_manifest(
 
     for ds, vehicle, rs in sorted(all_keys):
         ds_map = mapping.get(ds, {})
-        entry  = ds_map.get(vehicle)
+        entry = ds_map.get(vehicle)
         if entry is None or len(entry) < 3:
             # Background or unknown — no manifest entry needed
             continue
@@ -348,11 +344,13 @@ def build_manifest(
         if marker == "split":
             audio_nw = (
                 _file_n_windows(a_path, _source_rate_for_stem(a_path.stem, "audio"))
-                if a_path else 0
+                if a_path
+                else 0
             )
             seismic_nw = (
                 _file_n_windows(s_path, _source_rate_for_stem(s_path.stem, "seismic"))
-                if s_path else 0
+                if s_path
+                else 0
             )
             if audio_nw and seismic_nw:
                 n_paired = min(audio_nw, seismic_nw)
@@ -366,11 +364,11 @@ def build_manifest(
                 )
                 continue
             groups[gkey] = {
-                "dataset": ds, "vehicle": vehicle, "rs_node": rs,
+                "dataset": ds,
+                "vehicle": vehicle,
+                "rs_node": rs,
                 "marker": marker,
-                "split_assignments": {
-                    k: [list(iv) for iv in v] for k, v in intervals.items()
-                },
+                "split_assignments": {k: [list(iv) for iv in v] for k, v in intervals.items()},
             }
 
         elif marker == "split_runs":
@@ -381,7 +379,7 @@ def build_manifest(
                     f"seismic={s_path is not None})"
                 )
                 continue
-            audio_runs   = extract_runs(a_path, _source_rate_for_stem(a_path.stem, "audio"))
+            audio_runs = extract_runs(a_path, _source_rate_for_stem(a_path.stem, "audio"))
             seismic_runs = extract_runs(s_path, _source_rate_for_stem(s_path.stem, "seismic"))
             paired, dropped = pair_runs(audio_runs, seismic_runs)
             for d in dropped:
@@ -397,7 +395,9 @@ def build_manifest(
                 continue
             assignment = partition_runs_50_25_25(paired)
             split_assignments: dict[str, list[list[int]]] = {
-                "train": [], "val": [], "test": [],
+                "train": [],
+                "val": [],
+                "test": [],
             }
             run_meta: dict[str, dict] = {}
             for run_key, split in assignment.items():
@@ -411,13 +411,17 @@ def build_manifest(
             for s in split_assignments:
                 split_assignments[s].sort()
             groups[gkey] = {
-                "dataset": ds, "vehicle": vehicle, "rs_node": rs,
+                "dataset": ds,
+                "vehicle": vehicle,
+                "rs_node": rs,
                 "marker": marker,
                 "split_assignments": split_assignments,
                 "run_meta": run_meta,
                 "dropped_runs": [
-                    {"run_key": f"{d['run_key'][0]}_{d['run_key'][1]}",
-                     "reason": d["reason"]}
+                    {
+                        "run_key": f"{d['run_key'][0]}_{d['run_key'][1]}",
+                        "reason": d["reason"],
+                    }
                     for d in dropped
                 ],
             }

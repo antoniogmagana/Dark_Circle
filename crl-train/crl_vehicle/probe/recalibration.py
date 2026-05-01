@@ -13,12 +13,12 @@ split's true prior. Use only for diagnostic reporting with labels known
 unknown. Report column names must carry the `_target_calibrated` suffix
 to prevent confusion with uncalibrated deployment numbers.
 """
+
 from __future__ import annotations
 
 import math
 
 import torch
-
 
 UNIFORM_BINARY_PRIOR: float = 0.5
 
@@ -27,9 +27,7 @@ def uniform_multiclass_prior(n_classes: int) -> torch.Tensor:
     return torch.full((n_classes,), 1.0 / n_classes, dtype=torch.float32)
 
 
-def compute_binary_prior(
-    labels: torch.Tensor, eps: float = 1e-8
-) -> float:
+def compute_binary_prior(labels: torch.Tensor, eps: float = 1e-8) -> float:
     """Empirical P(y=1) from a tensor of {0,1} labels."""
     if labels.numel() == 0:
         return UNIFORM_BINARY_PRIOR
@@ -58,8 +56,10 @@ def apply_binary_log_prior_shift(
     For BCE logits (logit = log P(y=1) - log P(y=0)), the shift is
     Δ = log(p_split/(1-p_split)) - log(p_train/(1-p_train)).
     """
+
     def _lodds(p: float) -> float:
         return math.log(p / (1.0 - p))
+
     return logits + (_lodds(p_split) - _lodds(p_train))
 
 
@@ -77,15 +77,12 @@ def apply_multiclass_log_prior_shift(
     """
     n_classes = logits.shape[-1]
     if p_split.shape[-1] != n_classes:
-        raise ValueError(
-            f"p_split has {p_split.shape[-1]} classes, logits has {n_classes}"
-        )
+        raise ValueError(f"p_split has {p_split.shape[-1]} classes, logits has {n_classes}")
     if p_train is None:
         p_train = uniform_multiclass_prior(n_classes)
     if p_train.shape[-1] != n_classes:
-        raise ValueError(
-            f"p_train has {p_train.shape[-1]} classes, logits has {n_classes}"
-        )
-    shift = torch.log(p_split.to(logits.dtype).to(logits.device)) \
-          - torch.log(p_train.to(logits.dtype).to(logits.device))
+        raise ValueError(f"p_train has {p_train.shape[-1]} classes, logits has {n_classes}")
+    shift = torch.log(p_split.to(logits.dtype).to(logits.device)) - torch.log(
+        p_train.to(logits.dtype).to(logits.device)
+    )
     return logits + shift

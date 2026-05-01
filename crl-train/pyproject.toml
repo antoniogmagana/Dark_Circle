@@ -24,6 +24,18 @@ dependencies = [
 ]
 
 
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.6"
+black = "^25.1"
+pre-commit = "^3.8"
+pytest = "^9.0"
+
+# Lint/format config (black, ruff) lives in the repo-root pyproject.toml so all
+# sister projects share one source of truth. Type checking is Pyright, configured
+# in the repo-root pyrightconfig.json (also drives Pylance in VS Code). Run locally:
+#   poetry run black ../
+#   poetry run ruff check ../
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"

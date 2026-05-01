@@ -26,5 +26,4 @@ class Prior(nn.Module, ABC):
         mu: torch.Tensor,
         logvar: torch.Tensor,
         y: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...

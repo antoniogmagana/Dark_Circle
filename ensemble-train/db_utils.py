@@ -1,6 +1,7 @@
+import re
+
 import psycopg2
 from psycopg2 import sql
-import re
 
 # NOTICE: global 'config' is no longer imported
 
@@ -18,7 +19,7 @@ def sanitize_name(name, max_length=25):
 
 def db_connect(db_conn_params):
     try:
-        # Unpacks the passed dictionary 
+        # Unpacks the passed dictionary
         conn = psycopg2.connect(**db_conn_params)
         conn.autocommit = True
         cursor = conn.cursor()
@@ -48,8 +49,7 @@ def get_time_bounds(cursor, table_name, run_id=None):
         )
     else:
         query = sql.SQL(
-            "SELECT MIN(time_stamp), MAX(time_stamp) "
-            "FROM {table} WHERE run_id = {run_id}"
+            "SELECT MIN(time_stamp), MAX(time_stamp) " "FROM {table} WHERE run_id = {run_id}"
         ).format(
             table=sql.Identifier(table_name),
             run_id=sql.Literal(run_id),
@@ -128,9 +128,7 @@ def fetch_sensor_batch(cursor, table_name, sample_count, start_time, run_id=None
             start_time=sql.Literal(start_time)
         )
     else:
-        where_clause = sql.SQL(
-            "time_stamp >= {start_time} AND run_id = {run_id}"
-        ).format(
+        where_clause = sql.SQL("time_stamp >= {start_time} AND run_id = {run_id}").format(
             start_time=sql.Literal(start_time),
             run_id=sql.Literal(run_id),
         )

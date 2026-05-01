@@ -1,10 +1,10 @@
+import json
 import os
 import random
-import torch
-import json
 from datetime import datetime
-import numpy as np
 
+import numpy as np
+import torch
 
 # ===========================================================
 # Globals
@@ -101,9 +101,7 @@ ADC_SCALE_MAP = {s: 2 ** (b - 1) for s, b in BIT_DEPTH_MAP.items()}
 # Per-channel ADC scales ordered to match channel concatenation in dataset.py
 # audio=1ch, seismic=1ch, accel=3ch — channels stacked in TRAIN_SENSORS order
 _SENSOR_CHANNELS = {"audio": 1, "seismic": 1, "accel": 3}
-CHANNEL_ADC_SCALES = [
-    ADC_SCALE_MAP[s] for s in TRAIN_SENSORS for _ in range(_SENSOR_CHANNELS[s])
-]
+CHANNEL_ADC_SCALES = [ADC_SCALE_MAP[s] for s in TRAIN_SENSORS for _ in range(_SENSOR_CHANNELS[s])]
 
 # Semantic category names (used for category-level classification)
 # if background used, always set to 0: "background"
@@ -232,32 +230,34 @@ AUGMENT_SNR = True
 
 # The minimum and maximum SNR (in decibels) to apply when augmenting
 # Sensor-specific SNR ranges
-AUGMENT_SNR_RANGE_AUDIO    = (10, 30)   # appropriate for 16kHz high-energy signal
-AUGMENT_SNR_RANGE_SEISMIC  = (20, 40)   # less aggressive for low-SNR 200Hz signal
-AUGMENT_SNR_RANGE = AUGMENT_SNR_RANGE_AUDIO if TRAIN_SENSOR == "audio" else AUGMENT_SNR_RANGE_SEISMIC
+AUGMENT_SNR_RANGE_AUDIO = (10, 30)  # appropriate for 16kHz high-energy signal
+AUGMENT_SNR_RANGE_SEISMIC = (20, 40)  # less aggressive for low-SNR 200Hz signal
+AUGMENT_SNR_RANGE = (
+    AUGMENT_SNR_RANGE_AUDIO if TRAIN_SENSOR == "audio" else AUGMENT_SNR_RANGE_SEISMIC
+)
 
 # =====================================================================
 # 7b. CLASS BALANCE
 # =====================================================================
-CLASS_WEIGHT_CAP          = 10.0   # inverse-frequency weight ceiling (tunable)
-USE_WEIGHTED_SAMPLER      = True   # WeightedRandomSampler for train DataLoader
-WEIGHTED_SAMPLER_STRENGTH = 1.0    # 1.0=fully balanced, 0.0=uniform
+CLASS_WEIGHT_CAP = 10.0  # inverse-frequency weight ceiling (tunable)
+USE_WEIGHTED_SAMPLER = True  # WeightedRandomSampler for train DataLoader
+WEIGHTED_SAMPLER_STRENGTH = 1.0  # 1.0=fully balanced, 0.0=uniform
 
 # =====================================================================
 # 7c. TRAINING PROCEDURE
 # =====================================================================
-EARLY_STOP_PATIENCE = 15           # was hardcoded 8 in train.py
-CHECKPOINT_METRIC   = "mcc"        # "mcc" | "val_f1" | "val_loss" | "val_acc"
+EARLY_STOP_PATIENCE = 15  # was hardcoded 8 in train.py
+CHECKPOINT_METRIC = "mcc"  # "mcc" | "val_f1" | "val_loss" | "val_acc"
 
 # =====================================================================
 # 7d. HARDWARE & PRECISION
 # =====================================================================
-PREFETCH_FACTOR    = 16
-PIN_MEMORY         = True
+PREFETCH_FACTOR = 16
+PIN_MEMORY = True
 PERSISTENT_WORKERS = True
-TORCH_COMPILE      = True
-AMP_ENABLED        = True
-AMP_DTYPE          = "bfloat16"    # H100 native — no loss scaling needed
+TORCH_COMPILE = True
+AMP_ENABLED = True
+AMP_DTYPE = "bfloat16"  # H100 native — no loss scaling needed
 
 # =====================================================================
 # 8. MODEL HYPERPARAMETERS & CONTROL FLOW
@@ -405,7 +405,6 @@ def save_config_snapshot():
     for key, value in list(globals().items()):
         # Only grab standard uppercase configuration variables
         if key.isupper() and not key.startswith("_"):
-
             # Handle NumPy arrays which are not JSON-serializable
             if isinstance(value, np.ndarray):
                 config_dict[key] = value.tolist()
@@ -413,9 +412,7 @@ def save_config_snapshot():
             elif isinstance(value, torch.device):
                 config_dict[key] = str(value)
             # Handle standard JSON-serializable types
-            elif isinstance(
-                value, (int, float, str, list, dict, bool, tuple, type(None))
-            ):
+            elif isinstance(value, int | float | str | list | dict | bool | tuple | type(None)):
                 config_dict[key] = value
 
     with open(JSON_LOG_PATH, "w") as f:

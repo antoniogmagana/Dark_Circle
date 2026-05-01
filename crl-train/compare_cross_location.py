@@ -17,6 +17,7 @@ Outputs (default --out saved_crl/analysis/):
     cross_location.md          — markdown table sorted by min-F1
     cross_location_heatmap.png — matplotlib heatmap
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,12 +32,13 @@ from crl_vehicle import analysis as A
 
 
 def _fmt(v):
-    return f"{v:.3f}" if isinstance(v, (int, float)) else ""
+    return f"{v:.3f}" if isinstance(v, int | float) else ""
 
 
 # --------------------------------------------------------------------------
 # CSV / Markdown
 # --------------------------------------------------------------------------
+
 
 def collect_matrix(
     runs: list[A.RunMetrics],
@@ -64,16 +66,20 @@ def write_csv(path: Path, runs: list[A.RunMetrics], ds_names: list[str], mat: np
         w.writerow(["name", "frontend_type", *ds_names, "min_type_f1", "worst_dataset"])
         for i, rm in enumerate(runs):
             row = [rm.name, rm.config.get("frontend_type", "")]
-            row += [f"{mat[i, j]:.4f}" if not np.isnan(mat[i, j]) else ""
-                    for j in range(len(ds_names))]
-            row.append(f"{rm.min_dataset_type_f1:.4f}"
-                       if rm.min_dataset_type_f1 is not None else "")
+            row += [
+                f"{mat[i, j]:.4f}" if not np.isnan(mat[i, j]) else "" for j in range(len(ds_names))
+            ]
+            row.append(
+                f"{rm.min_dataset_type_f1:.4f}" if rm.min_dataset_type_f1 is not None else ""
+            )
             row.append(rm.worst_dataset or "")
             w.writerow(row)
 
 
 def render_markdown(
-    runs: list[A.RunMetrics], ds_names: list[str], mat: np.ndarray,
+    runs: list[A.RunMetrics],
+    ds_names: list[str],
+    mat: np.ndarray,
 ) -> str:
     lines = [
         "# Cross-Location Type F1",
@@ -94,8 +100,7 @@ def render_markdown(
     for i in order:
         rm = runs[i]
         row = [rm.name, rm.config.get("frontend_type", "")]
-        row += [_fmt(mat[i, j]) if not np.isnan(mat[i, j]) else "—"
-                for j in range(len(ds_names))]
+        row += [_fmt(mat[i, j]) if not np.isnan(mat[i, j]) else "—" for j in range(len(ds_names))]
         row.append(_fmt(rm.min_dataset_type_f1))
         row.append(rm.worst_dataset or "—")
         lines.append("| " + " | ".join(row) + " |")
@@ -106,10 +111,15 @@ def render_markdown(
 # Heatmap
 # --------------------------------------------------------------------------
 
+
 def render_heatmap(
-    runs: list[A.RunMetrics], ds_names: list[str], mat: np.ndarray, out_path: Path,
+    runs: list[A.RunMetrics],
+    ds_names: list[str],
+    mat: np.ndarray,
+    out_path: Path,
 ) -> None:
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -120,7 +130,9 @@ def render_heatmap(
     # Sort runs by min_type_f1 desc so best row is at top.
     order = sorted(
         range(len(runs)),
-        key=lambda i: -(runs[i].min_dataset_type_f1 if runs[i].min_dataset_type_f1 is not None else -1),
+        key=lambda i: -(
+            runs[i].min_dataset_type_f1 if runs[i].min_dataset_type_f1 is not None else -1
+        ),
     )
     sorted_mat = mat[order]
     sorted_names = [runs[i].name for i in order]
@@ -141,8 +153,15 @@ def render_heatmap(
         for j in range(sorted_mat.shape[1]):
             v = sorted_mat[i, j]
             if not np.isnan(v):
-                ax.text(j, i, f"{v:.2f}", ha="center", va="center",
-                        color="white" if v < 0.5 else "black", fontsize=8)
+                ax.text(
+                    j,
+                    i,
+                    f"{v:.2f}",
+                    ha="center",
+                    va="center",
+                    color="white" if v < 0.5 else "black",
+                    fontsize=8,
+                )
 
     fig.colorbar(im, ax=ax, label="type_f1")
     fig.tight_layout()
@@ -155,10 +174,11 @@ def render_heatmap(
 # CLI
 # --------------------------------------------------------------------------
 
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--root",   default="saved_crl/runs", type=Path)
-    p.add_argument("--out",    default="saved_crl/analysis", type=Path)
+    p.add_argument("--root", default="saved_crl/runs", type=Path)
+    p.add_argument("--out", default="saved_crl/analysis", type=Path)
     p.add_argument("--filter", action="append", default=[], metavar="key=val")
     p.add_argument("--include-diverged", action="store_true")
     return p.parse_args()
@@ -176,17 +196,17 @@ def main() -> int:
     # Drop runs with no per-dataset eval at all — they contribute no information.
     runs_with_eval = [rm for rm in runs if rm.per_dataset_type_f1]
     if not runs_with_eval:
-        print("No runs have per-dataset eval data. "
-              "Did you run run_full_diagnostic.py?", file=sys.stderr)
+        print(
+            "No runs have per-dataset eval data. " "Did you run run_full_diagnostic.py?",
+            file=sys.stderr,
+        )
         return 1
 
     run_names, ds_names, mat = collect_matrix(runs_with_eval)
     args.out.mkdir(parents=True, exist_ok=True)
 
     write_csv(args.out / "cross_location.csv", runs_with_eval, ds_names, mat)
-    (args.out / "cross_location.md").write_text(
-        render_markdown(runs_with_eval, ds_names, mat)
-    )
+    (args.out / "cross_location.md").write_text(render_markdown(runs_with_eval, ds_names, mat))
     render_heatmap(runs_with_eval, ds_names, mat, args.out / "cross_location_heatmap")
 
     print(f"Wrote {args.out / 'cross_location.csv'}")

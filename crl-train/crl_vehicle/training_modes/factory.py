@@ -14,8 +14,7 @@ def _build_prior(config) -> Prior:
     if prior_type == "conditional":
         return ConditionalPrior(d_z=config.d_z)
     raise ValueError(
-        f"Unknown prior_type: {prior_type!r}. "
-        f"Supported: 'standard', 'conditional'."
+        f"Unknown prior_type: {prior_type!r}. " f"Supported: 'standard', 'conditional'."
     )
 
 

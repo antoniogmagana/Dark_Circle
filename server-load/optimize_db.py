@@ -21,9 +21,9 @@ def apply_global_timestamp_indices():
     # This covers iobt, focal, and m3nvc regardless of their naming convention.
     cursor.execute(
         """
-        SELECT table_name 
-        FROM information_schema.columns 
-        WHERE column_name = 'time_stamp' 
+        SELECT table_name
+        FROM information_schema.columns
+        WHERE column_name = 'time_stamp'
         AND table_schema = 'public';
     """
     )
@@ -43,9 +43,7 @@ def apply_global_timestamp_indices():
             # 1. Create the B-Tree index
             # This allows O(log n) lookups instead of full table scans during training
             index_name = f"idx_{table}_timestamp"
-            cursor.execute(
-                f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} (time_stamp);"
-            )
+            cursor.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table} (time_stamp);")
 
             # 2. Analyze the table
             # This updates the query planner statistics so it actually uses the new index

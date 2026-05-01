@@ -1,13 +1,16 @@
+from typing import ClassVar
+
 import pytest
 import torch
 import torch.nn as nn
 from crl_vehicle.models.frontend import (
-    MultiScale1DFrontend, MorletFilterbank, LearnableMorletFilterbank,
+    LearnableMorletFilterbank,
+    MorletFilterbank,
+    MultiScale1DFrontend,
 )
 
 
 class TestMultiScale1DFrontend:
-
     def test_output_shape_audio(self):
         fe = nn.Sequential(
             MultiScale1DFrontend(in_channels=1, out_channels=64),
@@ -49,7 +52,6 @@ class TestMultiScale1DFrontend:
 
 
 class TestMorletFilterbank:
-
     def test_no_learned_parameters(self):
         fe = MorletFilterbank(in_channels=1, out_channels=32, kernel_size=101, sample_rate=200)
         assert sum(p.numel() for p in fe.parameters()) == 0
@@ -81,23 +83,29 @@ class TestMorletExplicitFreqRange:
 
     def test_explicit_freq_range_applied(self):
         fe1 = MorletFilterbank(
-            in_channels=1, out_channels=16, kernel_size=101, sample_rate=16000,
-            freq_min=100.0, freq_max=1000.0,
+            in_channels=1,
+            out_channels=16,
+            kernel_size=101,
+            sample_rate=16000,
+            freq_min=100.0,
+            freq_max=1000.0,
         )
         fe2 = MorletFilterbank(
-            in_channels=1, out_channels=16, kernel_size=101, sample_rate=16000,
-            freq_min=2000.0, freq_max=8000.0,
+            in_channels=1,
+            out_channels=16,
+            kernel_size=101,
+            sample_rate=16000,
+            freq_min=2000.0,
+            freq_max=8000.0,
         )
         # Different freq ranges ⇒ different kernels.
         assert not torch.equal(fe1.kernel_re, fe2.kernel_re)
 
     def test_invalid_freq_range_raises(self):
         with pytest.raises(ValueError, match="Invalid freq range"):
-            MorletFilterbank(1, 8, kernel_size=51, sample_rate=200,
-                             freq_min=100.0, freq_max=50.0)
+            MorletFilterbank(1, 8, kernel_size=51, sample_rate=200, freq_min=100.0, freq_max=50.0)
         with pytest.raises(ValueError, match="Invalid freq range"):
-            MorletFilterbank(1, 8, kernel_size=51, sample_rate=200,
-                             freq_min=0.0, freq_max=50.0)
+            MorletFilterbank(1, 8, kernel_size=51, sample_rate=200, freq_min=0.0, freq_max=50.0)
 
     def test_sr_heuristic_still_works_when_none(self):
         """Backward compat: no explicit freq_min/freq_max → SR heuristic."""
@@ -107,13 +115,16 @@ class TestMorletExplicitFreqRange:
         assert out.shape == (2, 16, 200)
         assert out.isfinite().all()
 
-    @pytest.mark.parametrize("sample_rate,freq_range,kernel_size", [
-        (200,   (None,   None),    101),   # default (seismic)
-        (200,   (5.0,    40.0),    101),   # explicit seismic-like
-        (16000, (None,   None),    257),   # default (audio)
-        (16000, (20.0,   8000.0),  257),   # explicit audio-like
-        (16000, (100.0,  1000.0),  101),   # narrow mid-band
-    ])
+    @pytest.mark.parametrize(
+        "sample_rate,freq_range,kernel_size",
+        [
+            (200, (None, None), 101),  # default (seismic)
+            (200, (5.0, 40.0), 101),  # explicit seismic-like
+            (16000, (None, None), 257),  # default (audio)
+            (16000, (20.0, 8000.0), 257),  # explicit audio-like
+            (16000, (100.0, 1000.0), 101),  # narrow mid-band
+        ],
+    )
     def test_kernels_not_underflowed(self, sample_rate, freq_range, kernel_size):
         """Regression: kernels must carry non-negligible energy.
 
@@ -123,9 +134,12 @@ class TestMorletExplicitFreqRange:
         near-delta kernels at SR ≥ ~400 with any non-default freq range."""
         freq_min, freq_max = freq_range
         fe = MorletFilterbank(
-            in_channels=1, out_channels=16,
-            kernel_size=kernel_size, sample_rate=sample_rate,
-            freq_min=freq_min, freq_max=freq_max,
+            in_channels=1,
+            out_channels=16,
+            kernel_size=kernel_size,
+            sample_rate=sample_rate,
+            freq_min=freq_min,
+            freq_max=freq_max,
         )
         # Every bin's kernel magnitude must exceed a small floor — not a
         # degenerate near-delta impulse.
@@ -164,7 +178,7 @@ class TestMorletPhaseChannels:
         log_power = out[:, :8, :]
         cos = out[:, 8:16, :]
         sin = out[:, 16:24, :]
-        mask = log_power > 1e-4   # bins with actual signal
+        mask = log_power > 1e-4  # bins with actual signal
         if mask.any():
             norms = cos.pow(2) + sin.pow(2)
             active = norms[mask]
@@ -180,8 +194,11 @@ class TestMorletPerSensorInModel:
         from training.trainer import CRLModel
 
         cfg = CRLConfig(
-            d_model=32, n_layers=1, n_heads=4,
-            frontend_type="morlet_per_sensor", d_z=24,
+            d_model=32,
+            n_layers=1,
+            n_heads=4,
+            frontend_type="morlet_per_sensor",
+            d_z=24,
             morlet_kernel_size=101,
         )
         model = CRLModel(cfg)
@@ -195,15 +212,18 @@ class TestMorletPerSensorInModel:
         from training.trainer import CRLModel
 
         cfg = CRLConfig(
-            d_model=32, n_layers=1, n_heads=4,
-            frontend_type="morlet_per_sensor", d_z=24,
+            d_model=32,
+            n_layers=1,
+            n_heads=4,
+            frontend_type="morlet_per_sensor",
+            d_z=24,
             morlet_kernel_size=101,
         )
         model = CRLModel(cfg)
         W_a = cfg.modality_cfg("audio").window_size
         W_s = cfg.modality_cfg("seismic").window_size
         with torch.no_grad():
-            _, z_a, _, _ = model.encode("audio",   torch.randn(2, 1, W_a) * 0.01)
+            _, z_a, _, _ = model.encode("audio", torch.randn(2, 1, W_a) * 0.01)
             _, z_s, _, _ = model.encode("seismic", torch.randn(2, 1, W_s) * 0.01)
         assert z_a.shape == (2, 24)
         assert z_s.shape == (2, 24)
@@ -213,13 +233,19 @@ class TestMorletPerSensorInModel:
         from training.trainer import CRLModel
 
         cfg = CRLConfig(
-            d_model=32, n_layers=1, frontend_type="morlet_per_sensor",
+            d_model=32,
+            n_layers=1,
+            frontend_type="morlet_per_sensor",
             morlet_kernel_size=51,
         )
         # Remove the seismic entry → construction must fail clearly.
         cfg.morlet_per_sensor_params = {
-            "audio": {"freq_min": 20.0, "freq_max": 8000.0,
-                      "out_channels_frac": 1.0, "w0": 6.0},
+            "audio": {
+                "freq_min": 20.0,
+                "freq_max": 8000.0,
+                "out_channels_frac": 1.0,
+                "w0": 6.0,
+            },
         }
         with pytest.raises(ValueError, match="requires params for"):
             CRLModel(cfg)
@@ -231,20 +257,30 @@ class TestMorletPerSensorInModel:
         from training.trainer import CRLModel
 
         cfg = CRLConfig(
-            d_model=32, n_layers=1, frontend_type="morlet_per_sensor",
+            d_model=32,
+            n_layers=1,
+            frontend_type="morlet_per_sensor",
             morlet_kernel_size=51,
         )
         cfg.morlet_per_sensor_params = {
-            "audio":   {"freq_min": 20.0, "freq_max": 8000.0,
-                        "out_channels_frac": 0.5, "w0": 6.0},
-            "seismic": {"freq_min": 2.0,  "freq_max": 40.0,
-                        "out_channels_frac": 1.0, "w0": 6.0},
+            "audio": {
+                "freq_min": 20.0,
+                "freq_max": 8000.0,
+                "out_channels_frac": 0.5,
+                "w0": 6.0,
+            },
+            "seismic": {
+                "freq_min": 2.0,
+                "freq_max": 40.0,
+                "out_channels_frac": 1.0,
+                "w0": 6.0,
+            },
         }
         model = CRLModel(cfg)
         # Inspect the Morlet bank inside the audio frontend sequential.
         audio_bank = model.frontends["audio"][0]
         assert isinstance(audio_bank, MorletFilterbank)
-        assert audio_bank.out_channels == 16   # 32 * 0.5
+        assert audio_bank.out_channels == 16  # 32 * 0.5
         seismic_bank = model.frontends["seismic"][0]
         assert seismic_bank.out_channels == 32  # 32 * 1.0
 
@@ -255,8 +291,11 @@ class TestMorletPerSensorDerivation:
     @pytest.mark.parametrize(
         "sensor,SR,W,freq_min,expected_stride,expected_ks_range",
         [
-            ("audio",   16000, 16000, 20.0, 500, (4583, 4587)),
-            ("seismic",   200,   200,  2.0,   6, (571,  575)),
+            # SR/W are the canonical post-resample rates returned by
+            # CRLConfig.modality_cfg(sensor). The model derives stride/kernel
+            # from those, not from these params — they're informational here.
+            ("audio", 16000, 16000, 20.0, 500, (4583, 4587)),
+            ("seismic", 100, 100, 2.0, 3, (285, 289)),
         ],
     )
     def test_stride_and_kernel_derivation(
@@ -266,30 +305,36 @@ class TestMorletPerSensorDerivation:
         from training.trainer import CRLModel
 
         cfg = CRLConfig(
-            d_model=16, n_layers=1, n_heads=4,
-            frontend_type="morlet_per_sensor", d_z=24,
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            frontend_type="morlet_per_sensor",
+            d_z=24,
         )
         # Single-sensor config: only the sensor under test in the params dict.
         cfg.morlet_per_sensor_params = {
             sensor: {
-                "freq_min": freq_min, "freq_max": SR / 4,
-                "out_channels_frac": 1.0, "w0": 6.0,
-                "target_tokens": 32, "receptive_cycles": 3.0,
+                "freq_min": freq_min,
+                "freq_max": SR / 4,
+                "out_channels_frac": 1.0,
+                "w0": 6.0,
+                "target_tokens": 32,
+                "receptive_cycles": 3.0,
             },
         }
         model = CRLModel(cfg, sensors=[sensor])
 
         derived = model._morlet_derived_params[sensor]
-        assert derived["pool_stride"]   == expected_stride
+        assert derived["pool_stride"] == expected_stride
         lo, hi = expected_ks_range
         assert lo <= derived["kernel_size"] <= hi
         assert derived["kernel_size"] % 2 == 1  # odd
-        assert derived["target_tokens"]    == 32
+        assert derived["target_tokens"] == 32
         assert derived["receptive_cycles"] == 3.0
 
         # Audit-trail sanity: post_pool_tokens and post_pool_rate present.
         assert "post_pool_tokens" in derived
-        assert "post_pool_rate"   in derived
+        assert "post_pool_rate" in derived
 
     def test_derived_params_absent_for_non_morlet_per_sensor(self):
         """Non-morlet frontends leave the derivation dict empty. (Both
@@ -298,31 +343,36 @@ class TestMorletPerSensorDerivation:
         from training.trainer import CRLModel
 
         cfg = CRLConfig(
-            d_model=16, n_layers=1, n_heads=4,
-            frontend_type="multiscale", fused_seq_len=16, d_z=24,
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            frontend_type="multiscale",
+            fused_seq_len=16,
+            d_z=24,
         )
         model = CRLModel(cfg)
         assert model._morlet_derived_params == {}
 
 
 class TestEarlyFusionShapeReconciliation:
-
     def test_adaptive_pool_equalizes_tokens(self):
         T_fused, d_model = 32, 64
         fe_audio = nn.Sequential(
             MultiScale1DFrontend(in_channels=1, out_channels=d_model),
-            nn.AvgPool1d(16, 16), nn.AdaptiveAvgPool1d(T_fused),
+            nn.AvgPool1d(16, 16),
+            nn.AdaptiveAvgPool1d(T_fused),
         )
         fe_seismic = nn.Sequential(
             MultiScale1DFrontend(in_channels=1, out_channels=d_model),
-            nn.AvgPool1d(16, 16), nn.AdaptiveAvgPool1d(T_fused),
+            nn.AvgPool1d(16, 16),
+            nn.AdaptiveAvgPool1d(T_fused),
         )
         with torch.no_grad():
             a = fe_audio(torch.zeros(4, 1, 16000))
             s = fe_seismic(torch.zeros(4, 1, 200))
             fused = torch.cat([a, s], dim=2)
-        assert a.shape     == (4, d_model, T_fused)
-        assert s.shape     == (4, d_model, T_fused)
+        assert a.shape == (4, d_model, T_fused)
+        assert s.shape == (4, d_model, T_fused)
         assert fused.shape == (4, d_model, 2 * T_fused)
         assert fused.isfinite().all()
 
@@ -333,9 +383,14 @@ class TestMorletFusedInModel:
 
     def _base_cfg(self, d_model=32):
         from crl_vehicle.config import CRLConfig
+
         return CRLConfig(
-            d_model=d_model, n_layers=1, n_heads=4,
-            frontend_type="morlet_fused", fused_seq_len=16, d_z=24,
+            d_model=d_model,
+            n_layers=1,
+            n_heads=4,
+            frontend_type="morlet_fused",
+            fused_seq_len=16,
+            d_z=24,
         )
 
     def test_model_constructs_with_fused_topology(self):
@@ -380,12 +435,22 @@ class TestMorletFusedInModel:
 
         cfg = self._base_cfg()
         cfg.morlet_per_sensor_params = {
-            "audio":   {"freq_min": 20.0, "freq_max": 8000.0,
-                        "out_channels_frac": 1.0, "w0": 6.0,
-                        "target_tokens": 16, "receptive_cycles": 3.0},
-            "seismic": {"freq_min": 2.0,  "freq_max": 40.0,
-                        "out_channels_frac": 0.5, "w0": 6.0,
-                        "target_tokens": 16, "receptive_cycles": 3.0},
+            "audio": {
+                "freq_min": 20.0,
+                "freq_max": 8000.0,
+                "out_channels_frac": 1.0,
+                "w0": 6.0,
+                "target_tokens": 16,
+                "receptive_cycles": 3.0,
+            },
+            "seismic": {
+                "freq_min": 2.0,
+                "freq_max": 40.0,
+                "out_channels_frac": 0.5,
+                "w0": 6.0,
+                "target_tokens": 16,
+                "receptive_cycles": 3.0,
+            },
         }
         with pytest.raises(ValueError, match="matching n_out_channels"):
             CRLModel(cfg)
@@ -395,9 +460,14 @@ class TestMorletFusedInModel:
 
         cfg = self._base_cfg()
         cfg.morlet_per_sensor_params = {
-            "audio": {"freq_min": 20.0, "freq_max": 8000.0,
-                      "out_channels_frac": 1.0, "w0": 6.0,
-                      "target_tokens": 16, "receptive_cycles": 3.0},
+            "audio": {
+                "freq_min": 20.0,
+                "freq_max": 8000.0,
+                "out_channels_frac": 1.0,
+                "w0": 6.0,
+                "target_tokens": 16,
+                "receptive_cycles": 3.0,
+            },
         }
         with pytest.raises(ValueError, match="requires params for"):
             CRLModel(cfg)
@@ -422,10 +492,15 @@ class TestLearnableMorletFilterbank:
     as nn.Parameter. Epoch-0 output must match the fixed MorletFilterbank
     within float32 precision; gradients must flow to the learnable params."""
 
-    COMMON = dict(
-        in_channels=1, out_channels=16, kernel_size=101,
-        sample_rate=200, w0=6.0, freq_min=2.0, freq_max=40.0,
-    )
+    COMMON: ClassVar[dict] = {
+        "in_channels": 1,
+        "out_channels": 16,
+        "kernel_size": 101,
+        "sample_rate": 200,
+        "w0": 6.0,
+        "freq_min": 2.0,
+        "freq_max": 40.0,
+    }
 
     @pytest.mark.parametrize("use_phase", [False, True])
     def test_init_matches_fixed_filterbank(self, use_phase):
@@ -445,8 +520,9 @@ class TestLearnableMorletFilterbank:
         assert y_fixed.dtype == y_learn.dtype
         # Tolerance reflects log/exp round-trip error + downstream mag division.
         atol = 1e-4 if use_phase else 1e-5
-        assert torch.allclose(y_fixed, y_learn, atol=atol), \
-            f"max abs diff {(y_fixed - y_learn).abs().max().item():.3e}"
+        assert torch.allclose(
+            y_fixed, y_learn, atol=atol
+        ), f"max abs diff {(y_fixed - y_learn).abs().max().item():.3e}"
 
     def test_gradient_flows_to_log_scales(self):
         """log_scales must receive gradient. This is the regression test
@@ -461,7 +537,9 @@ class TestLearnableMorletFilterbank:
 
     def test_gradient_flows_to_w0_when_learnable(self):
         learn = LearnableMorletFilterbank(
-            use_phase=False, learnable_w0=True, **self.COMMON,
+            use_phase=False,
+            learnable_w0=True,
+            **self.COMMON,
         )
         x = torch.randn(2, 1, 1000) * 0.01
         loss = learn(x).sum()
@@ -471,7 +549,9 @@ class TestLearnableMorletFilterbank:
 
     def test_w0_not_parameter_when_not_learnable(self):
         learn = LearnableMorletFilterbank(
-            use_phase=False, learnable_w0=False, **self.COMMON,
+            use_phase=False,
+            learnable_w0=False,
+            **self.COMMON,
         )
         assert not hasattr(learn, "w0_per_filter")
         assert isinstance(learn.w0, float)
@@ -517,15 +597,20 @@ class TestMorletLearnableInModel:
 
     def _base_cfg(self, **overrides):
         from crl_vehicle.config import CRLConfig
-        kwargs = dict(
-            d_model=32, n_layers=1, n_heads=4,
-            frontend_type="morlet_learnable", d_z=24,
-        )
+
+        kwargs = {
+            "d_model": 32,
+            "n_layers": 1,
+            "n_heads": 4,
+            "frontend_type": "morlet_learnable",
+            "d_z": 24,
+        }
         kwargs.update(overrides)
         return CRLConfig(**kwargs)
 
     def test_constructs_with_per_sensor_topology(self):
         from training.trainer import CRLModel
+
         model = CRLModel(self._base_cfg())
         assert model.encoder is None
         assert model.decoder is None
@@ -535,6 +620,7 @@ class TestMorletLearnableInModel:
 
     def test_learnable_parameters_nonempty(self):
         from training.trainer import CRLModel
+
         model = CRLModel(self._base_cfg())
         params = model.learnable_morlet_parameters()
         assert len(params) > 0
@@ -542,22 +628,28 @@ class TestMorletLearnableInModel:
 
     def test_forward_runs(self):
         from training.trainer import CRLModel
+
         cfg = self._base_cfg()
         model = CRLModel(cfg)
         W_a = cfg.modality_cfg("audio").window_size
         W_s = cfg.modality_cfg("seismic").window_size
         with torch.no_grad():
-            _, z_a, _, _ = model.encode("audio",   torch.randn(2, 1, W_a) * 0.01)
+            _, z_a, _, _ = model.encode("audio", torch.randn(2, 1, W_a) * 0.01)
             _, z_s, _, _ = model.encode("seismic", torch.randn(2, 1, W_s) * 0.01)
         assert z_a.shape == (2, 24)
         assert z_s.shape == (2, 24)
 
     def test_w0_param_added_when_learnable(self):
-        from training.trainer import CRLModel
         from crl_vehicle.models.frontend import LearnableMorletFilterbank
+        from training.trainer import CRLModel
+
         model = CRLModel(self._base_cfg(morlet_learnable_w0=True))
-        banks = [m for stack in model.frontends.values() for m in stack.modules()
-                 if isinstance(m, LearnableMorletFilterbank)]
+        banks = [
+            m
+            for stack in model.frontends.values()
+            for m in stack.modules()
+            if isinstance(m, LearnableMorletFilterbank)
+        ]
         assert len(banks) == 2
         for bank in banks:
             assert hasattr(bank, "w0_per_filter")
@@ -569,15 +661,21 @@ class TestMorletLearnableFusedInModel:
 
     def _base_cfg(self, **overrides):
         from crl_vehicle.config import CRLConfig
-        kwargs = dict(
-            d_model=32, n_layers=1, n_heads=4,
-            frontend_type="morlet_learnable_fused", fused_seq_len=16, d_z=24,
-        )
+
+        kwargs = {
+            "d_model": 32,
+            "n_layers": 1,
+            "n_heads": 4,
+            "frontend_type": "morlet_learnable_fused",
+            "fused_seq_len": 16,
+            "d_z": 24,
+        }
         kwargs.update(overrides)
         return CRLConfig(**kwargs)
 
     def test_constructs_with_fused_topology(self):
         from training.trainer import CRLModel
+
         model = CRLModel(self._base_cfg())
         assert model.encoder is not None
         assert model.decoder is not None
@@ -586,12 +684,14 @@ class TestMorletLearnableFusedInModel:
 
     def test_learnable_parameters_nonempty(self):
         from training.trainer import CRLModel
+
         model = CRLModel(self._base_cfg())
         params = model.learnable_morlet_parameters()
         assert len(params) > 0
 
     def test_forward_matches_fused_shape(self):
         from training.trainer import CRLModel
+
         cfg = self._base_cfg()
         model = CRLModel(cfg)
         W_a = cfg.modality_cfg("audio").window_size
@@ -607,14 +707,25 @@ class TestMorletLearnableFusedInModel:
 
     def test_mismatched_fracs_raises(self):
         from training.trainer import CRLModel
+
         cfg = self._base_cfg()
         cfg.morlet_per_sensor_params = {
-            "audio":   {"freq_min": 20.0, "freq_max": 8000.0,
-                        "out_channels_frac": 1.0, "w0": 6.0,
-                        "target_tokens": 16, "receptive_cycles": 3.0},
-            "seismic": {"freq_min": 2.0,  "freq_max": 40.0,
-                        "out_channels_frac": 0.5, "w0": 6.0,
-                        "target_tokens": 16, "receptive_cycles": 3.0},
+            "audio": {
+                "freq_min": 20.0,
+                "freq_max": 8000.0,
+                "out_channels_frac": 1.0,
+                "w0": 6.0,
+                "target_tokens": 16,
+                "receptive_cycles": 3.0,
+            },
+            "seismic": {
+                "freq_min": 2.0,
+                "freq_max": 40.0,
+                "out_channels_frac": 0.5,
+                "w0": 6.0,
+                "target_tokens": 16,
+                "receptive_cycles": 3.0,
+            },
         }
         with pytest.raises(ValueError, match="matching n_out_channels"):
             CRLModel(cfg)
@@ -624,9 +735,14 @@ class TestMorletLearnableFusedInModel:
         morlet_fused (fixed kernels) — prevents accidental LR-group creation."""
         from crl_vehicle.config import CRLConfig
         from training.trainer import CRLModel
+
         cfg = CRLConfig(
-            d_model=32, n_layers=1, n_heads=4,
-            frontend_type="morlet_fused", fused_seq_len=16, d_z=24,
+            d_model=32,
+            n_layers=1,
+            n_heads=4,
+            frontend_type="morlet_fused",
+            fused_seq_len=16,
+            d_z=24,
         )
         model = CRLModel(cfg)
         assert model.learnable_morlet_parameters() == []
@@ -640,25 +756,35 @@ class TestLearnableMorletOptimizerGroup:
     def test_separate_group_for_learnable_variant(self, tmp_path):
         from crl_vehicle.config import CRLConfig
         from training.trainer import CRLModel, Trainer
+
         cfg = CRLConfig(
-            d_model=32, n_layers=1, frontend_type="morlet_learnable", d_z=24,
-            lr=1e-3, morlet_learnable_lr_mult=0.1,
+            d_model=32,
+            n_layers=1,
+            frontend_type="morlet_learnable",
+            d_z=24,
+            lr=1e-3,
+            morlet_learnable_lr_mult=0.1,
         )
         model = CRLModel(cfg)
         trainer = Trainer(model, cfg, torch.device("cpu"), tmp_path)
-        lrs = [g["lr"] for g in trainer.optimizer.param_groups]
+        [g["lr"] for g in trainer.optimizer.param_groups]
         names = [g.get("name", "") for g in trainer.optimizer.param_groups]
         assert "learnable_morlet" in names
-        learnable_group = next(g for g in trainer.optimizer.param_groups
-                               if g.get("name") == "learnable_morlet")
-        assert learnable_group["lr"] == 1e-4   # 1e-3 * 0.1
+        learnable_group = next(
+            g for g in trainer.optimizer.param_groups if g.get("name") == "learnable_morlet"
+        )
+        assert learnable_group["lr"] == 1e-4  # 1e-3 * 0.1
 
     def test_no_double_optimization(self, tmp_path):
         """Learnable morlet params must appear in exactly one optimizer group."""
         from crl_vehicle.config import CRLConfig
         from training.trainer import CRLModel, Trainer
+
         cfg = CRLConfig(
-            d_model=32, n_layers=1, frontend_type="morlet_learnable", d_z=24,
+            d_model=32,
+            n_layers=1,
+            frontend_type="morlet_learnable",
+            d_z=24,
         )
         model = CRLModel(cfg)
         trainer = Trainer(model, cfg, torch.device("cpu"), tmp_path)
@@ -668,12 +794,14 @@ class TestLearnableMorletOptimizerGroup:
             for p in group["params"]:
                 if id(p) in learnable_ids:
                     appearances[id(p)] += 1
-        assert all(c == 1 for c in appearances.values()), \
-            f"param counts per optimizer group: {appearances}"
+        assert all(
+            c == 1 for c in appearances.values()
+        ), f"param counts per optimizer group: {appearances}"
 
     def test_no_extra_group_for_fixed_variant(self, tmp_path):
         from crl_vehicle.config import CRLConfig
         from training.trainer import CRLModel, Trainer
+
         cfg = CRLConfig(d_model=32, n_layers=1, frontend_type="morlet_per_sensor", d_z=24)
         model = CRLModel(cfg)
         trainer = Trainer(model, cfg, torch.device("cpu"), tmp_path)
@@ -685,12 +813,24 @@ class TestFFTMorletConv:
     """FFT-based convolution path must match direct F.conv1d within float
     precision and preserve gradients for the learnable variant."""
 
-    def _filterbank(self, ks, use_phase=False, sample_rate=200,
-                    freq_min=2.0, freq_max=40.0, out_channels=8):
+    def _filterbank(
+        self,
+        ks,
+        use_phase=False,
+        sample_rate=200,
+        freq_min=2.0,
+        freq_max=40.0,
+        out_channels=8,
+    ):
         return MorletFilterbank(
-            in_channels=1, out_channels=out_channels, kernel_size=ks,
-            sample_rate=sample_rate, w0=6.0,
-            freq_min=freq_min, freq_max=freq_max, use_phase=use_phase,
+            in_channels=1,
+            out_channels=out_channels,
+            kernel_size=ks,
+            sample_rate=sample_rate,
+            w0=6.0,
+            freq_min=freq_min,
+            freq_max=freq_max,
+            use_phase=use_phase,
         )
 
     def _force_threshold(self, threshold):
@@ -700,13 +840,16 @@ class TestFFTMorletConv:
         MorletFilterbank.FFT_CONV_THRESHOLD = threshold
         return prev
 
-    @pytest.mark.parametrize("ks,use_phase", [
-        (513,  False),
-        (513,  True),
-        (1025, False),
-        # Representative audio-Morlet size — the actual production hot path.
-        (4585, False),
-    ])
+    @pytest.mark.parametrize(
+        "ks,use_phase",
+        [
+            (513, False),
+            (513, True),
+            (1025, False),
+            # Representative audio-Morlet size — the actual production hot path.
+            (4585, False),
+        ],
+    )
     def test_fft_matches_direct_conv(self, ks, use_phase):
         """Force both paths on the same filterbank and compare outputs."""
         torch.manual_seed(42)
@@ -716,13 +859,12 @@ class TestFFTMorletConv:
         SR = 16000 if ks > 1000 else 200
         fmin = 20.0 if SR == 16000 else 2.0
         fmax = 8000.0 if SR == 16000 else 40.0
-        fb = self._filterbank(ks, use_phase=use_phase, sample_rate=SR,
-                              freq_min=fmin, freq_max=fmax)
+        fb = self._filterbank(ks, use_phase=use_phase, sample_rate=SR, freq_min=fmin, freq_max=fmax)
         x = torch.randn(2, 1, L) * 0.01
 
-        prev = self._force_threshold(10**9)    # disable FFT
+        prev = self._force_threshold(10**9)  # disable FFT
         y_direct = fb(x)
-        self._force_threshold(0)                # force FFT
+        self._force_threshold(0)  # force FFT
         y_fft = fb(x)
         self._force_threshold(prev)
 
@@ -739,6 +881,7 @@ class TestFFTMorletConv:
         """Below threshold → direct; at or above → FFT. The dispatch is
         silent, so test it by patching F.conv1d and checking call count."""
         from unittest.mock import patch
+
         import torch.nn.functional as F_mod
 
         torch.manual_seed(0)
@@ -761,8 +904,13 @@ class TestFFTMorletConv:
         propagate gradients to log_scales. This is the critical correctness
         check — a broken FFT path silently zeros out learning."""
         learn = LearnableMorletFilterbank(
-            in_channels=1, out_channels=16, kernel_size=513,
-            sample_rate=200, w0=6.0, freq_min=2.0, freq_max=40.0,
+            in_channels=1,
+            out_channels=16,
+            kernel_size=513,
+            sample_rate=200,
+            w0=6.0,
+            freq_min=2.0,
+            freq_max=40.0,
             use_phase=False,
         )
         assert learn.kernel_size >= MorletFilterbank.FFT_CONV_THRESHOLD
@@ -778,13 +926,23 @@ class TestFFTMorletConv:
         ks=513 so we're comparing FFT against direct across subclasses."""
         torch.manual_seed(0)
         fixed = MorletFilterbank(
-            in_channels=1, out_channels=16, kernel_size=513,
-            sample_rate=200, w0=6.0, freq_min=2.0, freq_max=40.0,
+            in_channels=1,
+            out_channels=16,
+            kernel_size=513,
+            sample_rate=200,
+            w0=6.0,
+            freq_min=2.0,
+            freq_max=40.0,
             use_phase=False,
         )
         learn = LearnableMorletFilterbank(
-            in_channels=1, out_channels=16, kernel_size=513,
-            sample_rate=200, w0=6.0, freq_min=2.0, freq_max=40.0,
+            in_channels=1,
+            out_channels=16,
+            kernel_size=513,
+            sample_rate=200,
+            w0=6.0,
+            freq_min=2.0,
+            freq_max=40.0,
             use_phase=False,
         )
         x = torch.randn(2, 1, 2000) * 0.01
@@ -800,6 +958,7 @@ class TestFFTMorletConv:
 # MultiScale1DFrontend per-branch strides + target_tokens
 # ---------------------------------------------------------------------------
 
+
 class TestMultiScaleGraduatedStrides:
     """New per-branch stride/alignment API, exercising the SR=4000 experiment shape."""
 
@@ -807,8 +966,10 @@ class TestMultiScaleGraduatedStrides:
         kernel_sizes = [201, 41, 9, 5]
         strides = [67, 13, 3, 1]
         fe = MultiScale1DFrontend(
-            in_channels=1, out_channels=64,
-            kernel_sizes=kernel_sizes, strides=strides,
+            in_channels=1,
+            out_channels=64,
+            kernel_sizes=kernel_sizes,
+            strides=strides,
             target_tokens=32,
         )
         with torch.no_grad():
@@ -827,8 +988,10 @@ class TestMultiScaleGraduatedStrides:
         kernel_sizes = [201, 41, 9, 5]
         strides = [67, 13, 3, 1]
         fe = MultiScale1DFrontend(
-            in_channels=1, out_channels=64,
-            kernel_sizes=kernel_sizes, strides=strides,
+            in_channels=1,
+            out_channels=64,
+            kernel_sizes=kernel_sizes,
+            strides=strides,
             target_tokens=32,
         )
         x = torch.randn(2, 1, 4000) * 0.01
@@ -854,8 +1017,10 @@ class TestMultiScaleGraduatedStrides:
     def test_strides_length_mismatch_raises(self):
         with pytest.raises(ValueError, match="strides length"):
             MultiScale1DFrontend(
-                in_channels=1, out_channels=64,
-                kernel_sizes=[9, 19, 39], strides=[4, 4],  # 2 vs 3
+                in_channels=1,
+                out_channels=64,
+                kernel_sizes=[9, 19, 39],
+                strides=[4, 4],  # 2 vs 3
             )
 
 
@@ -863,17 +1028,17 @@ class TestMultiScaleGraduatedStrides:
 # Frontend factory (build_frontend) — exercised before trainer wiring
 # ---------------------------------------------------------------------------
 
+
 class TestFrontendFactory:
     """Tests build_frontend in isolation. Not yet wired to trainer."""
 
     def test_multiscale_early_returns_shared_encoder(self):
         from crl_vehicle.config import CRLConfig
         from crl_vehicle.models.frontend_factory import build_frontend
+
         cfg = CRLConfig(d_model=16, n_layers=1, n_heads=4)
         sensors = ["audio", "seismic"]
-        frontends, encoder, decoder, encoders, decoders, derived = (
-            build_frontend(cfg, sensors)
-        )
+        frontends, encoder, decoder, encoders, decoders, derived = build_frontend(cfg, sensors)
         assert "audio" in frontends and "seismic" in frontends
         assert encoder is not None and decoder is not None
         assert len(encoders) == 0 and len(decoders) == 0
@@ -883,20 +1048,34 @@ class TestFrontendFactory:
     def test_morlet_late_returns_per_sensor_encoders(self):
         from crl_vehicle.config import CRLConfig
         from crl_vehicle.models.frontend_factory import build_frontend
+
         cfg = CRLConfig(
-            d_model=16, n_layers=1, n_heads=4,
-            frontend_bank="morlet", frontend_fusion="late",
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            frontend_bank="morlet",
+            frontend_fusion="late",
             frontend_per_sensor_params={
-                "audio":   {"freq_min": 20.0, "freq_max": 8000.0, "w0": 6.0,
-                            "target_tokens": 32, "receptive_cycles": 3.0,
-                            "out_channels_frac": 1.0},
-                "seismic": {"freq_min": 2.0, "freq_max": 40.0, "w0": 6.0,
-                            "target_tokens": 32, "receptive_cycles": 3.0,
-                            "out_channels_frac": 1.0},
+                "audio": {
+                    "freq_min": 20.0,
+                    "freq_max": 8000.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                    "out_channels_frac": 1.0,
+                },
+                "seismic": {
+                    "freq_min": 2.0,
+                    "freq_max": 40.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                    "out_channels_frac": 1.0,
+                },
             },
         )
-        frontends, encoder, decoder, encoders, decoders, derived = (
-            build_frontend(cfg, ["audio", "seismic"])
+        frontends, encoder, decoder, encoders, decoders, derived = build_frontend(
+            cfg, ["audio", "seismic"]
         )
         assert encoder is None and decoder is None
         assert "audio" in encoders and "seismic" in encoders
@@ -907,20 +1086,34 @@ class TestFrontendFactory:
     def test_morlet_early_returns_shared_encoder(self):
         from crl_vehicle.config import CRLConfig
         from crl_vehicle.models.frontend_factory import build_frontend
+
         cfg = CRLConfig(
-            d_model=16, n_layers=1, n_heads=4,
-            frontend_bank="morlet", frontend_fusion="early",
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            frontend_bank="morlet",
+            frontend_fusion="early",
             frontend_per_sensor_params={
-                "audio":   {"freq_min": 20.0, "freq_max": 8000.0, "w0": 6.0,
-                            "target_tokens": 32, "receptive_cycles": 3.0,
-                            "out_channels_frac": 1.0},
-                "seismic": {"freq_min": 2.0, "freq_max": 40.0, "w0": 6.0,
-                            "target_tokens": 32, "receptive_cycles": 3.0,
-                            "out_channels_frac": 1.0},
+                "audio": {
+                    "freq_min": 20.0,
+                    "freq_max": 8000.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                    "out_channels_frac": 1.0,
+                },
+                "seismic": {
+                    "freq_min": 2.0,
+                    "freq_max": 40.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                    "out_channels_frac": 1.0,
+                },
             },
         )
-        frontends, encoder, decoder, encoders, decoders, derived = (
-            build_frontend(cfg, ["audio", "seismic"])
+        frontends, encoder, decoder, encoders, decoders, derived = build_frontend(
+            cfg, ["audio", "seismic"]
         )
         assert encoder is not None and decoder is not None
         assert len(encoders) == 0 and len(decoders) == 0
@@ -929,16 +1122,30 @@ class TestFrontendFactory:
     def test_morlet_learnable_late_has_learnable_params(self):
         from crl_vehicle.config import CRLConfig
         from crl_vehicle.models.frontend_factory import build_frontend
+
         cfg = CRLConfig(
-            d_model=16, n_layers=1, n_heads=4,
-            frontend_bank="morlet_learnable", frontend_fusion="late",
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            frontend_bank="morlet_learnable",
+            frontend_fusion="late",
             frontend_per_sensor_params={
-                "audio":   {"freq_min": 20.0, "freq_max": 8000.0, "w0": 6.0,
-                            "target_tokens": 32, "receptive_cycles": 3.0,
-                            "out_channels_frac": 1.0},
-                "seismic": {"freq_min": 2.0, "freq_max": 40.0, "w0": 6.0,
-                            "target_tokens": 32, "receptive_cycles": 3.0,
-                            "out_channels_frac": 1.0},
+                "audio": {
+                    "freq_min": 20.0,
+                    "freq_max": 8000.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                    "out_channels_frac": 1.0,
+                },
+                "seismic": {
+                    "freq_min": 2.0,
+                    "freq_max": 40.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                    "out_channels_frac": 1.0,
+                },
             },
         )
         frontends, _, _, _, _, derived = build_frontend(cfg, ["audio", "seismic"])
@@ -950,18 +1157,26 @@ class TestFrontendFactory:
         """Smoke test: factory output runs through the encoder."""
         from crl_vehicle.config import CRLConfig
         from crl_vehicle.models.frontend_factory import build_frontend
+
         cfg = CRLConfig(d_model=16, n_layers=1, n_heads=4, audio_target_rate=4000)
         # New SR=4000 graduated kernel config:
         cfg = CRLConfig(
-            d_model=16, n_layers=1, n_heads=4, audio_target_rate=4000,
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            audio_target_rate=4000,
             frontend_per_sensor_params={
-                "audio":   {"target_tokens": 32,
-                            "kernel_sizes": [201, 41, 9, 5],
-                            "strides": [67, 13, 3, 1],
-                            "out_channels_frac": 1.0},
-                "seismic": {"target_tokens": 32,
-                            "kernel_sizes": [9, 19, 39],
-                            "out_channels_frac": 1.0},
+                "audio": {
+                    "target_tokens": 32,
+                    "kernel_sizes": [201, 41, 9, 5],
+                    "strides": [67, 13, 3, 1],
+                    "out_channels_frac": 1.0,
+                },
+                "seismic": {
+                    "target_tokens": 32,
+                    "kernel_sizes": [9, 19, 39],
+                    "out_channels_frac": 1.0,
+                },
             },
         )
         frontends, encoder, _, _, _, _ = build_frontend(cfg, ["audio", "seismic"])

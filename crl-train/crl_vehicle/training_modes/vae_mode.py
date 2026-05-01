@@ -8,7 +8,6 @@ from crl_vehicle.data.transforms import apply_intervention_batch
 from crl_vehicle.losses.crl_loss import (
     focal_cross_entropy,
     intervention_matching_loss,
-    kl_divergence,
     reconstruction_loss,
 )
 from crl_vehicle.models.intervention import label_change_target
@@ -20,9 +19,15 @@ def _empty_aux_metrics() -> dict:
     empty_f = torch.empty(0)
     empty_l = torch.empty(0, dtype=torch.long)
     return {
-        "recon": 0.0, "kl": 0.0, "raw_kl": 0.0, "interv": 0.0, "total": 0.0,
-        "aux_pres_logits": empty_f, "aux_pres_labels": empty_l,
-        "aux_type_logits": empty_f, "aux_type_labels": empty_l,
+        "recon": 0.0,
+        "kl": 0.0,
+        "raw_kl": 0.0,
+        "interv": 0.0,
+        "total": 0.0,
+        "aux_pres_logits": empty_f,
+        "aux_pres_labels": empty_l,
+        "aux_type_logits": empty_f,
+        "aux_type_labels": empty_l,
     }
 
 
@@ -46,12 +51,12 @@ class VAETrainingMode(TrainingMode):
     """
 
     # Checkpoint file names.
-    CKPT_REF_ELBO     = "crl_best.pth"
-    CKPT_AUX_TYPE_F1  = "crl_best_aux_type.pth"
+    CKPT_REF_ELBO = "crl_best.pth"
+    CKPT_AUX_TYPE_F1 = "crl_best_aux_type.pth"
 
     def __init__(self, prior: Prior, config) -> None:
         super().__init__()
-        self.prior  = prior
+        self.prior = prior
         self.config = config
 
     # ------------------------------------------------------------------
@@ -90,9 +95,7 @@ class VAETrainingMode(TrainingMode):
             return self._forward_pair_fused(model, batch, beta, device)
         return self._forward_pair_per_sensor(model, batch, beta, device)
 
-    def _forward_pair_fused(
-        self, model, batch, beta, dev
-    ) -> tuple[torch.Tensor, dict]:
+    def _forward_pair_fused(self, model, batch, beta, dev) -> tuple[torch.Tensor, dict]:
         cfg = self.config
         avail = batch["audio_avail"].bool() & batch["seismic_avail"].bool()
         if not avail.any():
@@ -111,9 +114,9 @@ class VAETrainingMode(TrainingMode):
         features, z_t, mu_t, lv_t = model.encode_fused(x_a, x_s)
         x_hat = model.decode_fused(z_t)
 
-        recon  = reconstruction_loss(x_hat, features.detach())
+        recon = reconstruction_loss(x_hat, features.detach())
 
-        det_t  = batch["detection_label_t"][avail].float().to(dev)
+        det_t = batch["detection_label_t"][avail].float().to(dev)
         type_t = batch["vehicle_type_t"][avail].to(dev)
         kl, raw_kl = self._kl_terms(mu_t, lv_t, det_t, type_t, beta)
 
@@ -125,14 +128,16 @@ class VAETrainingMode(TrainingMode):
         valid_type = type_t >= 0
         aux_type = torch.tensor(0.0, device=dev)
         aux_type_logit_valid = torch.empty(0, device=dev)
-        type_labels_valid    = torch.empty(0, dtype=torch.long, device=dev)
+        type_labels_valid = torch.empty(0, dtype=torch.long, device=dev)
         if valid_type.any():
             aux_type_logit_valid = model.aux_type_heads["fused"](z_type[valid_type])
-            type_labels_valid    = type_t[valid_type].long()
+            type_labels_valid = type_t[valid_type].long()
             if cfg.use_focal_type:
                 aux_type = focal_cross_entropy(
-                    aux_type_logit_valid, type_labels_valid,
-                    weight=None, gamma=cfg.focal_type_gamma,
+                    aux_type_logit_valid,
+                    type_labels_valid,
+                    weight=None,
+                    gamma=cfg.focal_type_gamma,
                 )
             else:
                 aux_type = F.cross_entropy(aux_type_logit_valid, type_labels_valid)
@@ -144,23 +149,26 @@ class VAETrainingMode(TrainingMode):
             x_s_p0 = batch["x_seismic_p0"][avail].to(dev)
             _, z_tn, _, _ = model.encode_fused(x_a_p0, x_s_p0)
             _, _, _, z_env_tn, _ = model.latent.split(z_tn)
-            det_tn  = batch["detection_label_p0"][avail].to(dev)
+            det_tn = batch["detection_label_p0"][avail].to(dev)
             type_tn = batch["vehicle_type_p0"][avail].to(dev)
             targets = label_change_target(det_t.long(), det_tn, type_t, type_tn).to(dev)
-            logits  = model.interv_classifier(z_env, z_env_tn)
-            interv  = intervention_matching_loss(logits, targets)
+            logits = model.interv_classifier(z_env, z_env_tn)
+            interv = intervention_matching_loss(logits, targets)
 
-        total = (recon + kl
-                 + cfg.lambda_interv   * interv
-                 + cfg.lambda_aux_pres * aux_pres
-                 + cfg.lambda_aux_type * aux_type)
+        total = (
+            recon
+            + kl
+            + cfg.lambda_interv * interv
+            + cfg.lambda_aux_pres * aux_pres
+            + cfg.lambda_aux_type * aux_type
+        )
 
         metrics = {
-            "recon":  recon.item(),
-            "kl":     kl.item(),
+            "recon": recon.item(),
+            "kl": kl.item(),
             "raw_kl": raw_kl.item(),
             "interv": interv.item() if isinstance(interv, torch.Tensor) else interv,
-            "total":  total.item(),
+            "total": total.item(),
             "aux_pres_logits": aux_pres_logit.detach().cpu(),
             "aux_pres_labels": det_t.detach().long().cpu(),
             "aux_type_logits": aux_type_logit_valid.detach().cpu(),
@@ -168,14 +176,17 @@ class VAETrainingMode(TrainingMode):
         }
         return total, metrics
 
-    def _forward_pair_per_sensor(
-        self, model, batch, beta, dev
-    ) -> tuple[torch.Tensor, dict]:
+    def _forward_pair_per_sensor(self, model, batch, beta, dev) -> tuple[torch.Tensor, dict]:
         cfg = self.config
 
         total_loss = torch.tensor(0.0, device=dev)
-        agg: dict[str, float] = {"recon": 0.0, "kl": 0.0, "raw_kl": 0.0,
-                                  "interv": 0.0, "total": 0.0}
+        agg: dict[str, float] = {
+            "recon": 0.0,
+            "kl": 0.0,
+            "raw_kl": 0.0,
+            "interv": 0.0,
+            "total": 0.0,
+        }
         aux_pres_logits_all: list[torch.Tensor] = []
         aux_pres_labels_all: list[torch.Tensor] = []
         aux_type_logits_all: list[torch.Tensor] = []
@@ -193,9 +204,9 @@ class VAETrainingMode(TrainingMode):
             features, z_t, mu_t, lv_t = model.encode(sensor, x)
             x_hat = model.decode(sensor, z_t)
 
-            recon  = reconstruction_loss(x_hat, features.detach())
+            recon = reconstruction_loss(x_hat, features.detach())
 
-            det_t  = batch["detection_label_t"][avail].float().to(dev)
+            det_t = batch["detection_label_t"][avail].float().to(dev)
             type_t = batch["vehicle_type_t"][avail].to(dev)
             kl, raw_kl = self._kl_terms(mu_t, lv_t, det_t, type_t, beta)
 
@@ -209,12 +220,14 @@ class VAETrainingMode(TrainingMode):
             valid_type = type_t >= 0
             aux_type = torch.tensor(0.0, device=dev)
             if valid_type.any():
-                type_logit_valid  = model.aux_type_heads[sensor](z_type[valid_type])
+                type_logit_valid = model.aux_type_heads[sensor](z_type[valid_type])
                 type_labels_valid = type_t[valid_type].long()
                 if cfg.use_focal_type:
                     aux_type = focal_cross_entropy(
-                        type_logit_valid, type_labels_valid,
-                        weight=None, gamma=cfg.focal_type_gamma,
+                        type_logit_valid,
+                        type_labels_valid,
+                        weight=None,
+                        gamma=cfg.focal_type_gamma,
                     )
                 else:
                     aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
@@ -227,22 +240,25 @@ class VAETrainingMode(TrainingMode):
                 x_p0 = batch[f"x_{sensor}_p0"][avail].to(dev)
                 _, z_tn, _, _ = model.encode(sensor, x_p0)
                 _, _, _, z_env_tn, _ = model.latent.split(z_tn)
-                det_tn  = batch["detection_label_p0"][avail].to(dev)
+                det_tn = batch["detection_label_p0"][avail].to(dev)
                 type_tn = batch["vehicle_type_p0"][avail].to(dev)
                 targets = label_change_target(det_t.long(), det_tn, type_t, type_tn).to(dev)
-                logits  = model.interv_classifier(z_env, z_env_tn)
-                interv  = intervention_matching_loss(logits, targets)
+                logits = model.interv_classifier(z_env, z_env_tn)
+                interv = intervention_matching_loss(logits, targets)
 
-            sensor_loss = (recon + kl
-                           + cfg.lambda_interv   * interv
-                           + cfg.lambda_aux_pres * aux_pres
-                           + cfg.lambda_aux_type * aux_type)
+            sensor_loss = (
+                recon
+                + kl
+                + cfg.lambda_interv * interv
+                + cfg.lambda_aux_pres * aux_pres
+                + cfg.lambda_aux_type * aux_type
+            )
             total_loss = total_loss + sensor_loss
-            agg["recon"]  += recon.item()
-            agg["kl"]     += kl.item()
+            agg["recon"] += recon.item()
+            agg["kl"] += kl.item()
             agg["raw_kl"] += raw_kl.item()
             agg["interv"] += interv.item() if isinstance(interv, torch.Tensor) else interv
-            agg["total"]  += sensor_loss.item()
+            agg["total"] += sensor_loss.item()
             n_active += 1
 
         if n_active > 1:
@@ -256,14 +272,16 @@ class VAETrainingMode(TrainingMode):
             torch.cat(aux_pres_logits_all) if aux_pres_logits_all else torch.empty(0)
         )
         agg["aux_pres_labels"] = (
-            torch.cat(aux_pres_labels_all) if aux_pres_labels_all
+            torch.cat(aux_pres_labels_all)
+            if aux_pres_labels_all
             else torch.empty(0, dtype=torch.long)
         )
         agg["aux_type_logits"] = (
             torch.cat(aux_type_logits_all) if aux_type_logits_all else torch.empty(0)
         )
         agg["aux_type_labels"] = (
-            torch.cat(aux_type_labels_all) if aux_type_labels_all
+            torch.cat(aux_type_labels_all)
+            if aux_type_labels_all
             else torch.empty(0, dtype=torch.long)
         )
         return total_loss, agg
@@ -275,18 +293,14 @@ class VAETrainingMode(TrainingMode):
     def val_metrics_summary(self, val_m: dict) -> dict:
         """val_ref_elbo = val_recon + val_raw_kl — epoch-invariant at beta=1."""
         out = dict(val_m)
-        out["val_ref_elbo"] = (
-            val_m.get("val_recon", 0.0) + val_m.get("val_raw_kl", 0.0)
-        )
+        out["val_ref_elbo"] = val_m.get("val_recon", 0.0) + val_m.get("val_raw_kl", 0.0)
         return out
 
     def update_beta(
         self, beta: float, val_m: dict, state: CheckpointState, config
     ) -> tuple[float, str]:
         raw_kl = val_m["val_raw_kl"]
-        recon_improving = (
-            val_m["val_recon"] < state.prev_val_recon - config.recon_min_delta
-        )
+        recon_improving = val_m["val_recon"] < state.prev_val_recon - config.recon_min_delta
         state.prev_val_recon = val_m["val_recon"]
         if raw_kl < config.kl_floor:
             return (max(0.0, beta - config.beta_step), "↓collapse")
@@ -330,12 +344,12 @@ class VAETrainingMode(TrainingMode):
     def checkpoint_summary(self, state: CheckpointState) -> dict:
         """Backward-compatible summary matching the existing crl_checkpoint_summary.json."""
         return {
-            "best_ref_elbo":       round(state.bests.get("val_ref_elbo", float("inf")), 6),
-            "best_aux_type_f1":    round(state.bests.get("val_aux_type_f1", -1.0), 4),
+            "best_ref_elbo": round(state.bests.get("val_ref_elbo", float("inf")), 6),
+            "best_aux_type_f1": round(state.bests.get("val_aux_type_f1", -1.0), 4),
             "best_aux_type_epoch": state.best_epochs.get("val_aux_type_f1", -1),
             "checkpoints": {
-                self.CKPT_REF_ELBO:    "selected by val_ref_elbo (recon + raw_kl at beta=1)",
+                self.CKPT_REF_ELBO: "selected by val_ref_elbo (recon + raw_kl at beta=1)",
                 self.CKPT_AUX_TYPE_F1: "selected by val_aux_type_f1 (downstream-proxy signal)",
-                "crl_final.pth":       "last epoch (may be post-early-stop)",
+                "crl_final.pth": "last epoch (may be post-early-stop)",
             },
         }

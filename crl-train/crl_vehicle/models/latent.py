@@ -1,13 +1,14 @@
 from __future__ import annotations
+
 import torch
 import torch.nn as nn
 
 
 class CausalLatentSpace(nn.Module):
-    D_PRES = 4   # dims 0-3
-    D_TYPE = 6   # dims 4-9
-    D_PROX = 3   # dims 10-12
-    D_ENV  = 6   # dims 13-18
+    D_PRES = 4  # dims 0-3
+    D_TYPE = 6  # dims 4-9
+    D_PROX = 3  # dims 10-12
+    D_ENV = 6  # dims 13-18
     D_CAUSAL = D_PRES + D_TYPE + D_PROX + D_ENV  # = 19
 
     def __init__(self, d_z: int = 24) -> None:
@@ -22,12 +23,12 @@ class CausalLatentSpace(nn.Module):
         end_pres = self.D_PRES
         end_type = end_pres + self.D_TYPE
         end_prox = end_type + self.D_PROX
-        end_env  = end_prox + self.D_ENV
+        end_env = end_prox + self.D_ENV
         self._slices = {
             "pres": slice(0, end_pres),
             "type": slice(end_pres, end_type),
             "prox": slice(end_type, end_prox),
-            "env":  slice(end_prox, end_env),
+            "env": slice(end_prox, end_env),
             "free": slice(end_env, d_z),
         }
 
@@ -58,15 +59,14 @@ class SplitLatentSpace(nn.Module):
             raise ValueError(f"d_signal must be > 0, got {d_signal}")
         if d_signal >= d_z:
             raise ValueError(
-                f"d_signal ({d_signal}) must be < d_z ({d_z}) "
-                f"to leave room for an env block"
+                f"d_signal ({d_signal}) must be < d_z ({d_z}) " f"to leave room for an env block"
             )
         self.d_z = d_z
         self.d_signal = d_signal
         self.d_env = d_z - d_signal
         self._slices = {
             "signal": slice(0, d_signal),
-            "env":    slice(d_signal, d_z),
+            "env": slice(d_signal, d_z),
         }
 
     def split(self, z: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

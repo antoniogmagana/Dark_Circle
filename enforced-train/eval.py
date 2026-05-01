@@ -1,33 +1,36 @@
-import time
 import json
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+import time
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
-from torch.utils.data import DataLoader
+
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+import torch
 import torch.nn.functional as F
-from sklearn.metrics import (
-    accuracy_score,
-    matthews_corrcoef,
-    roc_auc_score,
-    confusion_matrix,
-    precision_score,
-    recall_score,
-    f1_score
-)
-import warnings
 
 # Suppress the sklearn warning for undefined metrics (1 class present).
 from sklearn.exceptions import UndefinedMetricWarning
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    f1_score,
+    matthews_corrcoef,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+from torch.utils.data import DataLoader
+
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
 # NOTICE: global 'config' is NO LONGER IMPORTED
 
 from dataset import VehicleDataset
-from models import build_model
 from preprocess import preprocess_for_training
+
+from models import build_model
 
 
 def evaluate_directory(run_dir_path):
@@ -43,21 +46,18 @@ def evaluate_directory(run_dir_path):
     json_path = run_dir_path / "hyperparameters.json"
     if not json_path.exists():
         print(
-            f"  [!] Missing hyperparameters.json in {run_dir_path}. "
-            f"Cannot reconstruct config."
+            f"  [!] Missing hyperparameters.json in {run_dir_path}. " f"Cannot reconstruct config."
         )
         return
 
-    with open(json_path, 'r') as f:
+    with open(json_path) as f:
         config_dict = json.load(f)
 
     # JSON converts integer dictionary keys into strings.
     # We must revert CLASS_MAP keys back to integers so the confusion
     # matrix logic works.
     if "CLASS_MAP" in config_dict:
-        config_dict["CLASS_MAP"] = {
-            int(k): v for k, v in config_dict["CLASS_MAP"].items()
-        }
+        config_dict["CLASS_MAP"] = {int(k): v for k, v in config_dict["CLASS_MAP"].items()}
 
     # Convert dictionary to a dot-accessible object that mimics 'config'
     run_config = SimpleNamespace(**config_dict)
@@ -74,9 +74,7 @@ def evaluate_directory(run_dir_path):
     meta = torch.load(meta_path, map_location=device, weights_only=False)
 
     # Force USE_MEL to whatever was saved in the metadata
-    run_config.USE_MEL = meta.get(
-        "use_mel", getattr(run_config, "USE_MEL", True)
-    )
+    run_config.USE_MEL = meta.get("use_mel", getattr(run_config, "USE_MEL", True))
 
     # 4. Build Dataset & DataLoader using the injected run_config
     test_ds = VehicleDataset(split="test", config=run_config)
@@ -96,16 +94,14 @@ def evaluate_directory(run_dir_path):
     model = build_model(
         input_channels=run_config.IN_CHANNELS,
         num_classes=run_config.NUM_CLASSES,
-        config=run_config
+        config=run_config,
     ).to(device)
 
     model_path = run_dir_path / "best_model.pth"
     state_dict = torch.load(model_path, map_location=device, weights_only=True)
     # Strip torch.compile prefix if the model was saved after compilation
-    if any(k.startswith('_orig_mod.') for k in state_dict):
-        state_dict = {
-            k.removeprefix('_orig_mod.'): v for k, v in state_dict.items()
-        }
+    if any(k.startswith("_orig_mod.") for k in state_dict):
+        state_dict = {k.removeprefix("_orig_mod."): v for k, v in state_dict.items()}
     model.load_state_dict(state_dict)
     model.eval()
 
@@ -148,15 +144,9 @@ def evaluate_directory(run_dir_path):
     acc = accuracy_score(all_labels, all_preds)
     mcc = matthews_corrcoef(all_labels, all_preds)
 
-    precision = precision_score(
-        all_labels, all_preds, average='weighted', zero_division=0
-    )
-    recall = recall_score(
-        all_labels, all_preds, average='weighted', zero_division=0
-    )
-    f1 = f1_score(
-        all_labels, all_preds, average='weighted', zero_division=0
-    )
+    precision = precision_score(all_labels, all_preds, average="weighted", zero_division=0)
+    recall = recall_score(all_labels, all_preds, average="weighted", zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
 
     unique_classes = len(np.unique(all_labels))
     if unique_classes > 1:
@@ -164,13 +154,11 @@ def evaluate_directory(run_dir_path):
             if run_config.NUM_CLASSES == 2:
                 auc = roc_auc_score(all_labels, all_probs[:, 1])
             else:
-                auc = roc_auc_score(
-                    all_labels, all_probs, multi_class="ovr"
-                )
+                auc = roc_auc_score(all_labels, all_probs, multi_class="ovr")
         except ValueError:
-            auc = float('nan')
+            auc = float("nan")
     else:
-        auc = float('nan')
+        auc = float("nan")
 
     target_labels = list(range(run_config.NUM_CLASSES))
     cm = confusion_matrix(all_labels, all_preds, labels=target_labels)
@@ -180,17 +168,14 @@ def evaluate_directory(run_dir_path):
         tn, fp, fn, tp = cm.ravel()
         far = fp / (fp + tn) if (fp + tn) > 0 else 0.0
 
-    with np.errstate(divide='ignore', invalid='ignore'):
+    with np.errstate(divide="ignore", invalid="ignore"):
         per_class_acc = np.true_divide(cm.diagonal(), cm.sum(axis=1))
         per_class_acc[np.isnan(per_class_acc)] = 0.0
 
     # 8. Save Artifacts
     with open(report_path, "w") as f:
         f.write(f"Run Directory: {run_dir_path.name}\n")
-        f.write(
-            f"Mode: {run_config.TRAINING_MODE} "
-            f"| Model: {run_config.MODEL_NAME}\n"
-        )
+        f.write(f"Mode: {run_config.TRAINING_MODE} " f"| Model: {run_config.MODEL_NAME}\n")
         f.write("-" * 40 + "\n")
         f.write(f"Accuracy: {acc:.4f}\n")
         f.write(f"MCC: {mcc:.4f}\n")
@@ -217,10 +202,7 @@ def evaluate_directory(run_dir_path):
             for k in range(run_config.NUM_CLASSES):
                 if k < len(per_class_acc):
                     instance_name = inv_map.get(k, f"Class_{k}")
-                    f.write(
-                        f"  {instance_name} ({k}): "
-                        f"{per_class_acc[k]:.4f}\n"
-                    )
+                    f.write(f"  {instance_name} ({k}): " f"{per_class_acc[k]:.4f}\n")
 
     # ---------------------------------------------------------
     # Generate human-readable labels for the axes
@@ -229,18 +211,10 @@ def evaluate_directory(run_dir_path):
     if run_config.TRAINING_MODE == "detection":
         axis_labels = ["background", "target"]
     elif run_config.TRAINING_MODE == "category":
-        axis_labels = [
-            run_config.CLASS_MAP.get(i, str(i))
-            for i in range(run_config.NUM_CLASSES)
-        ]
+        axis_labels = [run_config.CLASS_MAP.get(i, str(i)) for i in range(run_config.NUM_CLASSES)]
     elif run_config.TRAINING_MODE == "instance":
-        inv_map = {
-            v: k
-            for k, v in getattr(run_config, "INSTANCE_TO_CLASS", {}).items()
-        }
-        axis_labels = [
-            inv_map.get(i, str(i)) for i in range(run_config.NUM_CLASSES)
-        ]
+        inv_map = {v: k for k, v in getattr(run_config, "INSTANCE_TO_CLASS", {}).items()}
+        axis_labels = [inv_map.get(i, str(i)) for i in range(run_config.NUM_CLASSES)]
     else:
         axis_labels = [str(i) for i in range(run_config.NUM_CLASSES)]
 
@@ -255,17 +229,16 @@ def evaluate_directory(run_dir_path):
     sns.heatmap(
         cm,
         annot=True,
-        fmt='d',
-        cmap='Blues',
+        fmt="d",
+        cmap="Blues",
         annot_kws={"size": annot_size, "weight": "bold"},
         cbar_kws={"shrink": 0.8},
         xticklabels=axis_labels,
-        yticklabels=axis_labels
+        yticklabels=axis_labels,
     )
 
     plt.title(
-        f"Confusion Matrix: {run_config.MODEL_NAME} "
-        f"({run_config.TRAINING_MODE})",
+        f"Confusion Matrix: {run_config.MODEL_NAME} " f"({run_config.TRAINING_MODE})",
         fontsize=26,
         pad=20,
     )
@@ -274,7 +247,7 @@ def evaluate_directory(run_dir_path):
 
     # Rotate the x-axis labels if there are a lot of them so they don't overlap
     if run_config.NUM_CLASSES > 5:
-        plt.xticks(rotation=45, ha='right', fontsize=20)
+        plt.xticks(rotation=45, ha="right", fontsize=20)
     else:
         plt.xticks(rotation=0, fontsize=20)
 
@@ -284,9 +257,7 @@ def evaluate_directory(run_dir_path):
     plt.gcf().axes[-1].tick_params(labelsize=16)
 
     plt.tight_layout()
-    plt.savefig(
-        run_dir_path / "conf_matrix.png", dpi=300, bbox_inches='tight'
-    )
+    plt.savefig(run_dir_path / "conf_matrix.png", dpi=300, bbox_inches="tight")
     plt.close()
 
 
@@ -357,7 +328,7 @@ def evaluate_best_ensemble(mode_dir):
         model_path = run_dir / "best_model.pth"
         if not json_path.exists() or not meta_path.exists() or not model_path.exists():
             return None, None
-        with open(json_path, "r") as f:
+        with open(json_path) as f:
             cfg_dict = json.load(f)
         if "CLASS_MAP" in cfg_dict:
             cfg_dict["CLASS_MAP"] = {int(k): v for k, v in cfg_dict["CLASS_MAP"].items()}
@@ -381,7 +352,7 @@ def evaluate_best_ensemble(mode_dir):
     audio_model, audio_cfg = _load_sensor_model(audio_run_dir)
 
     if seismic_model is None or audio_model is None:
-        print(f"  [!] Could not load one or both models for best_ensemble. Skipping.")
+        print("  [!] Could not load one or both models for best_ensemble. Skipping.")
         return
 
     # Build separate test DataLoaders — preprocessing differs between sensors
@@ -389,7 +360,7 @@ def evaluate_best_ensemble(mode_dir):
     audio_test_ds = VehicleDataset(split="test", config=audio_cfg)
 
     if len(seismic_test_ds) == 0 or len(audio_test_ds) == 0:
-        print(f"  [!] Empty test dataset for best_ensemble. Skipping.")
+        print("  [!] Empty test dataset for best_ensemble. Skipping.")
         return
 
     seismic_loader = DataLoader(
@@ -482,17 +453,14 @@ def evaluate_best_ensemble(mode_dir):
     combined_model_label = f"{seismic_model_name} + {audio_model_name}"
 
     with open(report_path, "w") as f:
-        f.write(f"Run Directory: best_ensemble\n")
+        f.write("Run Directory: best_ensemble\n")
         f.write(
-            f"Mode: {ref_cfg.TRAINING_MODE} | Model: {combined_model_label} "
-            f"[best_ensemble]\n"
+            f"Mode: {ref_cfg.TRAINING_MODE} | Model: {combined_model_label} " f"[best_ensemble]\n"
         )
         f.write(
             f"Seismic: {seismic_model_name} (run: {seismic_run_dir.name}, val_f1={seismic_f1:.4f})\n"
         )
-        f.write(
-            f"Audio:   {audio_model_name} (run: {audio_run_dir.name}, val_f1={audio_f1:.4f})\n"
-        )
+        f.write(f"Audio:   {audio_model_name} (run: {audio_run_dir.name}, val_f1={audio_f1:.4f})\n")
         f.write(f"Ensemble weights: seismic={w_s:.4f}, audio={w_a:.4f}\n")
         f.write("-" * 40 + "\n")
         f.write(f"Accuracy: {acc:.4f}\n")
@@ -573,17 +541,13 @@ def main():
 
     # Per-sensor evaluation — skip runs inside best_ensemble dirs
     run_dirs = [
-        p.parent for p in base_dir.rglob("best_model.pth")
-        if "best_ensemble" not in p.parts
+        p.parent for p in base_dir.rglob("best_model.pth") if "best_ensemble" not in p.parts
     ]
     for run_dir in run_dirs:
         evaluate_directory(run_dir)
 
     # Best-ensemble evaluation: one pass per training mode directory
-    mode_dirs = [
-        d for d in base_dir.iterdir()
-        if d.is_dir() and d.name not in ("cache",)
-    ]
+    mode_dirs = [d for d in base_dir.iterdir() if d.is_dir() and d.name not in ("cache",)]
     for mode_dir in mode_dirs:
         evaluate_best_ensemble(mode_dir)
 

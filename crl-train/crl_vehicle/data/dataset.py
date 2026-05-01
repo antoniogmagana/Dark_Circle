@@ -1,4 +1,5 @@
 """SensorDataset and StratifiedPairDataset for CRL training."""
+
 from __future__ import annotations
 
 import logging
@@ -12,15 +13,19 @@ import torch
 from torch.utils.data import Dataset
 
 from crl_vehicle.config import (
-    CRLConfig, LABEL_BACKGROUND, LABEL_MULTI, CATEGORY_TO_IDX, DATASET_VEHICLE_MAP
+    CATEGORY_TO_IDX,
+    DATASET_VEHICLE_MAP,
+    LABEL_BACKGROUND,
+    LABEL_MULTI,
+    CRLConfig,
 )
 from crl_vehicle.data.transforms import remove_dc
 
 # Stratum identifiers for partner sampling
-STRATUM_CONSEC    = 0
+STRATUM_CONSEC = 0
 STRATUM_SAME_TYPE = 1
 STRATUM_DIFF_TYPE = 2
-STRATUM_CROSS_DS  = 3
+STRATUM_CROSS_DS = 3
 
 # Known dataset names
 _KNOWN_DATASETS = {"iobt", "focal", "m3nvc"}
@@ -30,8 +35,8 @@ _KNOWN_DATASETS = {"iobt", "focal", "m3nvc"}
 # different rates per dataset and resampled to canonical rates at load time.
 _SOURCE_RATES = {
     "focal": {"audio": 16000, "seismic": 100},
-    "iobt":  {"audio": 16000, "seismic": 100},
-    "m3nvc": {"audio": 1600,  "seismic": 200},
+    "iobt": {"audio": 16000, "seismic": 100},
+    "m3nvc": {"audio": 1600, "seismic": 200},
 }
 
 
@@ -40,8 +45,9 @@ def _source_sample_rate(stem: str, sensor: str) -> int:
     dataset = stem.split("_", 1)[0]
     rates = _SOURCE_RATES.get(dataset)
     if rates is None:
-        raise ValueError(f"Unknown dataset prefix in stem {stem!r}; "
-                         f"expected one of {sorted(_SOURCE_RATES)}")
+        raise ValueError(
+            f"Unknown dataset prefix in stem {stem!r}; " f"expected one of {sorted(_SOURCE_RATES)}"
+        )
     return rates[sensor]
 
 
@@ -54,6 +60,7 @@ def _resample_to_target(arr: np.ndarray, source_rate: int, target_rate: int) -> 
     if source_rate == target_rate:
         return arr
     import torchaudio.functional as AF
+
     t = torch.from_numpy(arr).float().unsqueeze(0)  # (1, N)
     out = AF.resample(t, orig_freq=source_rate, new_freq=target_rate)
     return out.squeeze(0).numpy().astype(np.float32, copy=False)
@@ -87,7 +94,10 @@ def _vehicle_to_labels(dataset: str, vehicle: str) -> tuple[int, bool]:
 
 
 def _read_parquet_numpy(
-    path: Path, target_window_size: int, source_rate: int, target_rate: int,
+    path: Path,
+    target_window_size: int,
+    source_rate: int,
+    target_rate: int,
 ) -> np.ndarray:
     """Read a flat time-series parquet → float32 array (N_windows, target_window_size).
 
@@ -103,7 +113,8 @@ def _read_parquet_numpy(
 
 
 def _read_parquet_present(
-    path: Path, source_rate: int,
+    path: Path,
+    source_rate: int,
 ) -> np.ndarray:
     """Read the 'present' boolean column → per-window majority vote.
 
@@ -141,6 +152,7 @@ def _parse_stem(stem: str, sensor: str) -> tuple[str, str, str] | None:
 # ---------------------------------------------------------------------------
 # SensorDataset
 # ---------------------------------------------------------------------------
+
 
 class SensorDataset(Dataset):
     """Loads pre-windowed audio and seismic parquet files.
@@ -182,7 +194,7 @@ class SensorDataset(Dataset):
         # Shared-memory tensor store: (stem, seg_key) → Tensor(N, W) in shared memory.
         # Populated once at init, shared across all DataLoader workers with zero duplication.
         self._data_cache: dict[str, dict] = {"audio": {}, "seismic": {}}
-        self._index: list = []   # [(gkey, w_idx, vtype, det_label, audio_seg_id, seismic_seg_id)]
+        self._index: list = []  # [(gkey, w_idx, vtype, det_label, audio_seg_id, seismic_seg_id)]
         self._groups: dict = {}  # gkey → group metadata
         # id_split skip counters: reason → count
         self._id_skip_counts: dict[str, int] = {}
@@ -206,15 +218,19 @@ class SensorDataset(Dataset):
     def _load_data(self, cache_dir: Path | None) -> None:
         if self.use_id_split:
             from crl_vehicle.data.id_split import load_or_build_manifest
+
             self._id_manifest = load_or_build_manifest(
                 id_root=self.id_root,
                 mapping=DATASET_VEHICLE_MAP,
                 window_sizes={
-                    "audio":   self.cfg.modality_cfg("audio").window_size,
+                    "audio": self.cfg.modality_cfg("audio").window_size,
                     "seismic": self.cfg.modality_cfg("seismic").window_size,
                 },
-                cache_dir=self.id_cache_dir if self.id_cache_dir is not None
-                           else self.id_root.parent / "id_cache",
+                cache_dir=(
+                    self.id_cache_dir
+                    if self.id_cache_dir is not None
+                    else self.id_root.parent / "id_cache"
+                ),
             )
             # Scan all subdirs of id_root, dedupe by stem
             seen: dict[str, Path] = {}
@@ -231,9 +247,7 @@ class SensorDataset(Dataset):
             )
         self._build_from_parquet(parquet_files)
         if self.use_id_split and self._id_skip_counts:
-            summary = ", ".join(
-                f"{k}={v}" for k, v in sorted(self._id_skip_counts.items())
-            )
+            summary = ", ".join(f"{k}={v}" for k, v in sorted(self._id_skip_counts.items()))
             logging.getLogger(__name__).info(
                 f"id_split: role={self.role!r} skipped groups: {summary}"
             )
@@ -241,7 +255,7 @@ class SensorDataset(Dataset):
 
     def _build_from_parquet(self, files: list[Path]) -> None:
         # Group files by (dataset, vehicle, rs_node) and sensor
-        audio_files:   dict[tuple, Path] = {}
+        audio_files: dict[tuple, Path] = {}
         seismic_files: dict[tuple, Path] = {}
 
         for f in files:
@@ -270,7 +284,7 @@ class SensorDataset(Dataset):
             a_file = audio_files.get((ds, vehicle, rs))
             s_file = seismic_files.get((ds, vehicle, rs))
 
-            audio_stem   = f"{ds}_audio_{vehicle}_{rs}"   if a_file else None
+            audio_stem = f"{ds}_audio_{vehicle}_{rs}" if a_file else None
             seismic_stem = f"{ds}_seismic_{vehicle}_{rs}" if s_file else None
 
             audio_nw = seismic_nw = 0
@@ -283,7 +297,8 @@ class SensorDataset(Dataset):
                 src_sr_a = _source_sample_rate(audio_stem, "audio")
                 audio_nw = pq.read_metadata(a_file).num_rows // src_sr_a
                 self._cache["audio"][(audio_stem, None)] = {
-                    "path": a_file, "n_windows": audio_nw
+                    "path": a_file,
+                    "n_windows": audio_nw,
                 }
                 seg_id += 1
                 audio_seg_id = seg_id
@@ -293,13 +308,16 @@ class SensorDataset(Dataset):
                 src_sr_s = _source_sample_rate(seismic_stem, "seismic")
                 seismic_nw = pq.read_metadata(s_file).num_rows // src_sr_s
                 self._cache["seismic"][(seismic_stem, None)] = {
-                    "path": s_file, "n_windows": seismic_nw
+                    "path": s_file,
+                    "n_windows": seismic_nw,
                 }
                 seg_id += 1
                 seismic_seg_id = seg_id
                 seismic_present_per_window = _read_parquet_present(s_file, src_sr_s)
 
-            n_windows = min(audio_nw, seismic_nw) if audio_nw and seismic_nw else (audio_nw or seismic_nw)
+            n_windows = (
+                min(audio_nw, seismic_nw) if audio_nw and seismic_nw else (audio_nw or seismic_nw)
+            )
             if n_windows == 0:
                 continue
 
@@ -316,20 +334,23 @@ class SensorDataset(Dataset):
                 combined_present = np.ones(n_windows, dtype=bool)
 
             self._groups[gkey] = {
-                "audio_stem":    audio_stem,
-                "seismic_stem":  seismic_stem,
-                "seg_key":       None,
-                "audio_nw":      audio_nw,
-                "seismic_nw":    seismic_nw,
-                "vehicle_type":  vtype,
-                "audio_seg_id":  audio_seg_id,
+                "audio_stem": audio_stem,
+                "seismic_stem": seismic_stem,
+                "seg_key": None,
+                "audio_nw": audio_nw,
+                "seismic_nw": seismic_nw,
+                "vehicle_type": vtype,
+                "audio_seg_id": audio_seg_id,
                 "seismic_seg_id": seismic_seg_id,
             }
 
             # ID-split routing: filter the window range based on marker / role
             if self.use_id_split:
                 window_iter = self._id_split_window_indices(
-                    ds=ds, vehicle=vehicle, rs=rs, n_windows=n_windows,
+                    ds=ds,
+                    vehicle=vehicle,
+                    rs=rs,
+                    n_windows=n_windows,
                 )
                 if window_iter is None:
                     continue  # group not present in this role
@@ -344,7 +365,11 @@ class SensorDataset(Dataset):
                 self._index.append((gkey, w, w_vtype, w_det_label, audio_seg_id, seismic_seg_id))
 
     def _id_split_window_indices(
-        self, ds: str, vehicle: str, rs: str, n_windows: int,
+        self,
+        ds: str,
+        vehicle: str,
+        rs: str,
+        n_windows: int,
     ) -> list[int] | None:
         """Return window indices this group contributes to self.role, or None to skip.
 
@@ -413,27 +438,28 @@ class SensorDataset(Dataset):
 
         for sensor in ("audio", "seismic"):
             mc = self.cfg.modality_cfg(sensor)
-            W  = mc.window_size                # canonical (target) window size
-            target_sr = mc.sample_rate         # canonical (target) sample rate
+            W = mc.window_size  # canonical (target) window size
+            target_sr = mc.sample_rate  # canonical (target) sample rate
             for cache_key, entry in self._cache[sensor].items():
-                stem    = cache_key[0]
-                src     = entry["path"]
+                stem = cache_key[0]
+                src = entry["path"]
                 source_sr = _source_sample_rate(stem, sensor)
                 # Cache filename embeds target rate so old (pre-resample) caches
                 # don't get mistakenly loaded after this schema change.
-                pt_path = (
-                    cache_dir / f"{stem}_sr{target_sr}.pt"
-                ) if cache_dir else None
+                pt_path = (cache_dir / f"{stem}_sr{target_sr}.pt") if cache_dir else None
 
                 data_dict: dict | None = None
 
                 # Try loading from disk cache
-                if pt_path is not None and pt_path.exists():
-                    if pt_path.stat().st_mtime >= src.stat().st_mtime:
-                        loaded = torch.load(pt_path, weights_only=True)
-                        if isinstance(loaded, torch.Tensor):
-                            loaded = None  # old bare-tensor format — force re-read
-                        data_dict = loaded
+                if (
+                    pt_path is not None
+                    and pt_path.exists()
+                    and pt_path.stat().st_mtime >= src.stat().st_mtime
+                ):
+                    loaded = torch.load(pt_path, weights_only=True)
+                    if isinstance(loaded, torch.Tensor):
+                        loaded = None  # old bare-tensor format — force re-read
+                    data_dict = loaded
 
                 if data_dict is None:
                     arr = _read_parquet_numpy(src, W, source_sr, target_sr)
@@ -445,7 +471,7 @@ class SensorDataset(Dataset):
                         )
                     data_dict = {
                         "amplitude": torch.from_numpy(arr.copy()),
-                        "present":   torch.from_numpy(pres_arr.copy()),
+                        "present": torch.from_numpy(pres_arr.copy()),
                     }
                     if pt_path is not None:
                         tmp = pt_path.with_suffix(".tmp")
@@ -461,7 +487,11 @@ class SensorDataset(Dataset):
     # ------------------------------------------------------------------
 
     def _get_window(
-        self, sensor: str, stem: str, seg_key: Any, w: int,
+        self,
+        sensor: str,
+        stem: str,
+        seg_key: Any,
+        w: int,
     ) -> torch.Tensor:
         """Return a clean (1, W) window. Interventions are applied later on the
         GPU side in the training step — see apply_intervention_batch."""
@@ -487,28 +517,35 @@ class SensorDataset(Dataset):
         gkey, w, vtype, det_label, audio_seg_id, seismic_seg_id = self._index[idx]
         g = self._groups[gkey]
 
-        audio_avail   = g["audio_stem"]   is not None
+        audio_avail = g["audio_stem"] is not None
         seismic_avail = g["seismic_stem"] is not None
 
-        x_audio = (self._get_window("audio", g["audio_stem"], g["seg_key"], w)
-                   if audio_avail else torch.zeros(1, self.cfg.modality_cfg("audio").window_size))
-        x_seismic = (self._get_window("seismic", g["seismic_stem"], g["seg_key"], w)
-                     if seismic_avail else torch.zeros(1, self.cfg.modality_cfg("seismic").window_size))
+        x_audio = (
+            self._get_window("audio", g["audio_stem"], g["seg_key"], w)
+            if audio_avail
+            else torch.zeros(1, self.cfg.modality_cfg("audio").window_size)
+        )
+        x_seismic = (
+            self._get_window("seismic", g["seismic_stem"], g["seg_key"], w)
+            if seismic_avail
+            else torch.zeros(1, self.cfg.modality_cfg("seismic").window_size)
+        )
 
         return {
-            "x_audio":         x_audio,
-            "x_seismic":       x_seismic,
-            "audio_avail":     audio_avail,
-            "seismic_avail":   seismic_avail,
-            "vehicle_type":    vtype,
+            "x_audio": x_audio,
+            "x_seismic": x_seismic,
+            "audio_avail": audio_avail,
+            "seismic_avail": seismic_avail,
+            "vehicle_type": vtype,
             "detection_label": det_label,
-            "segment_id":      audio_seg_id,
+            "segment_id": audio_seg_id,
         }
 
 
 # ---------------------------------------------------------------------------
 # StratifiedPairDataset
 # ---------------------------------------------------------------------------
+
 
 class StratifiedPairDataset(Dataset):
     """Returns anchor + stratified partners for CRL pre-training.
@@ -533,8 +570,8 @@ class StratifiedPairDataset(Dataset):
         self.ds = sensor_dataset
         cfg = sensor_dataset.cfg
 
-        self._n_same  = cfg.n_partners_same_type
-        self._n_diff  = cfg.n_partners_diff_type
+        self._n_same = cfg.n_partners_same_type
+        self._n_diff = cfg.n_partners_diff_type
         self._n_cross = cfg.n_partners_cross_ds
 
         self._build_index()
@@ -555,7 +592,7 @@ class StratifiedPairDataset(Dataset):
         # cross-ds: derived on demand from _ds_idx[other_ds] — no separate storage
 
         gkey_to_sorted: dict[tuple, list[int]] = {}
-        for i, (gkey, w, vtype, det, a_seg, s_seg) in enumerate(index):
+        for i, (gkey, _w, vtype, _det, _a_seg, _s_seg) in enumerate(index):
             gkey_to_sorted.setdefault(gkey, []).append(i)
             ds = gkey[0]
             self._ds_vtype_idx.setdefault((ds, vtype), []).append(i)
@@ -573,7 +610,7 @@ class StratifiedPairDataset(Dataset):
 
     def _sample_partner(self, anchor_idx: int, stratum: int) -> int:
         """Sample one partner index for the given stratum, falling back to consec."""
-        index  = self.ds._index
+        index = self.ds._index
         gkey, _, vtype, _, _, _ = index[anchor_idx]
         ds_name = gkey[0]
         fallback = self._consec_next[anchor_idx]
@@ -587,9 +624,11 @@ class StratifiedPairDataset(Dataset):
             pool = [j for j in candidates if index[j][0] != gkey]
         elif stratum == STRATUM_DIFF_TYPE:
             candidates = self._ds_idx.get(ds_name, [])
-            pool = [j for j in candidates
-                    if index[j][2] != vtype and index[j][2] >= 0
-                    and index[j][0] != gkey]
+            pool = [
+                j
+                for j in candidates
+                if index[j][2] != vtype and index[j][2] >= 0 and index[j][0] != gkey
+            ]
         else:  # STRATUM_CROSS_DS — pick a random other dataset, then sample from it
             other_ds_names = [d for d in self._ds_idx if d != ds_name]
             if other_ds_names:
@@ -604,18 +643,27 @@ class StratifiedPairDataset(Dataset):
         """Fetch a single window item from the underlying SensorDataset."""
         gkey, w, vtype, det, a_seg, s_seg = self.ds._index[idx]
         g = self.ds._groups[gkey]
-        audio_avail   = g["audio_stem"]   is not None
+        audio_avail = g["audio_stem"] is not None
         seismic_avail = g["seismic_stem"] is not None
         mc_a = self.ds.cfg.modality_cfg("audio")
         mc_s = self.ds.cfg.modality_cfg("seismic")
-        x_audio = (self.ds._get_window("audio", g["audio_stem"], g["seg_key"], w)
-                   if audio_avail else torch.zeros(1, mc_a.window_size))
-        x_seismic = (self.ds._get_window("seismic", g["seismic_stem"], g["seg_key"], w)
-                     if seismic_avail else torch.zeros(1, mc_s.window_size))
+        x_audio = (
+            self.ds._get_window("audio", g["audio_stem"], g["seg_key"], w)
+            if audio_avail
+            else torch.zeros(1, mc_a.window_size)
+        )
+        x_seismic = (
+            self.ds._get_window("seismic", g["seismic_stem"], g["seg_key"], w)
+            if seismic_avail
+            else torch.zeros(1, mc_s.window_size)
+        )
         return {
-            "x_audio": x_audio, "x_seismic": x_seismic,
-            "vehicle_type": vtype, "detection_label": det,
-            "audio_avail": audio_avail, "seismic_avail": seismic_avail,
+            "x_audio": x_audio,
+            "x_seismic": x_seismic,
+            "vehicle_type": vtype,
+            "detection_label": det,
+            "audio_avail": audio_avail,
+            "seismic_avail": seismic_avail,
         }
 
     def __len__(self) -> int:
@@ -626,27 +674,27 @@ class StratifiedPairDataset(Dataset):
         anchor = self._fetch(anchor_idx)
 
         item: dict = {
-            "x_audio_t":         anchor["x_audio"],
-            "x_seismic_t":       anchor["x_seismic"],
+            "x_audio_t": anchor["x_audio"],
+            "x_seismic_t": anchor["x_seismic"],
             "detection_label_t": anchor["detection_label"],
-            "vehicle_type_t":    anchor["vehicle_type"],
-            "audio_avail":       anchor["audio_avail"],
-            "seismic_avail":     anchor["seismic_avail"],
+            "vehicle_type_t": anchor["vehicle_type"],
+            "audio_avail": anchor["audio_avail"],
+            "seismic_avail": anchor["seismic_avail"],
         }
 
         strata = (
             [STRATUM_CONSEC]
             + [STRATUM_SAME_TYPE] * self._n_same
             + [STRATUM_DIFF_TYPE] * self._n_diff
-            + [STRATUM_CROSS_DS]  * self._n_cross
+            + [STRATUM_CROSS_DS] * self._n_cross
         )
         for p, stratum in enumerate(strata):
             pidx = self._sample_partner(anchor_idx, stratum)
             pw = self._fetch(pidx)
-            item[f"x_audio_p{p}"]         = pw["x_audio"]
-            item[f"x_seismic_p{p}"]       = pw["x_seismic"]
+            item[f"x_audio_p{p}"] = pw["x_audio"]
+            item[f"x_seismic_p{p}"] = pw["x_seismic"]
             item[f"detection_label_p{p}"] = pw["detection_label"]
-            item[f"vehicle_type_p{p}"]    = pw["vehicle_type"]
+            item[f"vehicle_type_p{p}"] = pw["vehicle_type"]
             item[f"partner_stratum_p{p}"] = stratum
 
         return item
@@ -655,6 +703,7 @@ class StratifiedPairDataset(Dataset):
 # ---------------------------------------------------------------------------
 # Collate functions
 # ---------------------------------------------------------------------------
+
 
 def collate_single(batch: list[dict]) -> dict:
     """Standard collate for SensorDataset."""
@@ -678,6 +727,7 @@ def compute_class_weights(ds: SensorDataset) -> tuple[torch.Tensor, torch.Tensor
         type_weights:    (4,) tensor for CrossEntropyLoss weight (inverse freq, normalised)
     """
     from crl_vehicle.config import CATEGORY_TO_IDX
+
     n_classes = len(CATEGORY_TO_IDX)
 
     n_pos = n_neg = 0

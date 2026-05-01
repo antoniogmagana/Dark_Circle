@@ -1,10 +1,9 @@
 import pytest
 import torch
-from crl_vehicle.models.encoder_decoder import TemporalEncoder, FeatureDecoder
+from crl_vehicle.models.encoder_decoder import FeatureDecoder, TemporalEncoder
 
 
 class TestTemporalEncoder:
-
     @pytest.fixture
     def enc(self):
         return TemporalEncoder(in_channels=64, d_z=24, d_model=64, n_heads=4, n_layers=2)
@@ -31,7 +30,7 @@ class TestTemporalEncoder:
         with torch.no_grad():
             _, _, logvar = enc(torch.ones(2, 64, 64) * 100.0)
         assert (logvar >= -4.0 - 1e-5).all()
-        assert (logvar <=  4.0 + 1e-5).all()
+        assert (logvar <= 4.0 + 1e-5).all()
 
     def test_finite(self, enc):
         enc.eval()
@@ -49,7 +48,6 @@ class TestTemporalEncoder:
 
 
 class TestFeatureDecoder:
-
     def test_output_shape(self):
         dec = FeatureDecoder(out_channels=64, seq_len=64, d_z=24, d_model=64)
         with torch.no_grad():

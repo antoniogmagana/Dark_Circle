@@ -5,6 +5,7 @@ row-normalized 4x4 vehicle-type confusion matrices, side-by-side.
 
 Soft-exits with a clear message if either run lacks an eval_report.
 """
+
 from __future__ import annotations
 import argparse
 import json
@@ -15,8 +16,8 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent          # crl-train/saved_crl/slides-figs/
-SAVED_CRL = ROOT.parent                          # crl-train/saved_crl/
+ROOT = Path(__file__).resolve().parent  # crl-train/saved_crl/slides-figs/
+SAVED_CRL = ROOT.parent  # crl-train/saved_crl/
 
 DEFAULT_MULTI = SAVED_CRL / "id_split" / "multiscale_run1"
 DEFAULT_MORLET = SAVED_CRL / "id_split" / "morlet_per_sensor_phase_run1"
@@ -26,21 +27,23 @@ LABEL_MORLET = "Morlet (per-sensor) frontend"
 
 CLASS_ORDER = ["pedestrian", "light", "medium", "heavy"]
 
-mpl.rcParams.update({
-    "font.family": "sans-serif",
-    "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
-    "axes.labelsize": 16,
-    "axes.titlesize": 16,
-    "xtick.labelsize": 13,
-    "ytick.labelsize": 13,
-    "legend.fontsize": 13,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "savefig.dpi": 300,
-    "savefig.bbox": "tight",
-    "savefig.facecolor": "white",
-    "figure.facecolor": "white",
-})
+mpl.rcParams.update(
+    {
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
+        "axes.labelsize": 16,
+        "axes.titlesize": 16,
+        "xtick.labelsize": 13,
+        "ytick.labelsize": 13,
+        "legend.fontsize": 13,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+        "savefig.facecolor": "white",
+        "figure.facecolor": "white",
+    }
+)
 
 
 def find_report(run_dir: Path) -> Path | None:
@@ -65,7 +68,9 @@ def find_report(run_dir: Path) -> Path | None:
         ckpt_name = meta.get("ckpt_name")
         if probe and ckpt_name:
             ckpt_stem = Path(ckpt_name).stem
-            preferred = run_dir / "eval" / f"{probe}__{ckpt_stem}" / "full" / "eval_report.json"
+            preferred = (
+                run_dir / "eval" / f"{probe}__{ckpt_stem}" / "full" / "eval_report.json"
+            )
             if preferred.is_file():
                 return preferred
 
@@ -94,19 +99,32 @@ def cm_panel(ax, cm: np.ndarray, title: str) -> None:
         for j in range(n):
             value = norm[i, j]
             color = "white" if value < 0.5 else "black"
-            ax.text(j, i, f"{value:.2f}", ha="center", va="center",
-                    color=color, fontsize=12)
+            ax.text(
+                j, i, f"{value:.2f}", ha="center", va="center", color=color, fontsize=12
+            )
     return im
 
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--multi-run", type=Path, default=DEFAULT_MULTI,
-                   help="Run dir for the multiscale model (default: %(default)s)")
-    p.add_argument("--morlet-run", type=Path, default=DEFAULT_MORLET,
-                   help="Run dir for the morlet model (default: %(default)s)")
-    p.add_argument("--out", type=Path, default=ROOT / "fig5_confusion_type.png",
-                   help="Output PNG path")
+    p.add_argument(
+        "--multi-run",
+        type=Path,
+        default=DEFAULT_MULTI,
+        help="Run dir for the multiscale model (default: %(default)s)",
+    )
+    p.add_argument(
+        "--morlet-run",
+        type=Path,
+        default=DEFAULT_MORLET,
+        help="Run dir for the morlet model (default: %(default)s)",
+    )
+    p.add_argument(
+        "--out",
+        type=Path,
+        default=ROOT / "fig5_confusion_type.png",
+        help="Output PNG path",
+    )
     args = p.parse_args()
 
     multi_report = find_report(args.multi_run)
@@ -119,7 +137,9 @@ def main() -> int:
         missing.append(f"  morlet:     {args.morlet_run}")
     if missing:
         print("eval_report.json not found for:", *missing, sep="\n")
-        print("Run `python eval.py --save-dir <run_dir>` first, or wait for the diagnostic pipeline.")
+        print(
+            "Run `python eval.py --save-dir <run_dir>` first, or wait for the diagnostic pipeline."
+        )
         return 0  # soft exit
 
     multi = json.loads(multi_report.read_text())
@@ -129,10 +149,14 @@ def main() -> int:
     morlet_cm = morlet["type"]["confusion_matrix"]
 
     fig, axes = plt.subplots(1, 2, figsize=(13.5, 6.75))
-    cm_panel(axes[0], multi_cm,
-             f"{LABEL_MULTI}  •  macro F1 {multi['type']['macro_f1']:.3f}")
-    im = cm_panel(axes[1], morlet_cm,
-                  f"{LABEL_MORLET}  •  macro F1 {morlet['type']['macro_f1']:.3f}")
+    cm_panel(
+        axes[0], multi_cm, f"{LABEL_MULTI}  •  macro F1 {multi['type']['macro_f1']:.3f}"
+    )
+    im = cm_panel(
+        axes[1],
+        morlet_cm,
+        f"{LABEL_MORLET}  •  macro F1 {morlet['type']['macro_f1']:.3f}",
+    )
     axes[1].set_ylabel("")
     axes[1].tick_params(axis="y", labelleft=False)
 

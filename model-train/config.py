@@ -1,10 +1,10 @@
+import json
 import os
 import random
-import torch
-import json
 from datetime import datetime
-import numpy as np
 
+import numpy as np
+import torch
 
 # ===========================================================
 # Globals
@@ -106,9 +106,7 @@ ADC_SCALE_MAP = {s: 2 ** (b - 1) for s, b in BIT_DEPTH_MAP.items()}
 # Per-channel ADC scales ordered to match channel concatenation in dataset.py
 # audio=1ch, seismic=1ch, accel=3ch — channels stacked in TRAIN_SENSORS order
 _SENSOR_CHANNELS = {"audio": 1, "seismic": 1, "accel": 3}
-CHANNEL_ADC_SCALES = [
-    ADC_SCALE_MAP[s] for s in TRAIN_SENSORS for _ in range(_SENSOR_CHANNELS[s])
-]
+CHANNEL_ADC_SCALES = [ADC_SCALE_MAP[s] for s in TRAIN_SENSORS for _ in range(_SENSOR_CHANNELS[s])]
 
 # Semantic category names (used for category-level classification)
 # if background used, always set to 0: "background"
@@ -411,7 +409,6 @@ def save_config_snapshot():
     for key, value in list(globals().items()):
         # Only grab standard uppercase configuration variables
         if key.isupper() and not key.startswith("_"):
-
             # Handle NumPy arrays which are not JSON-serializable
             if isinstance(value, np.ndarray):
                 config_dict[key] = value.tolist()
@@ -419,9 +416,7 @@ def save_config_snapshot():
             elif isinstance(value, torch.device):
                 config_dict[key] = str(value)
             # Handle standard JSON-serializable types
-            elif isinstance(
-                value, (int, float, str, list, dict, bool, tuple, type(None))
-            ):
+            elif isinstance(value, int | float | str | list | dict | bool | tuple | type(None)):
                 config_dict[key] = value
 
     with open(JSON_LOG_PATH, "w") as f:

@@ -7,26 +7,27 @@ Covers:
     log_scales initialized from init_scales, probe heads dropped.
   - Trainer stage-2 LR groups and warmup-cosine schedule shape.
 """
+
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 import torch
-
 from crl_vehicle.config import CRLConfig
 from crl_vehicle.stage2 import (
-    find_compatible_run, resolve_source_checkpoint, _params_equal,
+    _params_equal,
+    find_compatible_run,
+    resolve_source_checkpoint,
 )
 from training.trainer import CRLModel, Trainer
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _write_fake_run(
     root: Path,
@@ -49,7 +50,7 @@ def _write_fake_run(
     if morlet_per_sensor_params is not None:
         cfg.morlet_per_sensor_params = morlet_per_sensor_params
     meta = {
-        "config":  asdict(cfg),
+        "config": asdict(cfg),
         "sensors": list(sensors),
     }
     (run_dir / "crl" / "meta.json").write_text(json.dumps(meta))
@@ -61,8 +62,8 @@ def _write_fake_run(
 # find_compatible_run
 # ---------------------------------------------------------------------------
 
-class TestFindCompatibleRun:
 
+class TestFindCompatibleRun:
     def _target_cfg(self, **overrides) -> dict:
         cfg = CRLConfig(
             frontend_type="morlet_learnable",
@@ -81,7 +82,9 @@ class TestFindCompatibleRun:
         newest = _write_fake_run(tmp_path, "2026-04-20", "morlet_per_sensor")
 
         # Force mtime order so newest actually has the latest mtime.
-        import os, time
+        import os
+        import time
+
         os.utime(old / "crl" / "meta.json", (time.time() - 300, time.time() - 300))
         os.utime(mid / "crl" / "meta.json", (time.time() - 200, time.time() - 200))
         os.utime(newest / "crl" / "meta.json", (time.time() - 100, time.time() - 100))
@@ -161,7 +164,6 @@ class TestFindCompatibleRun:
 
 
 class TestResolveSourceCheckpoint:
-
     def test_prefers_crl_best(self, tmp_path):
         run = _write_fake_run(tmp_path, "run", "morlet_per_sensor")
         (run / "crl" / "crl_final.pth").write_bytes(b"final")
@@ -208,12 +210,15 @@ class TestParamsEqual:
 # CRLModel.load_from_fixed_morlet_checkpoint
 # ---------------------------------------------------------------------------
 
-class TestStateDictConversion:
 
+class TestStateDictConversion:
     def _stage1_state(self, **overrides):
         """Build a converged stage-1 state_dict for morlet_per_sensor."""
         cfg = CRLConfig(
-            d_model=32, n_layers=1, n_heads=4, d_z=24,
+            d_model=32,
+            n_layers=1,
+            n_heads=4,
+            d_z=24,
             frontend_type="morlet_per_sensor",
         )
         for k, v in overrides.items():
@@ -227,7 +232,10 @@ class TestStateDictConversion:
 
     def _stage2_model(self, **overrides):
         cfg = CRLConfig(
-            d_model=32, n_layers=1, n_heads=4, d_z=24,
+            d_model=32,
+            n_layers=1,
+            n_heads=4,
+            d_z=24,
             frontend_type="morlet_learnable",
         )
         for k, v in overrides.items():
@@ -251,10 +259,7 @@ class TestStateDictConversion:
         _, source = self._stage1_state()
         _, model = self._stage2_model()
         # Grab one encoder weight key to check.
-        enc_key = next(
-            k for k in source.keys()
-            if k.startswith("encoders.audio.") and "weight" in k
-        )
+        enc_key = next(k for k in source if k.startswith("encoders.audio.") and "weight" in k)
         source_weight = source[enc_key].clone()
         model.load_from_fixed_morlet_checkpoint(source, strict=True)
         target_state = model.state_dict()
@@ -264,9 +269,7 @@ class TestStateDictConversion:
         """pres_heads / type_heads / prox_heads must NOT carry over from stage 1."""
         _, source = self._stage1_state()
         # Mark a probe-head weight so we can detect leakage.
-        marker_key = next(
-            k for k in source.keys() if k.startswith("pres_heads.")
-        )
+        marker_key = next(k for k in source if k.startswith("pres_heads."))
         source[marker_key] = torch.full_like(source[marker_key], 9999.0)
 
         _, model = self._stage2_model()
@@ -281,27 +284,31 @@ class TestStateDictConversion:
         """Source's kernel_re/kernel_im buffers must not appear on the
         learnable model (which has no such buffers)."""
         _, source = self._stage1_state()
-        assert any("kernel_re" in k for k in source.keys())  # precondition
+        assert any("kernel_re" in k for k in source)  # precondition
         _, model = self._stage2_model()
         # Should not raise despite source having extra keys.
         model.load_from_fixed_morlet_checkpoint(source, strict=True)
         target_state = dict(model.state_dict())
-        assert not any("kernel_re" in k for k in target_state.keys())
-        assert not any("kernel_im" in k for k in target_state.keys())
+        assert not any("kernel_re" in k for k in target_state)
+        assert not any("kernel_im" in k for k in target_state)
 
 
 # ---------------------------------------------------------------------------
 # Trainer stage-2 LR groups + schedule
 # ---------------------------------------------------------------------------
 
-class TestStage2Trainer:
 
+class TestStage2Trainer:
     def _cfg(self, **overrides):
-        base = dict(
-            d_model=32, n_layers=1, frontend_type="morlet_learnable", d_z=24,
-            lr=1e-3, morlet_learnable_lr_mult=0.1,
-            stage2_encoder_lr_mult=0.3,
-        )
+        base = {
+            "d_model": 32,
+            "n_layers": 1,
+            "frontend_type": "morlet_learnable",
+            "d_z": 24,
+            "lr": 1e-3,
+            "morlet_learnable_lr_mult": 0.1,
+            "stage2_encoder_lr_mult": 0.3,
+        }
         base.update(overrides)
         return CRLConfig(**base)
 
@@ -320,7 +327,7 @@ class TestStage2Trainer:
         # And at epoch 0: backbone is at peak (cosine(0) = 1.0), filter is
         # in warmup at 1/3 peak.
         assert groups["backbone"]["lr"] == 1e-3 * 0.3
-        assert abs(groups["learnable_morlet"]["lr"] - 1e-3 * 0.1 * (1/3)) < 1e-9
+        assert abs(groups["learnable_morlet"]["lr"] - 1e-3 * 0.1 * (1 / 3)) < 1e-9
 
     def test_stage2_false_matches_legacy_behavior(self, tmp_path):
         """When stage2=False, backbone LR is the base LR (unchanged)."""
@@ -337,7 +344,8 @@ class TestStage2Trainer:
         model = CRLModel(cfg)
         trainer = Trainer(model, cfg, torch.device("cpu"), tmp_path, stage2=True)
         filter_idx = next(
-            i for i, g in enumerate(trainer.optimizer.param_groups)
+            i
+            for i, g in enumerate(trainer.optimizer.param_groups)
             if g.get("name") == "learnable_morlet"
         )
         # Snapshot LR before each scheduler.step() call. After step() the
@@ -355,6 +363,5 @@ class TestStage2Trainer:
         # Epoch 3 is the first cosine step (progress=0 → full peak again).
         assert abs(filter_lrs[3] - peak_lr) < 1e-9
         # Epoch 4+ must be strictly less than peak (cosine decreasing).
-        assert filter_lrs[4] < peak_lr, \
-            f"filter LR not annealing post-warmup: {filter_lrs}"
+        assert filter_lrs[4] < peak_lr, f"filter LR not annealing post-warmup: {filter_lrs}"
         assert filter_lrs[5] < filter_lrs[4]

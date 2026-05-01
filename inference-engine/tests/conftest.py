@@ -1,12 +1,13 @@
 """
 Shared pytest fixtures for inference-engine tests.
 """
+
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
+
 import numpy as np
 import pytest
-from unittest.mock import Mock, MagicMock, AsyncMock, patch
-import asyncio
 
 # Mirror the container layout: each node ships flat into /app, so its
 # siblings are imported via top-level names (``from whitelist import ...``,
@@ -21,8 +22,9 @@ for node_dir in SRC_PATH.iterdir():
 
 # Import protobuf definitions
 try:
-    from inference_protos import inference_pb2
     from google.protobuf.timestamp_pb2 import Timestamp as ProtoTimestamp
+    from inference_protos import inference_pb2
+
     PROTOS_AVAILABLE = True
 except ImportError:
     PROTOS_AVAILABLE = False
@@ -33,6 +35,7 @@ except ImportError:
 # ============================================================================
 # Basic Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def sensor_id():
@@ -55,6 +58,7 @@ def window_duration():
 # ============================================================================
 # Sample Data Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def acoustic_sample_data():
@@ -96,6 +100,7 @@ def full_accel_window():
 # Mock Fixtures
 # ============================================================================
 
+
 @pytest.fixture
 def mock_ros2_node():
     """Mock ROS2 node for testing."""
@@ -104,13 +109,13 @@ def mock_ros2_node():
     node.create_subscription = MagicMock(return_value=MagicMock())
     node.create_publisher = MagicMock(return_value=MagicMock())
     node.create_timer = MagicMock(return_value=MagicMock())
-    
+
     # Mock get_topic_names_and_types for Discovery node testing
     node.get_topic_names_and_types.return_value = [
-        ('/sensor_array_01/acoustic', ['ros2_interfaces/msg/RawSensorReading']),
-        ('/sensor_array_01/seismic', ['ros2_interfaces/msg/RawSensorReading']),
+        ("/sensor_array_01/acoustic", ["ros2_interfaces/msg/RawSensorReading"]),
+        ("/sensor_array_01/seismic", ["ros2_interfaces/msg/RawSensorReading"]),
     ]
-    
+
     return node
 
 
@@ -132,7 +137,7 @@ def mock_nats_client():
     client._published_messages = []
 
     async def publish_spy(subject, data):
-        client._published_messages.append({'subject': subject, 'data': data})
+        client._published_messages.append({"subject": subject, "data": data})
 
     client.publish.side_effect = publish_spy
 
@@ -143,7 +148,7 @@ def mock_nats_client():
     js_ctx._published_messages = client._published_messages
 
     async def js_publish_spy(subject, data, **_kwargs):
-        client._published_messages.append({'subject': subject, 'data': data})
+        client._published_messages.append({"subject": subject, "data": data})
 
     js_ctx.publish = AsyncMock(side_effect=js_publish_spy)
     client.jetstream = MagicMock(return_value=js_ctx)
@@ -155,19 +160,22 @@ def mock_nats_client():
 def mock_k8s_client():
     """Mock Kubernetes API client for testing."""
     client = MagicMock()
-    
+
     # Mock deployment operations
     client.create_namespaced_deployment = MagicMock()
     client.delete_namespaced_deployment = MagicMock()
-    
+
     # Mock list_namespaced_deployment with realistic response
     mock_deployment = MagicMock()
-    mock_deployment.metadata.labels = {'sensor-array': 'sensor_array_01', 'app': 'ingestor'}
-    
+    mock_deployment.metadata.labels = {
+        "sensor-array": "sensor_array_01",
+        "app": "ingestor",
+    }
+
     mock_list_response = MagicMock()
     mock_list_response.items = [mock_deployment]
     client.list_namespaced_deployment.return_value = mock_list_response
-    
+
     return client
 
 
@@ -193,6 +201,7 @@ def mock_ros2_inference_result():
 # Protobuf Fixtures
 # ============================================================================
 
+
 @pytest.fixture
 def skip_if_no_protos():
     """Skip test if protobuf definitions are not available."""
@@ -205,26 +214,18 @@ def sample_sensor_data_proto(sensor_id, base_timestamp):
     """Create a sample SensorData protobuf message."""
     if not PROTOS_AVAILABLE:
         pytest.skip("inference_protos not available")
-    
+
     ts = ProtoTimestamp()
     ts.seconds = int(base_timestamp)
     ts.nanos = int((base_timestamp - int(base_timestamp)) * 1e9)
 
-    payload = inference_pb2.SensorData(
-        sensor_id=sensor_id,
-        time_stamp=ts
-    )
-    
+    payload = inference_pb2.SensorData(sensor_id=sensor_id, time_stamp=ts)
+
     # Add sample acoustic data
     acoustic_data = np.random.randn(16000).astype(np.float32)
-    payload.channels.append('acoustic')
-    payload.acoustic_data.CopyFrom(
-        inference_pb2.Tensor(
-            shape=[16000],
-            data=acoustic_data.tolist()
-        )
-    )
-    
+    payload.channels.append("acoustic")
+    payload.acoustic_data.CopyFrom(inference_pb2.Tensor(shape=[16000], data=acoustic_data.tolist()))
+
     return payload
 
 
@@ -232,11 +233,14 @@ def sample_sensor_data_proto(sensor_id, base_timestamp):
 # Helper Functions
 # ============================================================================
 
+
 @pytest.fixture
 def assert_arrays_equal():
     """Helper to assert numpy arrays are equal within tolerance."""
+
     def _assert_equal(arr1, arr2, rtol=1e-5, atol=1e-8):
         np.testing.assert_allclose(arr1, arr2, rtol=rtol, atol=atol)
+
     return _assert_equal
 
 
@@ -245,13 +249,13 @@ def create_timestamp_proto():
     """Factory to create protobuf Timestamp messages."""
     if not PROTOS_AVAILABLE:
         pytest.skip("inference_protos not available")
-    
+
     def _create(unix_time: float):
         ts = ProtoTimestamp()
         ts.seconds = int(unix_time)
         ts.nanos = int((unix_time - int(unix_time)) * 1e9)
         return ts
-    
+
     return _create
 
 
@@ -259,7 +263,8 @@ def create_timestamp_proto():
 # Parametrize Helpers
 # ============================================================================
 
-@pytest.fixture(params=['acoustic', 'seismic', 'accel_x', 'accel_y', 'accel_z'])
+
+@pytest.fixture(params=["acoustic", "seismic", "accel_x", "accel_y", "accel_z"])
 def channel_name(request):
     """Parametrize over all channel names."""
     return request.param

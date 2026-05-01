@@ -2,7 +2,6 @@ import math
 
 import pytest
 import torch
-
 from crl_vehicle.probe.recalibration import (
     UNIFORM_BINARY_PRIOR,
     apply_binary_log_prior_shift,
@@ -66,24 +65,18 @@ class TestBinaryLogPriorShift:
     def test_positive_class_heavier_in_split_biases_toward_positive(self):
         # Raw logit of 0 is the decision boundary. If split is heavily positive,
         # the shifted logit at 0 should become positive (i.e. predict class 1).
-        shifted = apply_binary_log_prior_shift(
-            torch.tensor([0.0]), p_split=0.9, p_train=0.5
-        )
+        shifted = apply_binary_log_prior_shift(torch.tensor([0.0]), p_split=0.9, p_train=0.5)
         assert shifted.item() > 0
 
     def test_negative_class_heavier_in_split_biases_toward_negative(self):
-        shifted = apply_binary_log_prior_shift(
-            torch.tensor([0.0]), p_split=0.1, p_train=0.5
-        )
+        shifted = apply_binary_log_prior_shift(torch.tensor([0.0]), p_split=0.1, p_train=0.5)
         assert shifted.item() < 0
 
 
 class TestMulticlassLogPriorShift:
     def test_uniform_split_uniform_train_zero_shift(self):
         logits = torch.randn(5, 4)
-        shifted = apply_multiclass_log_prior_shift(
-            logits, p_split=uniform_multiclass_prior(4)
-        )
+        shifted = apply_multiclass_log_prior_shift(logits, p_split=uniform_multiclass_prior(4))
         assert torch.allclose(shifted, logits, atol=1e-6)
 
     def test_shift_matches_formula(self):

@@ -1,10 +1,10 @@
-import os
 import io
 import re
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import psycopg2
-from pathlib import Path
 import variables
 
 # ==========================================
@@ -52,9 +52,7 @@ def determine_dataset(sensor_dir):
     Looks inside the sensor directory to determine the origin dataset.
     IoBT contains 'aud16000.csv' (or 'aud160000.csv'). Focal contains 'aud.csv'.
     """
-    if (sensor_dir / "aud16000.csv").exists() or (
-        sensor_dir / "aud160000.csv"
-    ).exists():
+    if (sensor_dir / "aud16000.csv").exists() or (sensor_dir / "aud160000.csv").exists():
         return "iobt"
     elif (sensor_dir / "aud.csv").exists():
         return "focal"
@@ -139,9 +137,7 @@ def get_scene_id(conn, cursor, scene_name):
     if result:
         return result[0]
     else:
-        sql_insert_query = (
-            "INSERT INTO scene_ids (scene) VALUES (%s) RETURNING scene_id"
-        )
+        sql_insert_query = "INSERT INTO scene_ids (scene) VALUES (%s) RETURNING scene_id"
         cursor.execute(sql_insert_query, (scene_name,))
         return cursor.fetchone()[0]
 
@@ -178,9 +174,7 @@ def load_data(
     if not files:
         return
 
-    print(
-        f"Found {len(files)} files for {signal_type} ({file_name}). Starting COPY process..."
-    )
+    print(f"Found {len(files)} files for {signal_type} ({file_name}). Starting COPY process...")
 
     table_offset = {}  # accumulated sample count per table across multiple files
 
@@ -209,9 +203,7 @@ def load_data(
         if not table_name:
             continue
 
-        print(
-            f"Streaming {dataset_name.upper()} {vehicle} sensor {sensor} into {table_name}..."
-        )
+        print(f"Streaming {dataset_name.upper()} {vehicle} sensor {sensor} into {table_name}...")
         samples_processed = table_offset.get(table_name, 0)
 
         for chunk in pd.read_csv(
@@ -223,34 +215,26 @@ def load_data(
             dtype=data_cols,
             chunksize=variables.CHUNK_SIZE,
         ):
-            chunk["time_stamp"] = (
-                np.arange(len(chunk)) + samples_processed
-            ) * sample_period
+            chunk["time_stamp"] = (np.arange(len(chunk)) + samples_processed) * sample_period
 
             # Ensure we only try to insert time_stamp and amplitude into the db
             final_chunk = chunk[["time_stamp", "amplitude"]]
-            copy_to_postgres(
-                conn, cursor, final_chunk, table_name, ("time_stamp", "amplitude")
-            )
+            copy_to_postgres(conn, cursor, final_chunk, table_name, ("time_stamp", "amplitude"))
 
             samples_processed += len(chunk)
 
         table_offset[table_name] = samples_processed
 
 
-def load_tri_axial_data(
-    conn, cursor, path_marker, root_dir, signal_type, file_map, sample_period
-):
-    primary_col = list(file_map.keys())[0]
+def load_tri_axial_data(conn, cursor, path_marker, root_dir, signal_type, file_map, sample_period):
+    primary_col = next(iter(file_map.keys()))
     primary_file = file_map[primary_col]
 
     files = list(root_dir.rglob(primary_file))
     if not files:
         return
 
-    print(
-        f"Found {len(files)} potential tri-axial sets for {signal_type}. Processing..."
-    )
+    print(f"Found {len(files)} potential tri-axial sets for {signal_type}. Processing...")
 
     table_offset = {}  # accumulated sample count per table across multiple files
 
@@ -295,11 +279,9 @@ def load_tri_axial_data(
 
         offset = table_offset.get(table_name, 0)
         combined_df = pd.concat(dfs, axis=1)
-        combined_df["time_stamp"] = (
-            np.arange(len(combined_df)) + offset
-        ) * sample_period
+        combined_df["time_stamp"] = (np.arange(len(combined_df)) + offset) * sample_period
 
-        db_cols = ["time_stamp"] + list(file_map.keys())
+        db_cols = ["time_stamp", *list(file_map.keys())]
         final_df = combined_df[db_cols]
 
         copy_to_postgres(conn, cursor, final_df, table_name, tuple(db_cols))
@@ -334,7 +316,7 @@ def load_m3nvc_dataset(conn, cursor, root_path):
                 meta_df = meta_df.loc[:, ~meta_df.columns.duplicated()]
 
                 def clean_label(val):
-                    if isinstance(val, (list, np.ndarray)):
+                    if isinstance(val, list | np.ndarray):
                         return "+".join(str(v) for v in val)
                     return val
 
@@ -414,9 +396,7 @@ def load_m3nvc_dataset(conn, cursor, root_path):
                 else:
                     if "channel" not in df.columns:
                         df["channel"] = "UD"
-                    final_df = df[
-                        ["scene_id", "run_id", "time_stamp", "channel", "amplitude"]
-                    ]
+                    final_df = df[["scene_id", "run_id", "time_stamp", "channel", "amplitude"]]
 
                 copy_to_postgres(conn, cursor, final_df, table_name, db_cols)
 
@@ -441,12 +421,12 @@ def load_from_parquet(conn, cursor, parquet_dir):
     scene_ids must be pre-populated in the DB before loading m3nvc files.
     """
     schema_map = {
-        ("iobt",  "audio"):   "standard",
-        ("focal", "audio"):   "standard",
-        ("iobt",  "seismic"): "standard",
+        ("iobt", "audio"): "standard",
+        ("focal", "audio"): "standard",
+        ("iobt", "seismic"): "standard",
         ("focal", "seismic"): "standard",
-        ("focal", "accel"):   "triaxial",
-        ("m3nvc", "audio"):   "m3nvc_audio",
+        ("focal", "accel"): "triaxial",
+        ("m3nvc", "audio"): "m3nvc_audio",
         ("m3nvc", "seismic"): "m3nvc_seismic",
     }
 
@@ -473,9 +453,7 @@ def load_from_parquet(conn, cursor, parquet_dir):
         df = pd.read_parquet(p)
         df = df.drop(columns=["unix_timestamp"], errors="ignore")
 
-        created = create_dynamic_table(
-            conn, cursor, dataset, signal, vehicle, sensor, schema_type
-        )
+        created = create_dynamic_table(conn, cursor, dataset, signal, vehicle, sensor, schema_type)
         if not created:
             continue
 
@@ -488,7 +466,6 @@ def load_from_parquet(conn, cursor, parquet_dir):
 # ==========================================
 
 if __name__ == "__main__":
-
     conn, cursor = db_connect()
 
     # 1. Generate Metadata Tables

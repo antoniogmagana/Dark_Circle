@@ -23,15 +23,15 @@ Usage
     python file_parse.py --datasets iobt focal --output-dir ./test_out
 """
 
-import re
 import argparse
-import numpy as np
-import pandas as pd
+import re
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import variables
-from sample_parse import bandpass, label_windows, AUDIO_BAND, BASE_RATES, M3NVC_RATES
-from load_db import sanitize_name, determine_dataset
+from load_db import determine_dataset, sanitize_name
+from sample_parse import AUDIO_BAND, BASE_RATES, M3NVC_RATES, bandpass, label_windows
 
 
 def pad_labels(present_arr: np.ndarray, target_length: int) -> np.ndarray:
@@ -40,9 +40,7 @@ def pad_labels(present_arr: np.ndarray, target_length: int) -> np.ndarray:
         return present_arr[:target_length]
 
     pad_val = present_arr[-1] if len(present_arr) > 0 else False
-    return np.concatenate(
-        [present_arr, np.full(target_length - len(present_arr), pad_val)]
-    )
+    return np.concatenate([present_arr, np.full(target_length - len(present_arr), pad_val)])
 
 
 # ============================================================
@@ -107,9 +105,7 @@ def process_iobt_focal_audio(
 ) -> pd.DataFrame | None:
     """Read audio CSV, apply bandpass + label_windows, return labeled DataFrame."""
     audio_candidates = ["aud16000.csv", "aud160000.csv", "aud.csv"]
-    audio_path = next(
-        (sensor_dir / f for f in audio_candidates if (sensor_dir / f).exists()), None
-    )
+    audio_path = next((sensor_dir / f for f in audio_candidates if (sensor_dir / f).exists()), None)
     if audio_path is None:
         return None
 
@@ -130,9 +126,7 @@ def process_iobt_focal_audio(
     amplitudes = bandpass(raw, *AUDIO_BAND, BASE_RATES["audio"])
 
     window_size = BASE_RATES["audio"]
-    labels = label_windows(
-        amplitudes, BASE_RATES["audio"], "audio", raw_signal=raw
-    )
+    labels = label_windows(amplitudes, BASE_RATES["audio"], "audio", raw_signal=raw)
 
     present = np.repeat(labels, window_size)
     present = pad_labels(present, n)
@@ -227,9 +221,7 @@ def process_iobt_focal_accel(
     if ts_path.exists():
         ts_raw = pd.read_csv(ts_path, header=None).iloc[:n, 0].values.astype("float64")
         unix_timestamp = (
-            ts_raw
-            if len(ts_raw) == n
-            else np.pad(ts_raw, (0, n - len(ts_raw)), mode="edge")
+            ts_raw if len(ts_raw) == n else np.pad(ts_raw, (0, n - len(ts_raw)), mode="edge")
         )
     else:
         start_ts = _get_start_timestamp(sensor_dir, dataset)
@@ -307,7 +299,7 @@ def process_m3nvc_scene(scene_dir: Path, output_dir: str) -> None:
             meta_df = meta_df.loc[:, ~meta_df.columns.duplicated()]
 
             def _clean(val):
-                if isinstance(val, (list, np.ndarray)):
+                if isinstance(val, list | np.ndarray):
                     return "+".join(str(v) for v in val)
                 return val
 
@@ -348,9 +340,7 @@ def process_m3nvc_scene(scene_dir: Path, output_dir: str) -> None:
                 continue
 
         signal_type = "audio" if modality == "mic" else "seismic"
-        sample_period = (
-            variables.ACOUSTIC_PR2 if modality == "mic" else variables.SEISMIC_PR2
-        )
+        sample_period = variables.ACOUSTIC_PR2 if modality == "mic" else variables.SEISMIC_PR2
 
         try:
             df = pd.read_parquet(p_file)
@@ -373,9 +363,7 @@ def process_m3nvc_scene(scene_dir: Path, output_dir: str) -> None:
             if modality == "mic":
                 amp_col = "samples" if "samples" in df.columns else df.columns[-1]
                 amplitudes = df[amp_col].values.astype("float32")
-                amplitudes_filt = bandpass(
-                    amplitudes, *AUDIO_BAND, M3NVC_RATES["audio"]
-                )
+                amplitudes_filt = bandpass(amplitudes, *AUDIO_BAND, M3NVC_RATES["audio"])
                 labels = label_windows(
                     amplitudes_filt,
                     M3NVC_RATES["audio"],
@@ -403,7 +391,7 @@ def process_m3nvc_scene(scene_dir: Path, output_dir: str) -> None:
                     channel_col = df["channel"].values
                     amplitudes = df[amp_col].values.astype("float32")
                 else:
-                    amp_col = [c for c in df.columns if c != ts_col][0]
+                    amp_col = next(c for c in df.columns if c != ts_col)
                     amplitudes = df[amp_col].values.astype("float32")
                     channel_col = np.full(n, "UD")
 
@@ -437,9 +425,7 @@ def process_m3nvc_scene(scene_dir: Path, output_dir: str) -> None:
     # Write accumulated runs
     for (signal_type, vehicle_label, sensor_node), dfs in accum.items():
         combined = pd.concat(dfs, ignore_index=True)
-        write_parquet(
-            combined, "m3nvc", signal_type, vehicle_label, sensor_node, output_dir
-        )
+        write_parquet(combined, "m3nvc", signal_type, vehicle_label, sensor_node, output_dir)
 
 
 def process_m3nvc(root_path: str, output_dir: str) -> None:

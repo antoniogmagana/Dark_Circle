@@ -7,13 +7,12 @@ specific assumptions into the Trainer. If this test crashes on a missing
 `val_recon` or `val_ref_elbo`, we have a leak and Checkpoint 3 will have to
 edit Trainer. If it passes, the interfaces are Checkpoint-3-ready.
 """
+
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
-
 from crl_vehicle.config import CRLConfig
-from crl_vehicle.training_modes import CheckpointState, TrainingMode
+from crl_vehicle.training_modes import TrainingMode
 
 
 class _ContrastiveStub(TrainingMode):
@@ -74,29 +73,35 @@ def _dummy_loader(n_batches: int = 2, B: int = 2):
     cfg = CRLConfig()
     W_a = cfg.modality_cfg("audio").window_size
     W_s = cfg.modality_cfg("seismic").window_size
+
     class _L:
         def __iter__(self):
             for _ in range(n_batches):
                 yield {
-                    "x_audio_t":         torch.randn(B, 1, W_a) * 0.01,
-                    "x_seismic_t":       torch.randn(B, 1, W_s) * 0.01,
-                    "audio_avail":       torch.ones(B, dtype=torch.bool),
-                    "seismic_avail":     torch.ones(B, dtype=torch.bool),
+                    "x_audio_t": torch.randn(B, 1, W_a) * 0.01,
+                    "x_seismic_t": torch.randn(B, 1, W_s) * 0.01,
+                    "audio_avail": torch.ones(B, dtype=torch.bool),
+                    "seismic_avail": torch.ones(B, dtype=torch.bool),
                     "detection_label_t": torch.zeros(B, dtype=torch.long),
-                    "vehicle_type_t":    torch.zeros(B, dtype=torch.long),
-                    "n_partners":        0,
+                    "vehicle_type_t": torch.zeros(B, dtype=torch.long),
+                    "n_partners": 0,
                 }
+
     return _L()
 
 
 def test_trainer_survives_non_vae_mode(tmp_path, monkeypatch):
     """Swap the default mode factory to a contrastive stub and run two epochs."""
-    from crl_vehicle import training_modes as tm
     from training import trainer as trainer_mod
 
     cfg = CRLConfig(
-        d_model=32, n_layers=1, frontend_type="multiscale",
-        fused_seq_len=16, d_z=24, n_epochs=2, early_stop_patience=10,
+        d_model=32,
+        n_layers=1,
+        frontend_type="multiscale",
+        fused_seq_len=16,
+        d_z=24,
+        n_epochs=2,
+        early_stop_patience=10,
     )
 
     # Monkey-patch the factory so Trainer receives the stub.
@@ -121,6 +126,7 @@ def test_trainer_survives_non_vae_mode(tmp_path, monkeypatch):
     assert (tmp_path / "crl_metrics.csv").exists()
     # Summary JSON should contain whatever the stub reported.
     import json
+
     summary = json.loads((tmp_path / "crl_checkpoint_summary.json").read_text())
     # Stub uses the generic base checkpoint_summary() — should have bests & best_epochs.
     assert "bests" in summary

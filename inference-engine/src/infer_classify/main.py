@@ -10,6 +10,7 @@ Loads either ``type_head_fused.ts`` (fused mode) or both
 For per-sensor mode we average the two heads' softmax probabilities before
 argmax — gives a smooth fused decision without re-encoding.
 """
+
 import asyncio
 import json
 import os
@@ -18,9 +19,7 @@ from pathlib import Path
 import nats
 import torch
 import torch.nn.functional as F
-
 from inference_protos import inference_pb2
-
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/model"))
 
@@ -100,9 +99,7 @@ class InferClassifyNode:
                     print("[infer_classify] missing z_fused; skipping", flush=True)
                     return
                 z = _z_to_tensor(detection.z_fused, self.z_dim)
-                probs = await loop.run_in_executor(
-                    None, self._infer_fused, z
-                )
+                probs = await loop.run_in_executor(None, self._infer_fused, z)
             else:
                 if not detection.z_audio or not detection.z_seismic:
                     print(
@@ -112,9 +109,7 @@ class InferClassifyNode:
                     return
                 z_audio = _z_to_tensor(detection.z_audio, self.z_dim)
                 z_seismic = _z_to_tensor(detection.z_seismic, self.z_dim)
-                probs = await loop.run_in_executor(
-                    None, self._infer_per_sensor, z_audio, z_seismic
-                )
+                probs = await loop.run_in_executor(None, self._infer_per_sensor, z_audio, z_seismic)
         except ValueError as exc:
             print(f"[infer_classify] z shape error: {exc}", flush=True)
             return
@@ -136,7 +131,7 @@ class InferClassifyNode:
 
 async def main_async():
     if "NATS_URL" not in os.environ:
-        raise EnvironmentError("Required environment variable 'NATS_URL' is not set")
+        raise OSError("Required environment variable 'NATS_URL' is not set")
 
     heads, meta, device = _load_artifacts(MODEL_DIR)
 

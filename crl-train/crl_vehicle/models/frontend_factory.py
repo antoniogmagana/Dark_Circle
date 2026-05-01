@@ -12,6 +12,7 @@ The bank position in each per-sensor `nn.Sequential` is pinned at index 0 so
 checkpoint loading (which keys on `frontends.{sensor}.0.kernel_re`) keep
 working unchanged.
 """
+
 from __future__ import annotations
 
 import math
@@ -31,12 +32,12 @@ def build_frontend(
     config: CRLConfig,
     sensors: list[str],
 ) -> tuple[
-    nn.ModuleDict,           # frontends (per-sensor Sequential, bank at index 0)
-    nn.Module | None,        # shared encoder (early fusion) or None
-    nn.Module | None,        # shared decoder (early fusion) or None
-    nn.ModuleDict,           # per-sensor encoders (late fusion) or empty
-    nn.ModuleDict,           # per-sensor decoders (late fusion) or empty
-    dict[str, dict],         # _morlet_derived_params audit trail
+    nn.ModuleDict,  # frontends (per-sensor Sequential, bank at index 0)
+    nn.Module | None,  # shared encoder (early fusion) or None
+    nn.Module | None,  # shared decoder (early fusion) or None
+    nn.ModuleDict,  # per-sensor encoders (late fusion) or empty
+    nn.ModuleDict,  # per-sensor decoders (late fusion) or empty
+    dict[str, dict],  # _morlet_derived_params audit trail
 ]:
     bank = config.frontend_bank
     fusion = config.frontend_fusion
@@ -48,8 +49,7 @@ def build_frontend(
         raise ValueError(f"frontend_fusion must be 'late' or 'early', got {fusion!r}")
     if bank not in ("multiscale", "morlet", "morlet_learnable"):
         raise ValueError(
-            f"frontend_bank must be 'multiscale', 'morlet', or 'morlet_learnable', "
-            f"got {bank!r}"
+            f"frontend_bank must be 'multiscale', 'morlet', or 'morlet_learnable', " f"got {bank!r}"
         )
 
     frontends: nn.ModuleDict = nn.ModuleDict()
@@ -72,18 +72,26 @@ def build_frontend(
         target_tokens = int(sp["target_tokens"])
 
         if bank == "multiscale":
-            stack, n_out = _build_multiscale_bank(
-                sp, mc, config.d_model, target_tokens
-            )
+            stack, n_out = _build_multiscale_bank(sp, mc, config.d_model, target_tokens)
             # Multiscale leaves derived empty (matches legacy contract).
         elif bank == "morlet":
             stack, n_out, derived[sensor] = _build_morlet_bank(
-                sp, mc, config.d_model, use_phase, target_tokens, fusion,
+                sp,
+                mc,
+                config.d_model,
+                use_phase,
+                target_tokens,
+                fusion,
             )
         else:  # morlet_learnable
             stack, n_out, derived[sensor] = _build_morlet_learnable_bank(
-                sp, mc, config.d_model, use_phase, learnable_w0,
-                target_tokens, fusion,
+                sp,
+                mc,
+                config.d_model,
+                use_phase,
+                learnable_w0,
+                target_tokens,
+                fusion,
             )
 
         frontends[sensor] = stack
@@ -98,10 +106,7 @@ def build_frontend(
                 n_heads=config.n_heads,
                 n_layers=config.n_layers,
             )
-            seq_len = (
-                target_tokens if bank == "multiscale"
-                else derived[sensor]["post_pool_tokens"]
-            )
+            seq_len = target_tokens if bank == "multiscale" else derived[sensor]["post_pool_tokens"]
             decoders[sensor] = FeatureDecoder(
                 out_channels=n_out,
                 seq_len=max(1, seq_len),
@@ -177,7 +182,11 @@ def _build_morlet_bank(
     receptive_cycles = float(sp.get("receptive_cycles", 3.0))
 
     pool_stride, kernel_size = _derive_morlet_kernel_and_stride(
-        mc, freq_min, w0, target_tokens, receptive_cycles,
+        mc,
+        freq_min,
+        w0,
+        target_tokens,
+        receptive_cycles,
     )
     bank = MorletFilterbank(
         in_channels=mc.n_channels,
@@ -190,7 +199,12 @@ def _build_morlet_bank(
         use_phase=use_phase,
     )
     stack, derived = _wrap_morlet_bank_with_pooling(
-        bank, pool_stride, target_tokens, fusion, mc, kernel_size,
+        bank,
+        pool_stride,
+        target_tokens,
+        fusion,
+        mc,
+        kernel_size,
         receptive_cycles,
     )
     return stack, bank.total_out_channels, derived
@@ -212,7 +226,11 @@ def _build_morlet_learnable_bank(
     receptive_cycles = float(sp.get("receptive_cycles", 3.0))
 
     pool_stride, kernel_size = _derive_morlet_kernel_and_stride(
-        mc, freq_min, w0, target_tokens, receptive_cycles,
+        mc,
+        freq_min,
+        w0,
+        target_tokens,
+        receptive_cycles,
     )
     bank = LearnableMorletFilterbank(
         in_channels=mc.n_channels,
@@ -226,7 +244,12 @@ def _build_morlet_learnable_bank(
         learnable_w0=learnable_w0,
     )
     stack, derived = _wrap_morlet_bank_with_pooling(
-        bank, pool_stride, target_tokens, fusion, mc, kernel_size,
+        bank,
+        pool_stride,
+        target_tokens,
+        fusion,
+        mc,
+        kernel_size,
         receptive_cycles,
     )
     derived["learnable"] = True
@@ -259,12 +282,12 @@ def _wrap_morlet_bank_with_pooling(
     layers: list[nn.Module] = [bank, nn.AvgPool1d(pool_stride, pool_stride)]
     post_pool_tokens = mc.window_size // pool_stride
     derived = {
-        "pool_stride":      pool_stride,
-        "kernel_size":      kernel_size,
-        "target_tokens":    target_tokens,
+        "pool_stride": pool_stride,
+        "kernel_size": kernel_size,
+        "target_tokens": target_tokens,
         "receptive_cycles": receptive_cycles,
         "post_pool_tokens": post_pool_tokens,
-        "post_pool_rate":   round(mc.sample_rate / pool_stride, 3),
+        "post_pool_rate": round(mc.sample_rate / pool_stride, 3),
     }
     if fusion == "early":
         layers.append(nn.AdaptiveAvgPool1d(target_tokens))

@@ -9,11 +9,11 @@ directly. The ROS2 / Kubernetes plumbing in ``discovery.main`` is exercised
 through inline simulation, since rclpy / kubernetes are not importable in
 this test environment.
 """
+
 import json
 import textwrap
 
 import pytest
-
 from whitelist import (
     ArraySpec,
     InvalidConfigError,
@@ -26,22 +26,24 @@ from whitelist import (
     required_topics,
 )
 
-
 # ---------------------------------------------------------------------------
 # Config loading
 # ---------------------------------------------------------------------------
+
 
 class TestLoadConfig:
     """``load_config`` parses the YAML ConfigMap into ArraySpec objects."""
 
     @pytest.mark.unit
     def test_audio_seismic_only(self):
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               shake-001:
                 audio: /shake_001/aud
                 seismic: /shake_001/ehz
-        """)
+        """
+        )
 
         specs = load_config(yaml_text)
 
@@ -53,7 +55,8 @@ class TestLoadConfig:
 
     @pytest.mark.unit
     def test_audio_seismic_with_accel(self):
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               shake-001:
                 audio: /shake_001/aud
@@ -62,7 +65,8 @@ class TestLoadConfig:
                   x: /shake_001/ene
                   y: /shake_001/enn
                   z: /shake_001/enz
-        """)
+        """
+        )
 
         spec = load_config(yaml_text)["shake-001"]
 
@@ -74,7 +78,8 @@ class TestLoadConfig:
 
     @pytest.mark.unit
     def test_multiple_arrays(self):
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               shake-001:
                 audio: /shake_001/aud
@@ -82,7 +87,8 @@ class TestLoadConfig:
               shake-002:
                 audio: /shake_002/aud
                 seismic: /shake_002/ehz
-        """)
+        """
+        )
 
         specs = load_config(yaml_text)
 
@@ -90,22 +96,26 @@ class TestLoadConfig:
 
     @pytest.mark.unit
     def test_missing_audio_is_invalid(self):
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               shake-001:
                 seismic: /shake_001/ehz
-        """)
+        """
+        )
 
         with pytest.raises(InvalidConfigError):
             load_config(yaml_text)
 
     @pytest.mark.unit
     def test_missing_seismic_is_invalid(self):
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               shake-001:
                 audio: /shake_001/aud
-        """)
+        """
+        )
 
         with pytest.raises(InvalidConfigError):
             load_config(yaml_text)
@@ -113,7 +123,8 @@ class TestLoadConfig:
     @pytest.mark.unit
     def test_partial_accel_is_invalid(self):
         """Accel block must have all three of x/y/z or be absent entirely."""
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               shake-001:
                 audio: /shake_001/aud
@@ -121,7 +132,8 @@ class TestLoadConfig:
                 accel:
                   x: /shake_001/ene
                   y: /shake_001/enn
-        """)
+        """
+        )
 
         with pytest.raises(PartialAccelError):
             load_config(yaml_text)
@@ -144,52 +156,61 @@ class TestLoadConfig:
     @pytest.mark.unit
     def test_array_id_with_underscore_rejected(self):
         """Array IDs become k8s Deployment names which must be RFC 1123."""
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               shake_001:
                 audio: /shake_001/aud
                 seismic: /shake_001/ehz
-        """)
+        """
+        )
         with pytest.raises(InvalidConfigError, match="RFC 1123"):
             load_config(yaml_text)
 
     @pytest.mark.unit
     def test_array_id_starting_with_digit_rejected(self):
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               1shake:
                 audio: /1shake/aud
                 seismic: /1shake/ehz
-        """)
+        """
+        )
         with pytest.raises(InvalidConfigError, match="RFC 1123"):
             load_config(yaml_text)
 
     @pytest.mark.unit
     def test_array_id_uppercase_rejected(self):
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               Shake-001:
                 audio: /Shake-001/aud
                 seismic: /Shake-001/ehz
-        """)
+        """
+        )
         with pytest.raises(InvalidConfigError, match="RFC 1123"):
             load_config(yaml_text)
 
     @pytest.mark.unit
     def test_array_id_trailing_hyphen_rejected(self):
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               shake-:
                 audio: /shake/aud
                 seismic: /shake/ehz
-        """)
+        """
+        )
         with pytest.raises(InvalidConfigError, match="RFC 1123"):
             load_config(yaml_text)
 
     @pytest.mark.unit
     def test_valid_array_ids(self):
         """Hyphen-separated lowercase IDs starting with a letter are fine."""
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               shake-001:
                 audio: /shake_001/aud
@@ -200,19 +221,22 @@ class TestLoadConfig:
               site-a-rs1d-7:
                 audio: /a/aud
                 seismic: /a/ehz
-        """)
+        """
+        )
         specs = load_config(yaml_text)
         assert set(specs) == {"shake-001", "s", "site-a-rs1d-7"}
 
     @pytest.mark.unit
     def test_topic_paths_may_contain_underscores(self):
         """Topic strings (values, not keys) keep underscores from the firmware."""
-        yaml_text = textwrap.dedent("""
+        yaml_text = textwrap.dedent(
+            """
             arrays:
               shake-001:
                 audio: /shake_001/aud
                 seismic: /shake_001/ehz
-        """)
+        """
+        )
         spec = load_config(yaml_text)["shake-001"]
         assert spec.audio == "/shake_001/aud"
         assert spec.seismic == "/shake_001/ehz"
@@ -220,12 +244,14 @@ class TestLoadConfig:
     @pytest.mark.unit
     def test_array_id_too_long_rejected(self):
         long_id = "a" * 60
-        yaml_text = textwrap.dedent(f"""
+        yaml_text = textwrap.dedent(
+            f"""
             arrays:
               {long_id}:
                 audio: /x/aud
                 seismic: /x/ehz
-        """)
+        """
+        )
         with pytest.raises(InvalidConfigError, match="max is"):
             load_config(yaml_text)
 
@@ -233,6 +259,7 @@ class TestLoadConfig:
 # ---------------------------------------------------------------------------
 # Required-topics / completeness
 # ---------------------------------------------------------------------------
+
 
 class TestRequiredTopics:
     """``required_topics`` lists every topic an array must have to spawn."""
@@ -250,7 +277,11 @@ class TestRequiredTopics:
             accel={"x": "/a/ene", "y": "/a/enn", "z": "/a/enz"},
         )
         assert required_topics(spec) == {
-            "/a/aud", "/a/ehz", "/a/ene", "/a/enn", "/a/enz"
+            "/a/aud",
+            "/a/ehz",
+            "/a/ene",
+            "/a/enn",
+            "/a/enz",
         }
 
 
@@ -308,9 +339,7 @@ class TestMissingTopics:
             accel={"x": "/a/ene", "y": "/a/enn", "z": "/a/enz"},
         )
         visible = {"/a/aud", "/a/ene"}
-        assert missing_topics(spec, visible) == {
-            "/a/ehz", "/a/enn", "/a/enz"
-        }
+        assert missing_topics(spec, visible) == {"/a/ehz", "/a/enn", "/a/enz"}
 
     @pytest.mark.unit
     def test_empty_when_complete(self):
@@ -321,6 +350,7 @@ class TestMissingTopics:
 # ---------------------------------------------------------------------------
 # Role-map injection (passed to Ingestor as JSON env)
 # ---------------------------------------------------------------------------
+
 
 class TestBuildRoleMap:
     """``build_role_map`` produces the JSON-serializable dict the Ingestor expects."""
@@ -363,6 +393,7 @@ class TestBuildRoleMap:
 # ---------------------------------------------------------------------------
 # Poll-state machine (decides spawn / wait / teardown each cycle)
 # ---------------------------------------------------------------------------
+
 
 class TestPollStateBasic:
     """``PollState`` implements the spawn/teardown decision logic."""
@@ -578,9 +609,7 @@ class TestPollStateLogThrottle:
             visible={"/a/aud", "/a/enn", "/a/enz"},
             active=set(),
         )
-        assert first.log_awaiting == {
-            "shake-001": frozenset({"/a/ehz", "/a/ene"})
-        }
+        assert first.log_awaiting == {"shake-001": frozenset({"/a/ehz", "/a/ene"})}
 
         # Second poll: only ehz still missing — set changed, log again.
         second = state.evaluate(
@@ -597,9 +626,7 @@ class TestPollStateLogThrottle:
         config = {"shake-001": spec}
 
         state.evaluate(config=config, visible={"/a/aud"}, active=set())
-        complete = state.evaluate(
-            config=config, visible={"/a/aud", "/a/ehz"}, active=set()
-        )
+        complete = state.evaluate(config=config, visible={"/a/aud", "/a/ehz"}, active=set())
         # Spawning is a state change too — but we only assert the missing-log
         # entry has cleared.
         assert "shake-001" not in complete.log_awaiting
@@ -608,6 +635,7 @@ class TestPollStateLogThrottle:
 # ---------------------------------------------------------------------------
 # Kubernetes orchestration (manifest construction)
 # ---------------------------------------------------------------------------
+
 
 class TestManifestConstruction:
     """The Discovery node fills the ingestor template with role-map JSON."""
@@ -619,7 +647,8 @@ class TestManifestConstruction:
         rendered Deployment carries the right name, labels, and env vars."""
         from whitelist import ArraySpec, build_ingestor_manifest
 
-        template = textwrap.dedent("""
+        template = textwrap.dedent(
+            """
             apiVersion: apps/v1
             kind: Deployment
             metadata:
@@ -647,7 +676,8 @@ class TestManifestConstruction:
                           value: "placeholder"
                         - name: SENSOR_ROLE_MAP
                           value: "{}"
-        """).strip()
+        """
+        ).strip()
 
         spec = ArraySpec(audio="/shake_001/aud", seismic="/shake_001/ehz")
         body = build_ingestor_manifest(template, "shake-001", spec)
@@ -658,10 +688,7 @@ class TestManifestConstruction:
         assert body["metadata"]["name"] == "ingestor-shake-001"
         assert body["metadata"]["labels"]["sensor-array"] == "shake-001"
         assert body["spec"]["selector"]["matchLabels"]["sensor-array"] == "shake-001"
-        assert (
-            body["spec"]["template"]["metadata"]["labels"]["sensor-array"]
-            == "shake-001"
-        )
+        assert body["spec"]["template"]["metadata"]["labels"]["sensor-array"] == "shake-001"
         env = body["spec"]["template"]["spec"]["containers"][0]["env"]
         env_dict = {e["name"]: e["value"] for e in env}
         assert env_dict["SENSOR_ARRAY"] == "shake-001"
@@ -677,7 +704,8 @@ class TestManifestConstruction:
         round-trip when we mutate the dict instead of string-replacing."""
         from whitelist import ArraySpec, build_ingestor_manifest
 
-        template = textwrap.dedent("""
+        template = textwrap.dedent(
+            """
             apiVersion: apps/v1
             kind: Deployment
             metadata:
@@ -704,7 +732,8 @@ class TestManifestConstruction:
                           value: "placeholder"
                         - name: SENSOR_ROLE_MAP
                           value: "{}"
-        """).strip()
+        """
+        ).strip()
 
         spec = ArraySpec(
             audio='/shake_001/audio "primary"',
@@ -713,9 +742,7 @@ class TestManifestConstruction:
         body = build_ingestor_manifest(template, "shake-001", spec)
         env = body["spec"]["template"]["spec"]["containers"][0]["env"]
         env_dict = {e["name"]: e["value"] for e in env}
-        assert json.loads(env_dict["SENSOR_ROLE_MAP"])["acoustic"] == (
-            '/shake_001/audio "primary"'
-        )
+        assert json.loads(env_dict["SENSOR_ROLE_MAP"])["acoustic"] == ('/shake_001/audio "primary"')
 
     @pytest.mark.integration
     @pytest.mark.k8s
@@ -734,6 +761,7 @@ class TestManifestConstruction:
 # ---------------------------------------------------------------------------
 # End-to-end poll cycle simulation
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 def test_full_poll_cycle_spawns_then_teardowns_on_topic_loss():
@@ -754,9 +782,7 @@ def test_full_poll_cycle_spawns_then_teardowns_on_topic_loss():
 
     # Polls 3-4: topics still present, idempotent.
     for _ in range(2):
-        d = state.evaluate(
-            config=config, visible={"/a/aud", "/a/ehz"}, active=active
-        )
+        d = state.evaluate(config=config, visible={"/a/aud", "/a/ehz"}, active=active)
         assert d.to_spawn == set()
         assert d.to_teardown == set()
 

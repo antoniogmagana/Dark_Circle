@@ -11,40 +11,42 @@ Coverage:
   6. Checkpoint selection: dual ckpt by val_ref_elbo + val_aux_type_f1.
   7. update_beta returns adaptive-beta tuple shape.
 """
+
 from __future__ import annotations
 
-import torch
 import pytest
-
+import torch
 from crl_vehicle.config import CRLConfig
 from crl_vehicle.data.dataset import (
-    STRATUM_CONSEC, STRATUM_CROSS_DS, STRATUM_DIFF_TYPE, STRATUM_SAME_TYPE,
+    STRATUM_CONSEC,
+    STRATUM_SAME_TYPE,
 )
 from crl_vehicle.training_modes import (
-    CheckpointState, DisentangledVAETrainingMode, build_training_mode,
+    CheckpointState,
+    DisentangledVAETrainingMode,
+    build_training_mode,
 )
 from training.trainer import CRLModel
 
 
-def _pair_batch(B=4, n_partners=2, audio_W=16000, seismic_W=200,
-                strata=None):
+def _pair_batch(B=4, n_partners=2, audio_W=16000, seismic_W=100, strata=None):
     """Synthetic pair batch matching StratifiedPairDataset output schema."""
     if strata is None:
         strata = [STRATUM_CONSEC, STRATUM_SAME_TYPE]
     batch = {
-        "x_audio_t":         torch.randn(B, 1, audio_W) * 0.01,
-        "x_seismic_t":       torch.randn(B, 1, seismic_W) * 0.01,
-        "audio_avail":       torch.ones(B, dtype=torch.bool),
-        "seismic_avail":     torch.ones(B, dtype=torch.bool),
+        "x_audio_t": torch.randn(B, 1, audio_W) * 0.01,
+        "x_seismic_t": torch.randn(B, 1, seismic_W) * 0.01,
+        "audio_avail": torch.ones(B, dtype=torch.bool),
+        "seismic_avail": torch.ones(B, dtype=torch.bool),
         "detection_label_t": torch.randint(0, 2, (B,)),
-        "vehicle_type_t":    torch.randint(0, 4, (B,)),
-        "n_partners":        n_partners,
+        "vehicle_type_t": torch.randint(0, 4, (B,)),
+        "n_partners": n_partners,
     }
     for p in range(n_partners):
-        batch[f"x_audio_p{p}"]         = torch.randn(B, 1, audio_W) * 0.01
-        batch[f"x_seismic_p{p}"]       = torch.randn(B, 1, seismic_W) * 0.01
+        batch[f"x_audio_p{p}"] = torch.randn(B, 1, audio_W) * 0.01
+        batch[f"x_seismic_p{p}"] = torch.randn(B, 1, seismic_W) * 0.01
         batch[f"detection_label_p{p}"] = torch.randint(0, 2, (B,))
-        batch[f"vehicle_type_p{p}"]    = torch.randint(0, 4, (B,))
+        batch[f"vehicle_type_p{p}"] = torch.randint(0, 4, (B,))
         batch[f"partner_stratum_p{p}"] = torch.full((B,), strata[p % len(strata)])
     return batch
 
@@ -52,26 +54,41 @@ def _pair_batch(B=4, n_partners=2, audio_W=16000, seismic_W=200,
 @pytest.fixture
 def cfg_ms():
     return CRLConfig(
-        d_model=32, n_layers=1, n_heads=4,
-        frontend_type="multiscale", fused_seq_len=16, d_z=24,
-        training_mode="disentangled", d_signal=12,
-        lambda_align=1.0, lambda_stab=0.1, lambda_interv_inv=1.0,
+        d_model=32,
+        n_layers=1,
+        n_heads=4,
+        frontend_type="multiscale",
+        fused_seq_len=16,
+        d_z=24,
+        training_mode="disentangled",
+        d_signal=12,
+        lambda_align=1.0,
+        lambda_stab=0.1,
+        lambda_interv_inv=1.0,
     )
 
 
 @pytest.fixture
 def cfg_per_sensor():
     return CRLConfig(
-        d_model=32, n_layers=1, n_heads=4,
-        frontend_type="morlet_per_sensor", fused_seq_len=16, d_z=24,
-        training_mode="disentangled", d_signal=12,
-        lambda_align=1.0, lambda_stab=0.1, lambda_interv_inv=1.0,
+        d_model=32,
+        n_layers=1,
+        n_heads=4,
+        frontend_type="morlet_per_sensor",
+        fused_seq_len=16,
+        d_z=24,
+        training_mode="disentangled",
+        d_signal=12,
+        lambda_align=1.0,
+        lambda_stab=0.1,
+        lambda_interv_inv=1.0,
     )
 
 
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
+
 
 def test_factory_dispatches_to_disentangled(cfg_ms):
     mode = build_training_mode(cfg_ms)
@@ -99,6 +116,7 @@ def test_pres_and_type_heads_sized_to_d_signal(cfg_ms):
 # ---------------------------------------------------------------------------
 # forward_pair — fused (multiscale)
 # ---------------------------------------------------------------------------
+
 
 def test_forward_pair_fused_returns_finite_loss(cfg_ms):
     mode = build_training_mode(cfg_ms)
@@ -135,6 +153,7 @@ def test_forward_pair_fused_grad_flows_to_backbone_and_heads(cfg_ms):
 # forward_pair — per-sensor (morlet_per_sensor)
 # ---------------------------------------------------------------------------
 
+
 def test_forward_pair_per_sensor_returns_finite_loss(cfg_per_sensor):
     mode = build_training_mode(cfg_per_sensor)
     model = CRLModel(config=cfg_per_sensor)
@@ -169,6 +188,7 @@ def test_forward_pair_per_sensor_grad_flows(cfg_per_sensor):
 # ---------------------------------------------------------------------------
 # Checkpoint selection
 # ---------------------------------------------------------------------------
+
 
 def test_should_save_checkpoint_dual_metric():
     cfg = CRLConfig(training_mode="disentangled", d_z=24, d_signal=12)
@@ -212,29 +232,32 @@ def test_early_stop_metric():
 # update_beta — adaptive schedule on full-z KL
 # ---------------------------------------------------------------------------
 
+
 def test_update_beta_increases_when_kl_above_target():
-    cfg = CRLConfig(training_mode="disentangled",
-                    beta_step=0.02, kl_floor=0.01, kl_target=0.5)
+    cfg = CRLConfig(training_mode="disentangled", beta_step=0.02, kl_floor=0.01, kl_target=0.5)
     mode = build_training_mode(cfg)
     state = CheckpointState()
     state.prev_val_recon = 10.0
     new_beta, event = mode.update_beta(
-        beta=0.0, val_m={"val_raw_kl": 1.0, "val_recon": 5.0},
-        state=state, config=cfg,
+        beta=0.0,
+        val_m={"val_raw_kl": 1.0, "val_recon": 5.0},
+        state=state,
+        config=cfg,
     )
     assert new_beta == pytest.approx(0.02)
     assert event == "↑"
 
 
 def test_update_beta_collapses_when_kl_below_floor():
-    cfg = CRLConfig(training_mode="disentangled",
-                    beta_step=0.02, kl_floor=0.01, kl_target=0.5)
+    cfg = CRLConfig(training_mode="disentangled", beta_step=0.02, kl_floor=0.01, kl_target=0.5)
     mode = build_training_mode(cfg)
     state = CheckpointState()
     state.prev_val_recon = 10.0
     new_beta, event = mode.update_beta(
-        beta=0.5, val_m={"val_raw_kl": 0.005, "val_recon": 5.0},
-        state=state, config=cfg,
+        beta=0.5,
+        val_m={"val_raw_kl": 0.005, "val_recon": 5.0},
+        state=state,
+        config=cfg,
     )
     assert new_beta == pytest.approx(0.48)
     assert event == "↓collapse"
@@ -243,6 +266,7 @@ def test_update_beta_collapses_when_kl_below_floor():
 # ---------------------------------------------------------------------------
 # val_metrics_summary derives ref_elbo
 # ---------------------------------------------------------------------------
+
 
 def test_val_metrics_summary_computes_ref_elbo():
     cfg = CRLConfig(training_mode="disentangled")

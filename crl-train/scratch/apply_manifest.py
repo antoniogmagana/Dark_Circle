@@ -26,14 +26,22 @@ SPLITS = ("train", "val", "test")
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--parsed-dir", required=True, type=Path,
-                    help="Path to data_files/parsed/ containing train/val/test/")
-    ap.add_argument("--manifest", required=True, type=Path,
-                    help="Path to manifest.csv")
-    ap.add_argument("--cache-dir", type=Path, default=None,
-                    help="Optional: saved_crl/cache/ to clear after moves")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="Print actions without executing")
+    ap.add_argument(
+        "--parsed-dir",
+        required=True,
+        type=Path,
+        help="Path to data_files/parsed/ containing train/val/test/",
+    )
+    ap.add_argument("--manifest", required=True, type=Path, help="Path to manifest.csv")
+    ap.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=None,
+        help="Optional: saved_crl/cache/ to clear after moves",
+    )
+    ap.add_argument(
+        "--dry-run", action="store_true", help="Print actions without executing"
+    )
     args = ap.parse_args()
 
     parsed = args.parsed_dir.resolve()
@@ -73,8 +81,10 @@ def main() -> int:
         moves += 1
 
     if missing:
-        print(f"\nWARNING: {len(missing)} file(s) in manifest not found on disk:",
-              file=sys.stderr)
+        print(
+            f"\nWARNING: {len(missing)} file(s) in manifest not found on disk:",
+            file=sys.stderr,
+        )
         for f in missing[:10]:
             print(f"  {f}", file=sys.stderr)
         if len(missing) > 10:
@@ -106,8 +116,10 @@ def main() -> int:
                     item.unlink()
                 print(f"  {action}")
 
-    print(f"\nSummary: {moves} moves, {deletes} deletes"
-          + (" (DRY RUN — no changes applied)" if args.dry_run else ""))
+    print(
+        f"\nSummary: {moves} moves, {deletes} deletes"
+        + (" (DRY RUN — no changes applied)" if args.dry_run else "")
+    )
 
     # 5. Post-state report.
     if not args.dry_run:

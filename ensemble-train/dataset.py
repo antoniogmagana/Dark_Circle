@@ -1,18 +1,17 @@
-import os
+import atexit
 import hashlib
 import json
-import random
 import math
+import os
+import random
+
 import torch
 import torchaudio.transforms
-from torch.utils.data import Dataset
-from sklearn.model_selection import train_test_split
-import atexit
-from torch.utils.data import get_worker_info
+from data_generator import generate_no_vehicle_sample
 
 # Centralized imports
-from db_utils import db_connect, db_close, fetch_table_segment, get_time_bounds
-from data_generator import generate_no_vehicle_sample
+from db_utils import db_close, db_connect, fetch_table_segment, get_time_bounds
+from torch.utils.data import Dataset, get_worker_info
 
 
 def db_worker_init(worker_id, config=None):
@@ -59,33 +58,32 @@ class VehicleDataset(Dataset):
     def __getitem__(self, idx):
         # Unpack the fully-defined sample tuple
         dataset, instance, sensor_node, run_id, time, label_str = self.samples[idx]
-        
+
         # --- RESOLVE STRING TO INTEGER ---
         if self.config.TRAINING_MODE == "detection":
             label_int = 0 if label_str == "background" else 1
-            
+
         elif self.config.TRAINING_MODE == "category":
             label_int = self.reverse_class_map.get(label_str, 0)
-            
+
         elif self.config.TRAINING_MODE == "instance":
             vehicle_type = self.config.DATASET_VEHICLE_MAP[dataset][instance][1]
             label_int = self.config.INSTANCE_TO_CLASS[vehicle_type]
-            
+
         else:
             raise ValueError(f"Unknown TRAINING_MODE: {self.config.TRAINING_MODE}")
 
         # -----------------------------------------------------------------
         # DYNAMIC SYNTHESIS: Background Augmentation & Pure Synthetic Trap
         # -----------------------------------------------------------------
-        is_pure_synthetic = (dataset == "synthetic")
-        
+        is_pure_synthetic = dataset == "synthetic"
+
         if is_pure_synthetic or (
             getattr(self.config, "SYNTHESIZE_BACKGROUND", False)
             and label_int == 0
             and self.split == "train"
             and random.random() < getattr(self.config, "SYNTHESIZE_PROBABILITY", 0.5)
         ):
-
             # Dynamically select the correct noise floor
             if self.noise_floors is not None:
                 # If pure synthetic, fallback to the average of all noise floors
@@ -99,11 +97,11 @@ class VehicleDataset(Dataset):
 
             X = generate_no_vehicle_sample(
                 config=self.config,
-                noise_profile="environmental", 
-                amplitude=current_amplitude
+                noise_profile="environmental",
+                amplitude=current_amplitude,
             )
             y = torch.tensor(label_int, dtype=torch.long)
-            
+
             # CRITICAL: Return dataset string here
             return X, y, dataset
 
@@ -117,11 +115,13 @@ class VehicleDataset(Dataset):
 
             start = time * expected_window
             cached = self.table_cache[(table, run_id)]
-            sensor_data = cached[:, start:start + expected_window].clone()
+            sensor_data = cached[:, start : start + expected_window].clone()
 
             if sensor_data.shape[1] < expected_window:
                 pad_amount = expected_window - sensor_data.shape[1]
-                sensor_data = torch.nn.functional.pad(sensor_data, (0, pad_amount), mode="replicate")
+                sensor_data = torch.nn.functional.pad(
+                    sensor_data, (0, pad_amount), mode="replicate"
+                )
 
             target_freq = int(max_time_steps / self.config.SAMPLE_SECONDS)
             if sample_rate < target_freq:
@@ -189,7 +189,7 @@ class VehicleDataset(Dataset):
 
     def _align_max_time(self):
         groups = {}
-        for (table, run_id), max_t in self.table_run_max_time.items():
+        for (table, run_id), _max_t in self.table_run_max_time.items():
             parts = table.split("_")
             dataset = parts[0]
             instance = "_".join(parts[2:-1])
@@ -202,11 +202,9 @@ class VehicleDataset(Dataset):
 
         keys_to_delete = []
 
-        for group_key, table_runs in groups.items():
+        for _group_key, table_runs in groups.items():
             present_signals = [tr[0].split("_")[1] for tr in table_runs]
-            has_all_signals = all(
-                signal in present_signals for signal in self.config.TRAIN_SENSORS
-            )
+            has_all_signals = all(signal in present_signals for signal in self.config.TRAIN_SENSORS)
 
             if not has_all_signals:
                 for tr in table_runs:
@@ -242,7 +240,7 @@ class VehicleDataset(Dataset):
 
             parts = table.split("_")
             dataset = parts[0]
-            signal = parts[1]
+            parts[1]
             instance = "_".join(parts[2:-1])
             sensor_node = parts[-1]
 
@@ -251,7 +249,10 @@ class VehicleDataset(Dataset):
             if vehicle_info is None:
                 continue
             category_str = vehicle_info[0]
-            if self.config.TRAINING_MODE == "category" and category_str not in self.config.CLASS_MAP.values():
+            if (
+                self.config.TRAINING_MODE == "category"
+                and category_str not in self.config.CLASS_MAP.values()
+            ):
                 continue
 
             # 3. Block Splitting Logic with Guard Bands
@@ -272,14 +273,21 @@ class VehicleDataset(Dataset):
                 if assigned_split == self.split:
                     start_sec = b_idx * block
                     end_sec = min(start_sec + usable, times)
-                    
+
                     for time_idx in range(start_sec, end_sec):
                         # WE STORE THE STRING NOW, NOT THE INTEGER
                         unique_samples.add(
-                            (dataset, instance, sensor_node, run_id, time_idx, category_str)
+                            (
+                                dataset,
+                                instance,
+                                sensor_node,
+                                run_id,
+                                time_idx,
+                                category_str,
+                            )
                         )
 
-        self.samples = sorted(list(unique_samples))
+        self.samples = sorted(unique_samples)
 
         # -----------------------------------------------------------------
         # CONTROLLED OVER-SAMPLING: Background Balancing
@@ -290,7 +298,7 @@ class VehicleDataset(Dataset):
             and getattr(self.config, "OVERSAMPLE_BACKGROUNDS", False)
         ):
             # Because we stored strings, we filter by "background"
-            background_samples = [s for s in self.samples if s[5] == "background"] 
+            background_samples = [s for s in self.samples if s[5] == "background"]
             vehicle_samples = [s for s in self.samples if s[5] != "background"]
 
             shortfall = len(vehicle_samples) - len(background_samples)
@@ -300,10 +308,15 @@ class VehicleDataset(Dataset):
                     extra_backgrounds = random.choices(background_samples, k=shortfall)
                     self.samples.extend(extra_backgrounds)
                 else:
-                    print(f"  [+] Injecting {shortfall} purely synthetic background samples to balance classes.")
-                    dummy_samples = [("synthetic", "noise", "none", None, i, "background") for i in range(shortfall)]
+                    print(
+                        f"  [+] Injecting {shortfall} purely synthetic background samples to balance classes."
+                    )
+                    dummy_samples = [
+                        ("synthetic", "noise", "none", None, i, "background")
+                        for i in range(shortfall)
+                    ]
                     self.samples.extend(dummy_samples)
-                    
+
                 random.shuffle(self.samples)
 
     def _get_cache_path(self):
@@ -313,9 +326,7 @@ class VehicleDataset(Dataset):
             "sample_seconds": self.config.SAMPLE_SECONDS,
             "split": self.split,
         }
-        key_hash = hashlib.md5(
-            json.dumps(key_data, sort_keys=True).encode()
-        ).hexdigest()[:12]
+        key_hash = hashlib.md5(json.dumps(key_data, sort_keys=True).encode()).hexdigest()[:12]
         cache_dir = getattr(self.config, "CACHE_DIR", "cache")
         return os.path.join(cache_dir, f"table_cache_{self.split}_{key_hash}.pt")
 
@@ -325,9 +336,15 @@ class VehicleDataset(Dataset):
         cache_path = self._get_cache_path()
 
         if os.path.exists(cache_path):
-            print(f"[{self.split}] Loading table cache from disk: {cache_path}", flush=True)
+            print(
+                f"[{self.split}] Loading table cache from disk: {cache_path}",
+                flush=True,
+            )
             self.table_cache = torch.load(cache_path, weights_only=False)
-            print(f"[{self.split}] Cache loaded ({len(self.table_cache)} segments).", flush=True)
+            print(
+                f"[{self.split}] Cache loaded ({len(self.table_cache)} segments).",
+                flush=True,
+            )
             return
 
         conn, cursor = db_connect(self.config.DB_CONN_PARAMS)

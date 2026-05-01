@@ -34,6 +34,7 @@ Caveats
 - Requires shuffle=False on the loader (default for eval) — relies on
   dataset._index ordering to recover per-window vehicle identity.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,17 +45,18 @@ from collections import defaultdict
 from pathlib import Path
 
 import torch
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from crl_vehicle.config import (
-    CRLConfig, CATEGORY_TO_IDX, DATASET_VEHICLE_MAP,
+    CATEGORY_TO_IDX,
+    DATASET_VEHICLE_MAP,
+    CRLConfig,
 )
 from crl_vehicle.data.dataset import SensorDataset, collate_single
+from crl_vehicle.seeding import seed_everything, seeded_dataloader_kwargs
 from training.trainer import CRLModel
-
 
 IDX_TO_CLASS = {v: k for k, v in CATEGORY_TO_IDX.items()}
 N_CLASSES = len(CATEGORY_TO_IDX)
@@ -62,31 +64,57 @@ N_CLASSES = len(CATEGORY_TO_IDX)
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--downstream-dir", required=True, type=Path,
-                   help="Path to a downstream/<probe>__<ckpt>/ directory "
-                        "containing meta.json + downstream_best.pth.")
-    p.add_argument("--test-dir",   default="../data_files/parsed/test/")
-    p.add_argument("--cache-dir",  default="./saved_crl/caches/waveform")
-    p.add_argument("--out-dir",    default=None,
-                   help="Output dir (defaults to --downstream-dir/per_vehicle/)")
-    p.add_argument("--use-id-split", action="store_true",
-                   help="Eval against the ID-split test partition.")
-    p.add_argument("--id-root",    default="../data_files/parsed/")
+    p.add_argument(
+        "--downstream-dir",
+        required=True,
+        type=Path,
+        help="Path to a downstream/<probe>__<ckpt>/ directory "
+        "containing meta.json + downstream_best.pth.",
+    )
+    p.add_argument("--test-dir", default="../data_files/parsed/test/")
+    p.add_argument("--cache-dir", default="./saved_crl/caches/waveform")
+    p.add_argument(
+        "--out-dir",
+        default=None,
+        help="Output dir (defaults to --downstream-dir/per_vehicle/)",
+    )
+    p.add_argument(
+        "--use-id-split",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Eval against the ID-split test partition (default). "
+        "Pass --no-use-id-split to use --test-dir instead.",
+    )
+    p.add_argument("--id-root", default="../data_files/parsed/")
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--num-workers", type=int, default=8)
-    p.add_argument("--reclass-threshold", type=float, default=0.50,
-                   help="Flag a vehicle for reclassification when its predicted "
-                        "majority class differs from its labeled class AND the "
-                        "majority class wins ≥ this fraction of windows. "
-                        "0.50 is conservative; lower for more candidates.")
+    p.add_argument(
+        "--reclass-threshold",
+        type=float,
+        default=0.50,
+        help="Flag a vehicle for reclassification when its predicted "
+        "majority class differs from its labeled class AND the "
+        "majority class wins ≥ this fraction of windows. "
+        "0.50 is conservative; lower for more candidates.",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Master RNG seed (default 42). Persisted into the "
+        "per_vehicle_confusion.json output.",
+    )
     return p.parse_args()
 
 
-def load_model_and_cfg(downstream_dir: Path, device: torch.device) -> tuple[CRLModel, CRLConfig, list[str]]:
+def load_model_and_cfg(
+    downstream_dir: Path, device: torch.device
+) -> tuple[CRLModel, CRLConfig, list[str]]:
     """Load the downstream-trained model from a downstream/<probe>__<ckpt>/ dir."""
     meta = json.loads((downstream_dir / "meta.json").read_text())
-    cfg = CRLConfig(**{k: v for k, v in meta["config"].items()
-                       if k in CRLConfig.__dataclass_fields__})
+    cfg = CRLConfig(
+        **{k: v for k, v in meta["config"].items() if k in CRLConfig.__dataclass_fields__}
+    )
     sensors = meta["sensors"]
     probe_mode = meta.get("probe_mode", "linear_ztype")
     model = CRLModel(cfg, sensors=sensors, probe_mode=probe_mode).to(device)
@@ -106,17 +134,26 @@ def make_test_dataset(args, cfg: CRLConfig) -> SensorDataset:
     cache_dir = Path(args.cache_dir)
     if args.use_id_split:
         return SensorDataset(
-            args.test_dir, cfg, is_train=False, cache_dir=cache_dir,
-            use_id_split=True, role="test",
-            id_root=args.id_root, id_cache_dir=Path("saved_crl/caches/id_split"),
+            args.test_dir,
+            cfg,
+            is_train=False,
+            cache_dir=cache_dir,
+            use_id_split=True,
+            role="test",
+            id_root=args.id_root,
+            id_cache_dir=Path("saved_crl/caches/id_split"),
         )
     return SensorDataset(args.test_dir, cfg, is_train=False, cache_dir=cache_dir)
 
 
 @torch.no_grad()
 def run_per_window_inference(
-    model: CRLModel, ds: SensorDataset, dev: torch.device,
-    batch_size: int, num_workers: int,
+    model: CRLModel,
+    ds: SensorDataset,
+    dev: torch.device,
+    batch_size: int,
+    num_workers: int,
+    seed: int,
 ) -> tuple[list[tuple[str, str, str]], torch.Tensor, torch.Tensor]:
     """Returns (per_window_keys, type_logits, type_labels), aligned by index.
 
@@ -124,9 +161,13 @@ def run_per_window_inference(
     Only windows with valid type label (vehicle_type >= 0) are emitted.
     """
     loader = DataLoader(
-        ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, collate_fn=collate_single,
+        ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=collate_single,
         pin_memory=True,
+        **seeded_dataloader_kwargs(seed),
     )
     model.eval()
     probe_mode = getattr(model, "probe_mode", "linear_ztype")
@@ -135,8 +176,10 @@ def run_per_window_inference(
     d_signal = model.cfg.d_signal
 
     def select_z(z_full, z_type_block, mask):
-        if use_fullz: return z_full[mask]
-        if use_signal: return z_full[mask][..., :d_signal]
+        if use_fullz:
+            return z_full[mask]
+        if use_signal:
+            return z_full[mask][..., :d_signal]
         return z_type_block[mask]
 
     all_logits, all_labels, all_global_idx = [], [], []
@@ -184,14 +227,16 @@ def run_per_window_inference(
 
 def aggregate(keys, preds, labels, group_by="vehicle"):
     """group_by ∈ {'vehicle', 'vehicle_rs'}."""
-    buckets = defaultdict(lambda: {
-        "true_class": None,
-        "n": 0,
-        "rs_nodes": set(),
-        "pred_counts": [0] * N_CLASSES,
-        "n_correct": 0,
-    })
-    for (ds, v, rs), pred, label in zip(keys, preds.tolist(), labels.tolist()):
+    buckets = defaultdict(
+        lambda: {
+            "true_class": None,
+            "n": 0,
+            "rs_nodes": set(),
+            "pred_counts": [0] * N_CLASSES,
+            "n_correct": 0,
+        }
+    )
+    for (ds, v, rs), pred, label in zip(keys, preds.tolist(), labels.tolist(), strict=False):
         if group_by == "vehicle":
             key = (ds, v)
         else:
@@ -228,16 +273,19 @@ def write_csv(out_path: Path, buckets: dict, group_by: str, reclass_thresh: floa
                 f"({majority_frac:.0%} of windows predicted that)"
             )
         row = {
-            "dataset": ds, "vehicle": v, "rs_node": rs,
-            "true_class": true_name, "n_windows": n,
+            "dataset": ds,
+            "vehicle": v,
+            "rs_node": rs,
+            "true_class": true_name,
+            "n_windows": n,
             "n_rs_nodes": len(b["rs_nodes"]),
             "pred_pedestrian": round(pred_fracs[0], 4),
-            "pred_light":      round(pred_fracs[1], 4),
-            "pred_medium":     round(pred_fracs[2], 4),
-            "pred_heavy":      round(pred_fracs[3], 4),
-            "pred_majority":   IDX_TO_CLASS[pred_majority],
-            "majority_frac":   round(majority_frac, 4),
-            "accuracy":        round(acc, 4),
+            "pred_light": round(pred_fracs[1], 4),
+            "pred_medium": round(pred_fracs[2], 4),
+            "pred_heavy": round(pred_fracs[3], 4),
+            "pred_majority": IDX_TO_CLASS[pred_majority],
+            "majority_frac": round(majority_frac, 4),
+            "accuracy": round(acc, 4),
             "reclass_recommendation": recommendation,
         }
         rows.append(row)
@@ -253,9 +301,11 @@ def write_csv(out_path: Path, buckets: dict, group_by: str, reclass_thresh: floa
 
 def print_summary(rows_by_vehicle: list[dict], reclass_thresh: float) -> None:
     print()
-    print(f"{'dataset':<7} {'vehicle':<25} {'true':<11} "
-          f"{'ped':>5} {'lit':>5} {'med':>5} {'hvy':>5} "
-          f"{'pred':<11} {'maj%':>5} {'acc':>5}  recommendation")
+    print(
+        f"{'dataset':<7} {'vehicle':<25} {'true':<11} "
+        f"{'ped':>5} {'lit':>5} {'med':>5} {'hvy':>5} "
+        f"{'pred':<11} {'maj%':>5} {'acc':>5}  recommendation"
+    )
     print("-" * 110)
     flagged = []
     for r in rows_by_vehicle:
@@ -272,47 +322,60 @@ def print_summary(rows_by_vehicle: list[dict], reclass_thresh: float) -> None:
             flagged.append(r)
 
     print()
-    print(f"=== {len(flagged)} vehicles flagged for reclassification "
-          f"(majority_frac ≥ {reclass_thresh:.0%}) ===")
+    print(
+        f"=== {len(flagged)} vehicles flagged for reclassification "
+        f"(majority_frac ≥ {reclass_thresh:.0%}) ==="
+    )
     for r in flagged:
-        print(f"  {r['dataset']}/{r['vehicle']}: "
-              f"{r['true_class']} → {r['pred_majority']} "
-              f"({r['majority_frac']:.0%} of {r['n_windows']} windows)")
+        print(
+            f"  {r['dataset']}/{r['vehicle']}: "
+            f"{r['true_class']} → {r['pred_majority']} "
+            f"({r['majority_frac']:.0%} of {r['n_windows']} windows)"
+        )
 
 
 def main() -> None:
     args = parse_args()
+    seed_everything(args.seed)
     out_dir = Path(args.out_dir) if args.out_dir else (args.downstream_dir / "per_vehicle")
     out_dir.mkdir(parents=True, exist_ok=True)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print(f"Loading model from {args.downstream_dir} …")
     model, cfg, sensors = load_model_and_cfg(args.downstream_dir, dev)
-    print(f"  frontend={cfg.frontend_type}, probe_mode={getattr(model, 'probe_mode', '?')}, "
-          f"d_z={cfg.d_z}, d_signal={cfg.d_signal}")
+    print(
+        f"  frontend={cfg.frontend_type}, probe_mode={getattr(model, 'probe_mode', '?')}, "
+        f"d_z={cfg.d_z}, d_signal={cfg.d_signal}"
+    )
 
     print(f"\nLoading test dataset (use_id_split={args.use_id_split}) …")
     test_ds = make_test_dataset(args, cfg)
     print(f"  {len(test_ds):,} test windows")
 
-    print(f"\nRunning per-window inference …")
+    print("\nRunning per-window inference …")
     keys, logits, labels = run_per_window_inference(
-        model, test_ds, dev, args.batch_size, args.num_workers,
+        model,
+        test_ds,
+        dev,
+        args.batch_size,
+        args.num_workers,
+        seed=args.seed,
     )
     preds = logits.argmax(dim=-1)
     overall_acc = (preds == labels).float().mean().item()
     print(f"  {len(keys):,} valid-typed windows  |  overall acc = {overall_acc:.4f}")
 
-    print(f"\nAggregating by vehicle …")
+    print("\nAggregating by vehicle …")
     by_vehicle = aggregate(keys, preds, labels, group_by="vehicle")
-    by_rs      = aggregate(keys, preds, labels, group_by="vehicle_rs")
+    by_rs = aggregate(keys, preds, labels, group_by="vehicle_rs")
 
     # Coverage report: which vehicles in DATASET_VEHICLE_MAP produced zero
     # test windows? Tells you up front when the test partition is missing
     # whole datasets (e.g. m3nvc under id-split + split_runs partitioner).
-    seen_vehicles = {(ds, v) for (ds, v) in by_vehicle.keys()}
+    seen_vehicles = set(by_vehicle.keys())
     expected_vehicles = {
-        (ds, v) for ds, vmap in DATASET_VEHICLE_MAP.items()
+        (ds, v)
+        for ds, vmap in DATASET_VEHICLE_MAP.items()
         for v, entry in vmap.items()
         if v != "background" and not (ds == "m3nvc" and "_" in v)
     }
@@ -327,10 +390,15 @@ def main() -> None:
         print("    (under id-split, missing vehicles are routed to other roles by")
         print("     plain markers or by the split_runs partitioner)")
 
-    rows_v  = write_csv(out_dir / "per_vehicle_confusion.csv", by_vehicle,
-                        "vehicle", args.reclass_threshold)
-    rows_rs = write_csv(out_dir / "per_vehicle_per_rs.csv", by_rs,
-                        "vehicle_rs", args.reclass_threshold)
+    rows_v = write_csv(
+        out_dir / "per_vehicle_confusion.csv",
+        by_vehicle,
+        "vehicle",
+        args.reclass_threshold,
+    )
+    rows_rs = write_csv(
+        out_dir / "per_vehicle_per_rs.csv", by_rs, "vehicle_rs", args.reclass_threshold
+    )
 
     summary = {
         "downstream_dir": str(args.downstream_dir),
@@ -341,6 +409,7 @@ def main() -> None:
         "frontend_type": cfg.frontend_type,
         "probe_mode": getattr(model, "probe_mode", None),
         "use_id_split": args.use_id_split,
+        "seed": args.seed,
         "per_vehicle": rows_v,
         "per_vehicle_per_rs": rows_rs,
     }

@@ -1,9 +1,11 @@
 """
 Simple tests without PyTorch to verify test framework.
 """
-import pytest
+
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def test_python_version():
@@ -14,7 +16,7 @@ def test_python_version():
 def test_project_structure():
     """Test project has expected directories."""
     project_root = Path(__file__).parent.parent
-    
+
     assert (project_root / "model-train").exists()
     assert (project_root / "ensemble-train").exists()
     assert (project_root / "server-load").exists()
@@ -24,7 +26,7 @@ def test_project_structure():
 def test_test_files_exist():
     """Test all test files exist."""
     test_dir = Path(__file__).parent
-    
+
     expected_files = [
         "conftest.py",
         "pytest.ini",
@@ -41,7 +43,7 @@ def test_test_files_exist():
         "run_tests.sh",
         "TEST_SUITE_SUMMARY.md",
     ]
-    
+
     for filename in expected_files:
         assert (test_dir / filename).exists(), f"{filename} not found"
 
@@ -58,15 +60,18 @@ def test_string_operations():
     assert "vehicle" in "vehicle detection"
 
 
-@pytest.mark.parametrize("value,expected", [
-    (2, 4),
-    (3, 9),
-    (4, 16),
-    (5, 25),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (2, 4),
+        (3, 9),
+        (4, 16),
+        (5, 25),
+    ],
+)
 def test_parametrized(value, expected):
     """Test parametrized test."""
-    assert value ** 2 == expected
+    assert value**2 == expected
 
 
 if __name__ == "__main__":

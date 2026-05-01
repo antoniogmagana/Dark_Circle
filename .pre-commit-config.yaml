@@ -1,0 +1,17 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+
+# Type checking is Pyright (configured in pyrightconfig.json). It runs in
+# Pylance/VS Code in real time, and on the CLI via `pyright .`. Not wired into
+# pre-commit by design — type issues should surface during editing, not at
+# commit time.

@@ -30,8 +30,8 @@ def test_modality_cfg_audio():
 def test_modality_cfg_seismic():
     cfg = CRLConfig()
     mc = cfg.modality_cfg("seismic")
-    assert mc.sample_rate == 200
-    assert mc.window_size == 200
+    assert mc.sample_rate == 100
+    assert mc.window_size == 100
     assert mc.n_channels == 1
 
 
@@ -81,6 +81,7 @@ def test_fused_seq_len_configurable():
 # New unified frontend schema (frontend_bank / frontend_fusion / params)
 # ---------------------------------------------------------------------------
 
+
 def test_frontend_schema_defaults():
     cfg = CRLConfig()
     assert cfg.frontend_bank == "multiscale"
@@ -109,10 +110,10 @@ def test_audio_target_rate_invalid_raises():
 @pytest.mark.parametrize(
     "legacy_type,expected_bank,expected_fusion",
     [
-        ("morlet",                 "morlet",           "late"),
-        ("morlet_per_sensor",      "morlet",           "late"),
-        ("morlet_fused",           "morlet",           "early"),
-        ("morlet_learnable",       "morlet_learnable", "late"),
+        ("morlet", "morlet", "late"),
+        ("morlet_per_sensor", "morlet", "late"),
+        ("morlet_fused", "morlet", "early"),
+        ("morlet_learnable", "morlet_learnable", "late"),
         ("morlet_learnable_fused", "morlet_learnable", "early"),
     ],
 )
@@ -126,6 +127,7 @@ def test_legacy_frontend_type_translates(legacy_type, expected_bank, expected_fu
 def test_legacy_frontend_type_multiscale_no_warning():
     # Default frontend_type matches default (bank, fusion); no warning.
     import warnings
+
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)
         cfg = CRLConfig(frontend_type="multiscale")
@@ -140,12 +142,22 @@ def test_legacy_morlet_per_sensor_params_promoted():
         cfg = CRLConfig(
             frontend_type="morlet_per_sensor",
             morlet_per_sensor_params={
-                "audio":   {"freq_min": 20.0, "freq_max": 8000.0, "w0": 6.0,
-                            "target_tokens": 32, "receptive_cycles": 3.0,
-                            "out_channels_frac": 1.0},
-                "seismic": {"freq_min": 2.0, "freq_max": 40.0, "w0": 6.0,
-                            "target_tokens": 32, "receptive_cycles": 3.0,
-                            "out_channels_frac": 1.0},
+                "audio": {
+                    "freq_min": 20.0,
+                    "freq_max": 8000.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                    "out_channels_frac": 1.0,
+                },
+                "seismic": {
+                    "freq_min": 2.0,
+                    "freq_max": 40.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                    "out_channels_frac": 1.0,
+                },
             },
         )
     assert cfg.frontend_per_sensor_params["audio"]["freq_min"] == 20.0
@@ -158,10 +170,20 @@ def test_new_schema_reverse_maps_to_frontend_type():
         frontend_bank="morlet",
         frontend_fusion="late",
         frontend_per_sensor_params={
-            "audio":   {"freq_min": 20.0, "freq_max": 8000.0, "w0": 6.0,
-                        "target_tokens": 32, "receptive_cycles": 3.0},
-            "seismic": {"freq_min": 2.0, "freq_max": 40.0, "w0": 6.0,
-                        "target_tokens": 32, "receptive_cycles": 3.0},
+            "audio": {
+                "freq_min": 20.0,
+                "freq_max": 8000.0,
+                "w0": 6.0,
+                "target_tokens": 32,
+                "receptive_cycles": 3.0,
+            },
+            "seismic": {
+                "freq_min": 2.0,
+                "freq_max": 40.0,
+                "w0": 6.0,
+                "target_tokens": 32,
+                "receptive_cycles": 3.0,
+            },
         },
     )
     assert cfg.frontend_type == "morlet_per_sensor"
@@ -174,14 +196,24 @@ def test_inconsistent_legacy_and_new_raises():
     # reverse-promotion path, not an inconsistency.
     with pytest.raises(ValueError, match="Inconsistent frontend config"):
         CRLConfig(
-            frontend_type="morlet_per_sensor",     # → (morlet, late)
-            frontend_bank="morlet_learnable",      # disagrees on bank
+            frontend_type="morlet_per_sensor",  # → (morlet, late)
+            frontend_bank="morlet_learnable",  # disagrees on bank
             frontend_fusion="late",
             frontend_per_sensor_params={
-                "audio":   {"freq_min": 20.0, "freq_max": 8000.0, "w0": 6.0,
-                            "target_tokens": 32, "receptive_cycles": 3.0},
-                "seismic": {"freq_min": 2.0, "freq_max": 40.0, "w0": 6.0,
-                            "target_tokens": 32, "receptive_cycles": 3.0},
+                "audio": {
+                    "freq_min": 20.0,
+                    "freq_max": 8000.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                },
+                "seismic": {
+                    "freq_min": 2.0,
+                    "freq_max": 40.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                },
             },
         )
 
@@ -192,10 +224,20 @@ def test_morlet_freq_max_above_nyquist_raises():
             frontend_bank="morlet",
             frontend_fusion="late",
             frontend_per_sensor_params={
-                "audio": {"freq_min": 20.0, "freq_max": 9000.0, "w0": 6.0,
-                          "target_tokens": 32, "receptive_cycles": 3.0},
-                "seismic": {"freq_min": 2.0, "freq_max": 40.0, "w0": 6.0,
-                            "target_tokens": 32, "receptive_cycles": 3.0},
+                "audio": {
+                    "freq_min": 20.0,
+                    "freq_max": 9000.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                },
+                "seismic": {
+                    "freq_min": 2.0,
+                    "freq_max": 40.0,
+                    "w0": 6.0,
+                    "target_tokens": 32,
+                    "receptive_cycles": 3.0,
+                },
             },
             audio_target_rate=4000,  # Nyquist=2000, freq_max=9000 fails
         )
@@ -217,7 +259,7 @@ def test_required_keys_missing_morlet_raises():
             frontend_bank="morlet",
             frontend_fusion="late",
             frontend_per_sensor_params={
-                "audio":   {"target_tokens": 32},  # missing freq_min etc.
+                "audio": {"target_tokens": 32},  # missing freq_min etc.
                 "seismic": {"target_tokens": 32},
             },
         )
@@ -237,9 +279,11 @@ def test_strides_length_mismatch_raises():
     with pytest.raises(ValueError, match="strides length"):
         CRLConfig(
             frontend_per_sensor_params={
-                "audio": {"target_tokens": 32,
-                          "kernel_sizes": [9, 19, 39],
-                          "strides": [4, 4]},  # length mismatch
+                "audio": {
+                    "target_tokens": 32,
+                    "kernel_sizes": [9, 19, 39],
+                    "strides": [4, 4],
+                },  # length mismatch
                 "seismic": {"target_tokens": 32, "kernel_sizes": [9]},
             },
         )

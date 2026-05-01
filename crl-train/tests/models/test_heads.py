@@ -1,6 +1,9 @@
-import pytest
 import torch
-from crl_vehicle.models.heads import LinearPresenceHead, LinearTypeHead, LinearProximityHead
+from crl_vehicle.models.heads import (
+    LinearPresenceHead,
+    LinearProximityHead,
+    LinearTypeHead,
+)
 from crl_vehicle.models.latent import CausalLatentSpace
 
 

@@ -4,10 +4,9 @@ import threading
 
 import nats
 import rclpy
-from rclpy.node import Node
-
 from buffer import SensorBuffer
 from dispatch import NATS_SUBJECT, make_role_callback, parse_role_map
+from rclpy.node import Node
 from ros2_interfaces.msg import RawSensorReading
 
 
@@ -59,7 +58,7 @@ async def start_jetstream():
 def main():
     for var in ["NATS_URL", "SENSOR_ARRAY", "SENSOR_ROLE_MAP"]:
         if var not in os.environ:
-            raise EnvironmentError(f"Required environment variable '{var}' is not set")
+            raise OSError(f"Required environment variable '{var}' is not set")
 
     loop = asyncio.new_event_loop()
     nc, js = loop.run_until_complete(start_jetstream())

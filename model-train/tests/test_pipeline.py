@@ -1,13 +1,12 @@
-import pytest
 import config
+import pytest
 
 # Import helpers from train.py
 from train import (
+    assign_label,
     extract_instance_from_table,
     instance_to_category,
-    assign_label,
 )
-
 
 # ============================================================
 # 1. Test instance extraction from table names
@@ -86,13 +85,13 @@ def test_num_classes_detection(monkeypatch):
 def test_num_classes_category(monkeypatch):
     monkeypatch.setattr(config, "TRAINING_MODE", "category")
     monkeypatch.setattr(config, "NUM_CLASSES", len(config.CLASS_MAP))
-    assert config.NUM_CLASSES == len(config.CLASS_MAP)
+    assert len(config.CLASS_MAP) == config.NUM_CLASSES
 
 
 def test_num_classes_instance(monkeypatch):
     monkeypatch.setattr(config, "TRAINING_MODE", "instance")
     monkeypatch.setattr(config, "NUM_CLASSES", len(config.INSTANCE_TO_CLASS))
-    assert config.NUM_CLASSES == len(config.INSTANCE_TO_CLASS)
+    assert len(config.INSTANCE_TO_CLASS) == config.NUM_CLASSES
 
 
 # ============================================================
@@ -107,12 +106,12 @@ def test_instance_to_class_reproducible():
     random.seed(config.INSTANCE_SEED)
 
     all_instances = sorted(
-        set(
+        {
             inst
             for ds_map in config.DATASET_VEHICLE_MAP.values()
             for inst_list in ds_map.values()
             for inst in inst_list
-        )
+        }
     )
 
     shuffled = all_instances.copy()

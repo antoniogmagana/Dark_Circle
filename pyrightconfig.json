@@ -3,17 +3,31 @@
         "test",
         "model-train",
         "ensemble-train",
+        "enforced-train",
         "server-load",
-        "inference-engine"
+        "inference-engine",
+        "crl-train"
+    ],
+    "exclude": [
+        "**/.venv",
+        "**/__pycache__",
+        "**/saved_crl",
+        "**/scratch",
+        "install",
+        "build",
+        "log",
+        "data_exploration_notebooks"
     ],
     "extraPaths": [
         "model-train",
         "ensemble-train",
+        "enforced-train",
         "server-load",
-        "inference-engine"
+        "inference-engine",
+        "crl-train"
     ],
-    "venvPath": "/home/lvc_toolkit",
-    "venv": "ai_env",
+    "venvPath": ".",
+    "venv": "crl-train/.venv",
     "pythonVersion": "3.12",
     "typeCheckingMode": "basic",
     "reportMissingImports": true,

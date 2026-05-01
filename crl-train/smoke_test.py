@@ -15,18 +15,22 @@ Usage:
 """
 
 import argparse
+import shutil
 import sys
+import tempfile
 from pathlib import Path
-import shutil, tempfile
 
 import torch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from crl_vehicle.config import CRLConfig, MODALITIES
-from crl_vehicle.data.dataset import SensorDataset, ConsecutivePairDataset, collate_pairs
+from crl_vehicle.config import MODALITIES, CRLConfig
+from crl_vehicle.data.dataset import (
+    ConsecutivePairDataset,
+    SensorDataset,
+    collate_pairs,
+)
 from training.trainer import CRLModel, Trainer
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -40,11 +44,7 @@ def _header(msg):
 
 
 def _check(name, tensor, expected_shape=None):
-    ok = (
-        "✓"
-        if (expected_shape is None or tuple(tensor.shape) == tuple(expected_shape))
-        else "✗"
-    )
+    ok = "✓" if (expected_shape is None or tuple(tensor.shape) == tuple(expected_shape)) else "✗"
     print(f"  {ok}  {name}: {tuple(tensor.shape)}  dtype={tensor.dtype}")
     if not tensor.isfinite().all():
         print(f"     WARNING: non-finite values detected in {name}!")
@@ -57,14 +57,10 @@ def _slim_dataset(
     all_parquet = sorted(src.glob("*.parquet"))
     files = []
     for sensor in MODALITIES:
-        sensor_files = [
-            f for f in all_parquet if f.stem.split("_", 2)[1:2] == [sensor]
-        ][:max_files]
+        sensor_files = [f for f in all_parquet if f.stem.split("_", 2)[1:2] == [sensor]][:max_files]
         files.extend(sensor_files)
     if not files:
-        raise FileNotFoundError(
-            f"No parquet files for modalities {MODALITIES} in {parquet_dir}"
-        )
+        raise FileNotFoundError(f"No parquet files for modalities {MODALITIES} in {parquet_dir}")
     tmp = Path(tempfile.mkdtemp(prefix="crl_smoke_"))
     try:
         for f in files:
@@ -83,16 +79,26 @@ def _slim_dataset(
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--data-dir",   default="../data_files/parsed/train")
-    p.add_argument("--val-dir",    default="../data_files/parsed/val")
-    p.add_argument("--sensors",    nargs="+", default=["audio", "seismic"], choices=MODALITIES)
+    p.add_argument("--data-dir", default="../data_files/parsed/train")
+    p.add_argument("--val-dir", default="../data_files/parsed/val")
+    p.add_argument("--sensors", nargs="+", default=["audio", "seismic"], choices=MODALITIES)
     p.add_argument("--batch-size", type=int, default=8)
-    p.add_argument("--max-files",  type=int, default=6)
-    p.add_argument("--device",     default=None)
-    p.add_argument("--frontend",   type=str, default="multiscale",
-                   choices=["multiscale", "morlet", "morlet_per_sensor", "morlet_fused",
-                            "morlet_learnable", "morlet_learnable_fused"],
-                   help="Frontend architecture to use.")
+    p.add_argument("--max-files", type=int, default=6)
+    p.add_argument("--device", default=None)
+    p.add_argument(
+        "--frontend",
+        type=str,
+        default="multiscale",
+        choices=[
+            "multiscale",
+            "morlet",
+            "morlet_per_sensor",
+            "morlet_fused",
+            "morlet_learnable",
+            "morlet_learnable_fused",
+        ],
+        help="Frontend architecture to use.",
+    )
     return p.parse_args()
 
 
@@ -126,7 +132,7 @@ def main():
     # ----------------------------------------------------------------
     try:
         train_ds = _slim_dataset(args.data_dir, cfg, args.max_files, is_train=True)
-        val_ds   = _slim_dataset(args.val_dir,  cfg, args.max_files, is_train=False)
+        val_ds = _slim_dataset(args.val_dir, cfg, args.max_files, is_train=False)
     except FileNotFoundError as e:
         print(f"\nERROR: {e}")
         sys.exit(1)
@@ -188,7 +194,7 @@ def main():
             _check("  split z_pres", z_pres, (x.shape[0], model.latent.D_PRES))
             _check("  split z_type", z_type, (x.shape[0], model.latent.D_TYPE))
             _check("  split z_prox", z_prox, (x.shape[0], model.latent.D_PROX))
-            _check("  split z_env",  z_env,  (x.shape[0], model.latent.D_ENV))
+            _check("  split z_env", z_env, (x.shape[0], model.latent.D_ENV))
             _check("  split z_free", z_free, (x.shape[0], model.latent.d_free))
 
     # ----------------------------------------------------------------
@@ -222,13 +228,9 @@ def main():
     trainer.scaler.update()
 
     bad_grads = [
-        n for n, p in model.named_parameters()
-        if p.grad is not None and not p.grad.isfinite().all()
+        n for n, p in model.named_parameters() if p.grad is not None and not p.grad.isfinite().all()
     ]
-    no_grads = [
-        n for n, p in model.named_parameters()
-        if p.requires_grad and p.grad is None
-    ]
+    no_grads = [n for n, p in model.named_parameters() if p.requires_grad and p.grad is None]
     if bad_grads:
         print(f"  WARNING: non-finite gradients in: {bad_grads[:5]}")
     elif no_grads:

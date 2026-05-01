@@ -49,8 +49,7 @@ class TrainingMode(nn.Module, ABC):
         batch: dict,
         beta: float,
         device: torch.device,
-    ) -> tuple[torch.Tensor, dict]:
-        ...
+    ) -> tuple[torch.Tensor, dict]: ...
 
     @abstractmethod
     def val_metrics_summary(self, val_m: dict) -> dict:
@@ -72,8 +71,7 @@ class TrainingMode(nn.Module, ABC):
         ...
 
     @abstractmethod
-    def early_stop_metric(self) -> str:
-        ...
+    def early_stop_metric(self) -> str: ...
 
     @abstractmethod
     def early_stop_mode(self) -> str:
@@ -83,6 +81,6 @@ class TrainingMode(nn.Module, ABC):
     def checkpoint_summary(self, state: CheckpointState) -> dict:
         """Emit the crl_checkpoint_summary.json payload for this mode."""
         return {
-            "bests":       {k: round(v, 6) for k, v in state.bests.items()},
+            "bests": {k: round(v, 6) for k, v in state.bests.items()},
             "best_epochs": dict(state.best_epochs),
         }

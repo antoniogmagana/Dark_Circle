@@ -1,10 +1,10 @@
+import json
 import os
 import random
-import torch
-import json
 from datetime import datetime
-import numpy as np
 
+import numpy as np
+import torch
 
 # ===========================================================
 # Globals
@@ -61,9 +61,7 @@ if not DB_CONN_PARAMS["password"]:
 #   "instance"   -> each vehicle instance is its own class
 TRAINING_MODE = os.environ.get("TRAINING_MODE")
 if not TRAINING_MODE:
-    TRAINING_MODE = input(
-        'Enter Training Mode ["detection", "category", "instance"]: '
-    )
+    TRAINING_MODE = input('Enter Training Mode ["detection", "category", "instance"]: ')
 
 # Reproducible instance-level class IDs
 INSTANCE_SEED = 0
@@ -103,9 +101,7 @@ NATIVE_SR = {
 }
 
 # Global reference sample rate for all sensors/datasets
-REF_SAMPLE_RATE = max(
-    NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_SENSORS
-)
+REF_SAMPLE_RATE = max(NATIVE_SR[ds][s] for ds in TRAIN_DATASETS for s in TRAIN_SENSORS)
 
 # Bit depth per sensor type (hardware spec)
 BIT_DEPTH_MAP = {"audio": 16, "seismic": 24, "accel": 24}
@@ -115,9 +111,7 @@ ADC_SCALE_MAP = {s: 2 ** (b - 1) for s, b in BIT_DEPTH_MAP.items()}
 
 # Per-channel ADC scales ordered to match channel concatenation in dataset.py
 # audio=1ch, seismic=1ch, accel=3ch — channels stacked in TRAIN_SENSORS order
-CHANNEL_ADC_SCALES = [
-    ADC_SCALE_MAP[s] for s in TRAIN_SENSORS for _ in range(_SENSOR_CHANNELS[s])
-]
+CHANNEL_ADC_SCALES = [ADC_SCALE_MAP[s] for s in TRAIN_SENSORS for _ in range(_SENSOR_CHANNELS[s])]
 
 # Semantic category names (used for category-level classification)
 # if background used, always set to 0: "background"
@@ -393,14 +387,11 @@ def save_config_snapshot():
 
     for key, value in list(globals().items()):
         if key.isupper() and not key.startswith("_"):
-
             if isinstance(value, np.ndarray):
                 config_dict[key] = value.tolist()
             elif isinstance(value, torch.device):
                 config_dict[key] = str(value)
-            elif isinstance(
-                value, (int, float, str, list, dict, bool, tuple, type(None))
-            ):
+            elif isinstance(value, int | float | str | list | dict | bool | tuple | type(None)):
                 config_dict[key] = value
 
     with open(JSON_LOG_PATH, "w") as f:
@@ -414,12 +405,8 @@ def save_config_snapshot():
 ENSEMBLE_WEIGHT_METRIC = "val_f1"
 ENSEMBLE_WEIGHT_SCHEME = "linear"
 
-ENSEMBLE_RUN_ID = os.environ.get(
-    "ENSEMBLE_RUN_ID", datetime.now().strftime("%Y%m%d_%H%M%S")
-)
-ENSEMBLE_DIR = os.path.join(
-    "saved_models", "ensemble", TRAINING_MODE, ENSEMBLE_RUN_ID
-)
+ENSEMBLE_RUN_ID = os.environ.get("ENSEMBLE_RUN_ID", datetime.now().strftime("%Y%m%d_%H%M%S"))
+ENSEMBLE_DIR = os.path.join("saved_models", "ensemble", TRAINING_MODE, ENSEMBLE_RUN_ID)
 ENSEMBLE_REPORT_PATH = os.path.join(ENSEMBLE_DIR, "ensemble_report.txt")
 ENSEMBLE_WEIGHTS_PATH = os.path.join(
     "saved_models", "ensemble", TRAINING_MODE, "ensemble_weights.json"

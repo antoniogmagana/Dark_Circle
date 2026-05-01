@@ -4,7 +4,6 @@ import numpy as np
 import torch
 import torchaudio.functional as F
 from google.protobuf.timestamp_pb2 import Timestamp
-
 from inference_protos import inference_pb2
 
 _AUDIO_BITS = int(os.environ.get("AUDIO_BIT_DEPTH", "16"))
@@ -40,9 +39,7 @@ class SensorBuffer:
             tr = int(os.environ.get("TARGET_RATE", "16000"))
             self.target_rates = {ch: tr for ch in self.rates}
 
-        self.limits = {
-            ch: int(self.window * self.target_rates[ch]) for ch in self.rates
-        }
+        self.limits = {ch: int(self.window * self.target_rates[ch]) for ch in self.rates}
         self.buffers = {ch: np.zeros(self.limits[ch]) for ch in self.rates}
 
         self.holding_pen = {
@@ -89,9 +86,7 @@ class SensorBuffer:
                 inference_pb2.Tensor(shape=list(arr.shape), data=arr.flatten().tolist())
             )
 
-        if any(
-            axis in self.active_channels for axis in ["accel_x", "accel_y", "accel_z"]
-        ):
+        if any(axis in self.active_channels for axis in ["accel_x", "accel_y", "accel_z"]):
             payload.channels.append("accel")
             accel_matrix = (
                 np.vstack(

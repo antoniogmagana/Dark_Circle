@@ -1,31 +1,25 @@
-import os
 import csv
+
+import config
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-from torch.utils.data import DataLoader
-from sklearn.metrics import (precision_score, 
-                             recall_score, 
-                             f1_score, 
-                             confusion_matrix
-)
-
 from data_generator import augment_batch
 from dataset import VehicleDataset
-from models import build_model
 from preprocess import preprocess_for_training
-import config
+from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score
+from torch.utils.data import DataLoader
+
+from models import build_model
 
 
-def train_one_epoch(
-    model, loader, optimizer, criterion, device, config, epoch
-):
+def train_one_epoch(model, loader, optimizer, criterion, device, config, epoch):
     model.train()
     total_loss = 0
     total_correct = 0
     total_samples = 0
 
-    for batch_idx, (x, y, dataset_names) in enumerate(loader):
+    for _batch_idx, (x, y, _dataset_names) in enumerate(loader):
         x, y = x.to(device), y.to(device)
 
         # -----------------------------------------------------------------
@@ -59,7 +53,7 @@ def evaluate(model, loader, criterion, device, config):
     all_labels = []
 
     with torch.inference_mode():
-        for x, y, dataset_names in loader:
+        for x, y, _dataset_names in loader:
             x, y = x.to(device), y.to(device)
 
             # Preprocessing on the GPU
@@ -78,20 +72,20 @@ def evaluate(model, loader, criterion, device, config):
     all_labels = torch.cat(all_labels).cpu().numpy()
     total_samples = len(all_labels)
     avg_loss = total_loss / total_samples
-    
+
     # Calculate global metrics
-    precision = precision_score(all_labels, all_preds, average='weighted', zero_division=0)
-    recall = recall_score(all_labels, all_preds, average='weighted', zero_division=0)
-    f1 = f1_score(all_labels, all_preds, average='weighted', zero_division=0)
+    precision = precision_score(all_labels, all_preds, average="weighted", zero_division=0)
+    recall = recall_score(all_labels, all_preds, average="weighted", zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
     accuracy = (np.array(all_preds) == np.array(all_labels)).mean()
 
     # Calculate per-class accuracy safely using the confusion matrix
     target_labels = list(range(config.NUM_CLASSES))
     cm = confusion_matrix(all_labels, all_preds, labels=target_labels)
-    
-    with np.errstate(divide='ignore', invalid='ignore'):
+
+    with np.errstate(divide="ignore", invalid="ignore"):
         per_class_acc = np.true_divide(cm.diagonal(), cm.sum(axis=1))
-        per_class_acc[np.isnan(per_class_acc)] = 0.0 
+        per_class_acc[np.isnan(per_class_acc)] = 0.0
 
     return avg_loss, accuracy, precision, recall, f1, per_class_acc
 
@@ -110,8 +104,7 @@ def compute_noise_floors(calib_loader, config):
                 all_stds[ds].append(window_stds[i].unsqueeze(0))
 
     noise_floors = {
-        ds: torch.quantile(torch.cat(stds, dim=0), q=0.05, dim=0)
-        for ds, stds in all_stds.items()
+        ds: torch.quantile(torch.cat(stds, dim=0), q=0.05, dim=0) for ds, stds in all_stds.items()
     }
 
     return noise_floors
@@ -176,10 +169,13 @@ def main():
     # ------------------------------------------------------------
     # Save Metadata (Now storing dicts)
     # ------------------------------------------------------------
-    torch.save({
-        "model_name": config.MODEL_NAME,
-        "use_mel": config.USE_MEL,
-    }, config.META_SAVE_PATH)
+    torch.save(
+        {
+            "model_name": config.MODEL_NAME,
+            "use_mel": config.USE_MEL,
+        },
+        config.META_SAVE_PATH,
+    )
 
     print(f"Saved model metadata to: {config.META_SAVE_PATH}")
 
@@ -193,12 +189,12 @@ def main():
     print("Performing dummy pass to initialize Lazy modules...")
     model.eval()
     with torch.no_grad():
-        for x_dummy, _, ds_names in train_loader:
+        for x_dummy, _, _ds_names in train_loader:
             x_dummy = x_dummy.to(device)
-            
+
             x_dummy = preprocess_for_training(x_dummy, config=config)
-            
-            if hasattr(model, 'fit_extractor'):
+
+            if hasattr(model, "fit_extractor"):
                 model.fit_extractor(x_dummy[:32])
                 model(x_dummy[:32])
             else:
@@ -209,13 +205,15 @@ def main():
         weights = torch.tensor(config.CLASS_WEIGHTS, device=device)
         criterion = nn.CrossEntropyLoss(weight=weights)
     else:
-        print(f"Warning: CLASS_WEIGHTS len ({len(config.CLASS_WEIGHTS)}) != NUM_CLASSES ({config.NUM_CLASSES}). Defaulting to unweighted loss.")
+        print(
+            f"Warning: CLASS_WEIGHTS len ({len(config.CLASS_WEIGHTS)}) != NUM_CLASSES ({config.NUM_CLASSES}). Defaulting to unweighted loss."
+        )
         criterion = nn.CrossEntropyLoss()
 
     optimizer = model.get_optimizer()
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
-        mode="min" if getattr(config, "BEST_MODEL_METRIC", "val_acc") == "val_loss" else "max",
+        mode=("min" if getattr(config, "BEST_MODEL_METRIC", "val_acc") == "val_loss" else "max"),
         factor=0.5,
         patience=3,
     )
@@ -234,11 +232,18 @@ def main():
         class_names = [f"Val_Acc_Class_{i}" for i in range(config.NUM_CLASSES)]
 
     headers = [
-        "Epoch", "Train_Loss", "Train_Acc", 
-        "Val_Loss", "Val_Acc", "Val_Precision", "Val_Recall", "Val_F1"
-    ] + class_names
+        "Epoch",
+        "Train_Loss",
+        "Train_Acc",
+        "Val_Loss",
+        "Val_Acc",
+        "Val_Precision",
+        "Val_Recall",
+        "Val_F1",
+        *class_names,
+    ]
 
-    with open(config.METRICS_LOG_PATH, mode='w', newline='') as f:
+    with open(config.METRICS_LOG_PATH, mode="w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(headers)
 
@@ -246,9 +251,9 @@ def main():
     # Training loop with Dynamic "Best Model" criteria
     # ------------------------------------------------------------
     target_metric_name = getattr(config, "BEST_MODEL_METRIC", "val_acc")
-    
+
     if target_metric_name == "val_loss":
-        best_metric_value = float('inf')
+        best_metric_value = float("inf")
     else:
         best_metric_value = 0.0
 
@@ -275,14 +280,19 @@ def main():
 
         class_values = [f"{per_class_acc[i]:.4f}" for i in range(config.NUM_CLASSES)]
 
-        with open(config.METRICS_LOG_PATH, mode='a', newline='') as f:
+        with open(config.METRICS_LOG_PATH, mode="a", newline="") as f:
             writer = csv.writer(f)
             row_data = [
-                epoch, 
-                f"{train_loss:.4f}", f"{train_acc:.4f}", 
-                f"{val_loss:.4f}", f"{val_acc:.4f}",
-                f"{val_prec:.4f}", f"{val_rec:.4f}", f"{val_f1:.4f}"
-            ] + class_values
+                epoch,
+                f"{train_loss:.4f}",
+                f"{train_acc:.4f}",
+                f"{val_loss:.4f}",
+                f"{val_acc:.4f}",
+                f"{val_prec:.4f}",
+                f"{val_rec:.4f}",
+                f"{val_f1:.4f}",
+                *class_values,
+            ]
             writer.writerow(row_data)
 
         metrics_dict = {
@@ -290,9 +300,9 @@ def main():
             "val_acc": val_acc,
             "val_f1": val_f1,
             "val_precision": val_prec,
-            "val_recall": val_rec
+            "val_recall": val_rec,
         }
-        
+
         current_metric_value = metrics_dict.get(target_metric_name, val_acc)
 
         is_best = False

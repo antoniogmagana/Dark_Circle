@@ -43,12 +43,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from crl_vehicle.config import CRLConfig
 from crl_vehicle.data.dataset import (
-    SensorDataset, StratifiedPairDataset,
-    collate_pairs, collate_single,
+    SensorDataset,
+    StratifiedPairDataset,
+    collate_pairs,
+    collate_single,
     compute_class_weights,
 )
 from training.trainer import CRLModel, Trainer
-
 
 # ---------------------------------------------------------------------------
 # Experiment definitions
@@ -59,43 +60,43 @@ from training.trainer import CRLModel, Trainer
 
 EXPERIMENTS = [
     {
-        "name":        "baseline_multiscale",
+        "name": "baseline_multiscale",
         "description": "Default multiscale frontend, default loss weights",
-        "overrides":   {},
+        "overrides": {},
     },
     {
-        "name":        "baseline_morlet",
+        "name": "baseline_morlet",
         "description": "Morlet frontend, otherwise default",
-        "overrides":   {"frontend_type": "morlet"},
+        "overrides": {"frontend_type": "morlet"},
     },
     {
-        "name":        "high_interv",
+        "name": "high_interv",
         "description": "Stronger intervention matching signal (lambda_interv=2.0)",
-        "overrides":   {"lambda_interv": 2.0},
+        "overrides": {"lambda_interv": 2.0},
     },
     {
-        "name":        "low_interv",
+        "name": "low_interv",
         "description": "Weaker intervention signal (lambda_interv=0.5)",
-        "overrides":   {"lambda_interv": 0.5},
+        "overrides": {"lambda_interv": 0.5},
     },
     {
-        "name":        "more_partners",
+        "name": "more_partners",
         "description": "2 same-type + 2 diff-type + 2 cross-dataset partners",
-        "overrides":   {
+        "overrides": {
             "n_partners_same_type": 2,
             "n_partners_diff_type": 2,
-            "n_partners_cross_ds":  2,
+            "n_partners_cross_ds": 2,
         },
     },
     {
-        "name":        "larger_free_subspace",
+        "name": "larger_free_subspace",
         "description": "Larger free/nuisance subspace (d_free=13 vs 5) — extra capacity for signal variation the causal slots don't model",
-        "overrides":   {"d_z": 32},
+        "overrides": {"d_z": 32},
     },
     {
-        "name":        "aggressive_beta",
+        "name": "aggressive_beta",
         "description": "Faster beta growth and higher KL target for stronger VAE pressure",
-        "overrides":   {"beta_step": 0.05, "kl_target": 1.0},
+        "overrides": {"beta_step": 0.05, "kl_target": 1.0},
     },
 ]
 
@@ -103,6 +104,7 @@ EXPERIMENTS = [
 # ---------------------------------------------------------------------------
 # Device
 # ---------------------------------------------------------------------------
+
 
 def get_device() -> torch.device:
     if torch.cuda.is_available():
@@ -121,6 +123,7 @@ def get_device() -> torch.device:
 # Config helpers
 # ---------------------------------------------------------------------------
 
+
 def apply_overrides(cfg: CRLConfig, overrides: dict) -> CRLConfig:
     for k, v in overrides.items():
         if not hasattr(cfg, k):
@@ -133,26 +136,42 @@ def apply_overrides(cfg: CRLConfig, overrides: dict) -> CRLConfig:
 # Loader builders (wrap shared datasets — no I/O)
 # ---------------------------------------------------------------------------
 
+
 def build_loaders(train_ds, val_ds, cfg: CRLConfig, sensors: list[str]):
     pin = torch.cuda.is_available()
-    kw = dict(num_workers=cfg.num_workers, pin_memory=pin,
-              persistent_workers=cfg.num_workers > 0)
+    kw = {
+        "num_workers": cfg.num_workers,
+        "pin_memory": pin,
+        "persistent_workers": cfg.num_workers > 0,
+    }
 
     pair_train = DataLoader(
-        StratifiedPairDataset(train_ds), batch_size=cfg.batch_size,
-        shuffle=True, collate_fn=collate_pairs, **kw,
+        StratifiedPairDataset(train_ds),
+        batch_size=cfg.batch_size,
+        shuffle=True,
+        collate_fn=collate_pairs,
+        **kw,
     )
     pair_val = DataLoader(
-        StratifiedPairDataset(val_ds), batch_size=cfg.batch_size,
-        shuffle=False, collate_fn=collate_pairs, **kw,
+        StratifiedPairDataset(val_ds),
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        collate_fn=collate_pairs,
+        **kw,
     )
     single_train = DataLoader(
-        train_ds, batch_size=cfg.batch_size,
-        shuffle=True, collate_fn=collate_single, **kw,
+        train_ds,
+        batch_size=cfg.batch_size,
+        shuffle=True,
+        collate_fn=collate_single,
+        **kw,
     )
     single_val = DataLoader(
-        val_ds, batch_size=cfg.batch_size,
-        shuffle=False, collate_fn=collate_single, **kw,
+        val_ds,
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        collate_fn=collate_single,
+        **kw,
     )
     return pair_train, pair_val, single_train, single_val
 
@@ -160,6 +179,7 @@ def build_loaders(train_ds, val_ds, cfg: CRLConfig, sensors: list[str]):
 # ---------------------------------------------------------------------------
 # Metric readers
 # ---------------------------------------------------------------------------
+
 
 def _best_crl_elbo(save_dir: Path) -> tuple[float, int]:
     path = save_dir / "crl_metrics.csv"
@@ -178,8 +198,10 @@ def _best_crl_elbo(save_dir: Path) -> tuple[float, int]:
 def _best_downstream(save_dir: Path) -> dict:
     path = save_dir / "downstream_metrics.csv"
     best: dict[str, float] = {
-        "val_pres_f1": 0.0, "val_pres_acc": 0.0,
-        "val_type_f1": 0.0, "val_type_acc": 0.0,
+        "val_pres_f1": 0.0,
+        "val_pres_acc": 0.0,
+        "val_type_f1": 0.0,
+        "val_type_acc": 0.0,
         "val_loss": float("inf"),
     }
     if not path.exists():
@@ -197,6 +219,7 @@ def _best_downstream(save_dir: Path) -> dict:
 # Single experiment runner
 # ---------------------------------------------------------------------------
 
+
 def run_experiment(
     exp: dict,
     base_cfg: CRLConfig,
@@ -212,7 +235,7 @@ def run_experiment(
     type_weights: torch.Tensor | None = None,
 ) -> dict:
     name = exp["name"]
-    ts   = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     save_dir = experiments_dir / name / ts
     save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -225,27 +248,26 @@ def run_experiment(
 
     cfg = apply_overrides(deepcopy(base_cfg), exp["overrides"])
 
-    pair_train, pair_val, single_train, single_val = build_loaders(
-        train_ds, val_ds, cfg, sensors
-    )
+    pair_train, pair_val, single_train, single_val = build_loaders(train_ds, val_ds, cfg, sensors)
 
-    model   = CRLModel(cfg, sensors=sensors).to(device)
+    model = CRLModel(cfg, sensors=sensors).to(device)
     trainer = Trainer(model, cfg, device, save_dir)
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Parameters: {n_params:,}")
 
     t0 = time.time()
-    trainer.train_crl(pair_train, pair_val, epochs=crl_epochs,
-                      steps_per_epoch=steps_per_epoch)
+    trainer.train_crl(pair_train, pair_val, epochs=crl_epochs, steps_per_epoch=steps_per_epoch)
     crl_elapsed = time.time() - t0
     print(f"  CRL done in {crl_elapsed/60:.1f} min")
 
     t1 = time.time()
     trainer.train_downstream(
-        single_train, single_val, epochs=ds_epochs,
+        single_train,
+        single_val,
+        epochs=ds_epochs,
         pres_pos_weight=pres_weight.to(device) if pres_weight is not None else None,
-        type_class_weights=type_weights.to(device) if type_weights is not None else None,
+        type_class_weights=(type_weights.to(device) if type_weights is not None else None),
     )
     ds_elapsed = time.time() - t1
     print(f"  Downstream done in {ds_elapsed/60:.1f} min")
@@ -254,14 +276,14 @@ def run_experiment(
     ds_best = _best_downstream(save_dir)
 
     summary = {
-        "name":                   name,
-        "timestamp":              ts,
-        "description":            exp["description"],
-        "overrides":              exp["overrides"],
-        "crl_elapsed_min":        round(crl_elapsed / 60, 2),
-        "ds_elapsed_min":         round(ds_elapsed / 60, 2),
-        "best_val_ref_elbo":      round(best_elbo, 4),
-        "crl_converged_epoch":    conv_epoch,
+        "name": name,
+        "timestamp": ts,
+        "description": exp["description"],
+        "overrides": exp["overrides"],
+        "crl_elapsed_min": round(crl_elapsed / 60, 2),
+        "ds_elapsed_min": round(ds_elapsed / 60, 2),
+        "best_val_ref_elbo": round(best_elbo, 4),
+        "crl_converged_epoch": conv_epoch,
         **{k: round(v, 4) for k, v in ds_best.items()},
     }
     (save_dir / "experiment_summary.json").write_text(json.dumps(summary, indent=2))
@@ -272,6 +294,7 @@ def run_experiment(
 # Report
 # ---------------------------------------------------------------------------
 
+
 def write_report(summaries: list[dict], report_path: Path) -> None:
     baseline = next((s for s in summaries if s["name"] == "baseline_multiscale"), summaries[0])
     baseline_pres_f1 = baseline.get("val_pres_f1", 0.0)
@@ -281,21 +304,26 @@ def write_report(summaries: list[dict], report_path: Path) -> None:
     for s in summaries:
         delta_pres = s.get("val_pres_f1", 0.0) - baseline_pres_f1
         delta_type = s.get("val_type_f1", 0.0) - baseline_type_f1
-        verdict = "IMPROVED" if (delta_pres + delta_type) > 0.05 else (
-                  "MARGINAL"  if (delta_pres + delta_type) > 0 else "NO_CHANGE")
-        comparison.append({
-            "name":             s["name"],
-            "description":      s["description"],
-            "overrides":        s.get("overrides", {}),
-            "best_val_ref_elbo": s.get("best_val_ref_elbo", float("inf")),
-            "val_pres_f1":      s.get("val_pres_f1", 0.0),
-            "val_type_f1":      s.get("val_type_f1", 0.0),
-            "val_pres_acc":     s.get("val_pres_acc", 0.0),
-            "val_type_acc":     s.get("val_type_acc", 0.0),
-            "delta_pres_f1":    round(delta_pres, 4),
-            "delta_type_f1":    round(delta_type, 4),
-            "verdict":          verdict,
-        })
+        verdict = (
+            "IMPROVED"
+            if (delta_pres + delta_type) > 0.05
+            else ("MARGINAL" if (delta_pres + delta_type) > 0 else "NO_CHANGE")
+        )
+        comparison.append(
+            {
+                "name": s["name"],
+                "description": s["description"],
+                "overrides": s.get("overrides", {}),
+                "best_val_ref_elbo": s.get("best_val_ref_elbo", float("inf")),
+                "val_pres_f1": s.get("val_pres_f1", 0.0),
+                "val_type_f1": s.get("val_type_f1", 0.0),
+                "val_pres_acc": s.get("val_pres_acc", 0.0),
+                "val_type_acc": s.get("val_type_acc", 0.0),
+                "delta_pres_f1": round(delta_pres, 4),
+                "delta_type_f1": round(delta_type, 4),
+                "verdict": verdict,
+            }
+        )
 
     report = {"summaries": summaries, "comparison": comparison}
     report_path.write_text(json.dumps(report, indent=2))
@@ -303,8 +331,10 @@ def write_report(summaries: list[dict], report_path: Path) -> None:
     print(f"\n{'=' * 80}")
     print("  EXPERIMENT COMPARISON")
     print(f"{'=' * 80}")
-    print(f"  {'Experiment':<26} {'ELBO':>7} {'PresF1':>7} {'TypeF1':>7} "
-          f"{'dPres':>7} {'dType':>7}  Verdict")
+    print(
+        f"  {'Experiment':<26} {'ELBO':>7} {'PresF1':>7} {'TypeF1':>7} "
+        f"{'dPres':>7} {'dType':>7}  Verdict"
+    )
     print(f"  {'-'*26} {'-'*7} {'-'*7} {'-'*7} {'-'*7} {'-'*7}  -------")
     for c in comparison:
         elbo = c["best_val_ref_elbo"]
@@ -320,6 +350,7 @@ def write_report(summaries: list[dict], report_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # YAML sweep (subprocess mode)
 # ---------------------------------------------------------------------------
+
 
 def load_sweep_yaml(path: Path) -> tuple[dict, list[dict]]:
     """Load a sweep YAML into (base_config, runs).
@@ -364,13 +395,13 @@ def load_sweep_yaml(path: Path) -> tuple[dict, list[dict]]:
 # CRLConfig fields that have a dedicated train.py CLI flag. Everything else
 # goes through --config-overrides-json to avoid argparse pollution.
 _TRAIN_PY_FLAGS = {
-    "frontend_type":            "--frontend",
-    "training_mode":            "--training-mode",
-    "batch_size":               "--batch-size",
-    "lr":                       "--lr",
-    "num_workers":              "--num-workers",
-    "n_epochs":                 "--crl-epochs",
-    "morlet_learnable_w0":      None,  # store_true — special-cased below
+    "frontend_type": "--frontend",
+    "training_mode": "--training-mode",
+    "batch_size": "--batch-size",
+    "lr": "--lr",
+    "num_workers": "--num-workers",
+    "n_epochs": "--crl-epochs",
+    "morlet_learnable_w0": None,  # store_true — special-cased below
     "morlet_learnable_lr_mult": "--morlet-learnable-lr-mult",
 }
 
@@ -422,7 +453,7 @@ def _collect_run_metrics(run_dir: Path) -> dict:
     best_elbo, conv_epoch = _best_crl_elbo(run_dir)
     ds_best = _best_downstream(run_dir)
     return {
-        "best_val_ref_elbo":   round(best_elbo, 4) if best_elbo != float("inf") else None,
+        "best_val_ref_elbo": round(best_elbo, 4) if best_elbo != float("inf") else None,
         "crl_converged_epoch": conv_epoch,
         **{k: round(v, 4) for k, v in ds_best.items()},
     }
@@ -455,8 +486,7 @@ def run_yaml_sweep(
         valid = {r["name"] for r in runs}
         unknown = set(only) - valid
         if unknown:
-            raise ValueError(f"--only: unknown names {sorted(unknown)}. "
-                             f"Valid: {sorted(valid)}")
+            raise ValueError(f"--only: unknown names {sorted(unknown)}. " f"Valid: {sorted(valid)}")
         runs = [r for r in runs if r["name"] in only]
 
     python_exe = sys.executable
@@ -495,14 +525,16 @@ def run_yaml_sweep(
             result = subprocess.run(argv, check=False)
             elapsed = time.time() - t0
             if result.returncode != 0:
-                summaries.append({
-                    "name": name, "overrides": run.get("overrides", {}),
-                    "returncode": result.returncode,
-                    "elapsed_min": round(elapsed / 60, 2),
-                    "error": f"subprocess exited with code {result.returncode}",
-                })
-                print(f"  FAILED: returncode={result.returncode} "
-                      f"({elapsed/60:.1f} min)")
+                summaries.append(
+                    {
+                        "name": name,
+                        "overrides": run.get("overrides", {}),
+                        "returncode": result.returncode,
+                        "elapsed_min": round(elapsed / 60, 2),
+                        "error": f"subprocess exited with code {result.returncode}",
+                    }
+                )
+                print(f"  FAILED: returncode={result.returncode} " f"({elapsed/60:.1f} min)")
                 continue
         except KeyboardInterrupt:
             print(f"\n  INTERRUPTED during {name}")
@@ -510,10 +542,10 @@ def run_yaml_sweep(
 
         metrics = _collect_run_metrics(run_dir)
         summary = {
-            "name":        name,
-            "overrides":   run.get("overrides", {}),
+            "name": name,
+            "overrides": run.get("overrides", {}),
             "elapsed_min": round(elapsed / 60, 2),
-            "returncode":  0,
+            "returncode": 0,
             **metrics,
         }
         summaries.append(summary)
@@ -525,15 +557,21 @@ def run_yaml_sweep(
 
 def write_sweep_summary(summaries: list[dict], out_dir: Path) -> None:
     """Write sweep summary.csv and summary.json under out_dir."""
-    summary_csv  = out_dir / "summary.csv"
+    summary_csv = out_dir / "summary.csv"
     summary_json = out_dir / "summary.json"
 
     metric_keys = [
-        "best_val_ref_elbo", "crl_converged_epoch",
-        "val_pres_f1", "val_pres_acc", "val_type_f1", "val_type_acc",
-        "val_loss", "elapsed_min", "returncode",
+        "best_val_ref_elbo",
+        "crl_converged_epoch",
+        "val_pres_f1",
+        "val_pres_acc",
+        "val_type_f1",
+        "val_type_acc",
+        "val_loss",
+        "elapsed_min",
+        "returncode",
     ]
-    fieldnames = ["name"] + metric_keys + ["overrides"]
+    fieldnames = ["name", *metric_keys, "overrides"]
 
     with open(summary_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -551,23 +589,32 @@ def write_sweep_summary(summaries: list[dict], out_dir: Path) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def parse_args():
     p = argparse.ArgumentParser(description="CRL hyperparameter sweep")
-    p.add_argument("--data-dir",        default="../data_files/parsed/train")
-    p.add_argument("--val-dir",         default="../data_files/parsed/val")
-    p.add_argument("--cache-dir",       default="./saved_crl/caches/waveform")
-    p.add_argument("--out-dir",         default="./saved_crl/runs/_archive/experiments_sweep")
-    p.add_argument("--crl-epochs",      type=int, default=100)
-    p.add_argument("--ds-epochs",       type=int, default=50)
-    p.add_argument("--batch-size",      type=int, default=None)
-    p.add_argument("--num-workers",     type=int, default=None)
-    p.add_argument("--steps-per-epoch", type=int, default=None,
-                   help="Limit batches per epoch (for smoke tests)")
+    p.add_argument("--data-dir", default="../data_files/parsed/train")
+    p.add_argument("--val-dir", default="../data_files/parsed/val")
+    p.add_argument("--cache-dir", default="./saved_crl/caches/waveform")
+    p.add_argument("--out-dir", default="./saved_crl/runs/_archive/experiments_sweep")
+    p.add_argument("--crl-epochs", type=int, default=100)
+    p.add_argument("--ds-epochs", type=int, default=50)
+    p.add_argument("--batch-size", type=int, default=None)
+    p.add_argument("--num-workers", type=int, default=None)
+    p.add_argument(
+        "--steps-per-epoch",
+        type=int,
+        default=None,
+        help="Limit batches per epoch (for smoke tests)",
+    )
     p.add_argument("--only", nargs="+", default=None, metavar="NAME")
-    p.add_argument("--sweep",           default=None, metavar="YAML",
-                   help="Path to a sweep YAML. When set, each run launches "
-                        "train.py in a subprocess (GPU/crash isolation). When "
-                        "omitted, the hardcoded EXPERIMENTS list runs in-process.")
+    p.add_argument(
+        "--sweep",
+        default=None,
+        metavar="YAML",
+        help="Path to a sweep YAML. When set, each run launches "
+        "train.py in a subprocess (GPU/crash isolation). When "
+        "omitted, the hardcoded EXPERIMENTS list runs in-process.",
+    )
     return p.parse_args()
 
 
@@ -578,10 +625,10 @@ def main():
     # subprocess children each build their own datasets from the shared cache.
     if args.sweep is not None:
         extra_cli = {
-            "--data-dir":        args.data_dir,
-            "--val-dir":         args.val_dir,
-            "--cache-dir":       args.cache_dir,
-            "--ds-epochs":       args.ds_epochs,
+            "--data-dir": args.data_dir,
+            "--val-dir": args.val_dir,
+            "--cache-dir": args.cache_dir,
+            "--ds-epochs": args.ds_epochs,
             "--steps-per-epoch": args.steps_per_epoch,
         }
         cli_base: dict = {}
@@ -617,14 +664,18 @@ def main():
     # Build datasets ONCE — shared across all experiments
     print("\nPreloading datasets into shared memory …")
     t_load = time.time()
-    train_ds = SensorDataset(args.data_dir, base_cfg, is_train=True,  cache_dir=cache_dir)
-    val_ds   = SensorDataset(args.val_dir,  base_cfg, is_train=False, cache_dir=cache_dir)
-    print(f"  Done in {(time.time()-t_load)/60:.1f} min  "
-          f"({len(train_ds):,} train / {len(val_ds):,} val windows)")
+    train_ds = SensorDataset(args.data_dir, base_cfg, is_train=True, cache_dir=cache_dir)
+    val_ds = SensorDataset(args.val_dir, base_cfg, is_train=False, cache_dir=cache_dir)
+    print(
+        f"  Done in {(time.time()-t_load)/60:.1f} min  "
+        f"({len(train_ds):,} train / {len(val_ds):,} val windows)"
+    )
 
     pres_weight, type_weights = compute_class_weights(train_ds)
-    print(f"  Class weights — pres pos_weight: {pres_weight:.3f} | "
-          f"type: {[round(w, 3) for w in type_weights.tolist()]}")
+    print(
+        f"  Class weights — pres pos_weight: {pres_weight:.3f} | "
+        f"type: {[round(w, 3) for w in type_weights.tolist()]}"
+    )
 
     experiments = EXPERIMENTS
     if args.only:
@@ -643,8 +694,13 @@ def main():
     for exp in experiments:
         try:
             summary = run_experiment(
-                exp, base_cfg, train_ds, val_ds, device,
-                experiments_dir, sensors,
+                exp,
+                base_cfg,
+                train_ds,
+                val_ds,
+                device,
+                experiments_dir,
+                sensors,
                 crl_epochs=args.crl_epochs,
                 ds_epochs=args.ds_epochs,
                 steps_per_epoch=args.steps_per_epoch,
@@ -654,14 +710,17 @@ def main():
             summaries.append(summary)
         except Exception as exc:
             import traceback
+
             print(f"\nERROR in {exp['name']}: {exc}")
             traceback.print_exc()
-            summaries.append({
-                "name": exp["name"],
-                "description": f"{exp['description']} (FAILED)",
-                "overrides": exp["overrides"],
-                "error": str(exc),
-            })
+            summaries.append(
+                {
+                    "name": exp["name"],
+                    "description": f"{exp['description']} (FAILED)",
+                    "overrides": exp["overrides"],
+                    "error": str(exc),
+                }
+            )
 
     write_report(summaries, experiments_dir / "report.json")
 

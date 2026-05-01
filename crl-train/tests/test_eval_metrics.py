@@ -1,22 +1,26 @@
 """Tests for eval.py metric functions that don't require loading a model."""
+
 import pytest
 import torch
-
 from eval import (
-    binary_metrics, multiclass_metrics,
-    recalibrated_binary_metrics, recalibrated_multiclass_metrics,
+    binary_metrics,
+    multiclass_metrics,
+    recalibrated_binary_metrics,
+    recalibrated_multiclass_metrics,
 )
 
 
 class TestMulticlassSupportOnly:
     def test_all_classes_present_equals_raw_macro(self):
         """When every class has support, macro_f1 == macro_f1_support_only."""
-        logits = torch.tensor([
-            [2.0, 0.0, 0.0, 0.0],  # pred 0, label 0
-            [0.0, 2.0, 0.0, 0.0],  # pred 1, label 1
-            [0.0, 0.0, 2.0, 0.0],  # pred 2, label 2
-            [0.0, 0.0, 0.0, 2.0],  # pred 3, label 3
-        ])
+        logits = torch.tensor(
+            [
+                [2.0, 0.0, 0.0, 0.0],  # pred 0, label 0
+                [0.0, 2.0, 0.0, 0.0],  # pred 1, label 1
+                [0.0, 0.0, 2.0, 0.0],  # pred 2, label 2
+                [0.0, 0.0, 0.0, 2.0],  # pred 3, label 3
+            ]
+        )
         labels = torch.tensor([0, 1, 2, 3])
         m = multiclass_metrics(logits, labels, n_classes=4)
         assert m["macro_f1"] == m["macro_f1_support_only"]
@@ -24,15 +28,17 @@ class TestMulticlassSupportOnly:
 
     def test_missing_classes_inflate_support_only(self):
         """On a split with only 2 of 4 classes, support_only is higher than unfiltered."""
-        logits = torch.tensor([
-            [2.0, 0.0, 0.0, 0.0],
-            [2.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, 2.0, 0.0],
-            [0.0, 0.0, 2.0, 0.0],
-        ])
+        logits = torch.tensor(
+            [
+                [2.0, 0.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 2.0, 0.0],
+                [0.0, 0.0, 2.0, 0.0],
+            ]
+        )
         labels = torch.tensor([0, 0, 2, 2])  # only classes 0 and 2 present
         m = multiclass_metrics(logits, labels, n_classes=4)
-        assert m["macro_f1"] == pytest.approx(0.5)          # (1 + 0 + 1 + 0) / 4
+        assert m["macro_f1"] == pytest.approx(0.5)  # (1 + 0 + 1 + 0) / 4
         assert m["macro_f1_support_only"] == pytest.approx(1.0)  # (1 + 1) / 2
 
     def test_zero_support_overall_is_zero(self):

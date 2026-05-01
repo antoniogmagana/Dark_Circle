@@ -4,9 +4,9 @@
 import os
 
 import rclpy
-from kubernetes import client, config as k8s_config
+from kubernetes import client
+from kubernetes import config as k8s_config
 from rclpy.node import Node
-
 from whitelist import (
     ArraySpec,
     InvalidConfigError,
@@ -51,9 +51,7 @@ class DiscoveryNode(Node):
             with open(self.config_path) as f:
                 return load_config(f.read())
         except FileNotFoundError:
-            self.get_logger().error(
-                f"config file {self.config_path} not found; treating as empty"
-            )
+            self.get_logger().error(f"config file {self.config_path} not found; treating as empty")
             return {}
         except InvalidConfigError as exc:
             self.get_logger().error(f"invalid config, ignoring this poll: {exc}")
@@ -61,9 +59,7 @@ class DiscoveryNode(Node):
 
     def _visible_topics(self) -> set[str]:
         return {
-            topic
-            for topic, types in self.get_topic_names_and_types()
-            if SENSOR_MSG_TYPE in types
+            topic for topic, types in self.get_topic_names_and_types() if SENSOR_MSG_TYPE in types
         }
 
     def _spawn(self, sensor_array: str, spec: ArraySpec):
@@ -99,9 +95,7 @@ class DiscoveryNode(Node):
             self._teardown(array_id)
 
         for array_id, missing in decision.log_awaiting.items():
-            self.get_logger().info(
-                f"awaiting {array_id}: missing {sorted(missing)}"
-            )
+            self.get_logger().info(f"awaiting {array_id}: missing {sorted(missing)}")
 
         self._log_unknown_topics(cfg, visible)
 

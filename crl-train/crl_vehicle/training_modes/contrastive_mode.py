@@ -5,12 +5,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from crl_vehicle.data.dataset import (
-    STRATUM_CONSEC, STRATUM_CROSS_DS, STRATUM_DIFF_TYPE, STRATUM_SAME_TYPE,
+    STRATUM_CONSEC,
+    STRATUM_SAME_TYPE,
 )
 from crl_vehicle.data.transforms import apply_intervention_batch
 from crl_vehicle.losses.contrastive import nt_xent_loss
 from crl_vehicle.training_modes.base import CheckpointState, TrainingMode
-
 
 _POSITIVE_STRATA = (STRATUM_CONSEC, STRATUM_SAME_TYPE)
 
@@ -37,7 +37,7 @@ class ContrastiveTrainingMode(TrainingMode):
     def __init__(self, config) -> None:
         super().__init__()
         self.config = config
-        d_z    = config.d_z
+        d_z = config.d_z
         d_proj = config.contrastive_d_proj
         self.projection = nn.Sequential(
             nn.Linear(d_z, d_proj),
@@ -55,8 +55,7 @@ class ContrastiveTrainingMode(TrainingMode):
     ) -> tuple[torch.Tensor, dict]:
         n_partners = batch["n_partners"]
         if n_partners == 0:
-            return torch.zeros((), device=device, requires_grad=True), \
-                   {"contrastive_loss": 0.0}
+            return torch.zeros((), device=device, requires_grad=True), {"contrastive_loss": 0.0}
 
         if model.is_fused_frontend():
             mu_t, mu_parts, is_pos = self._encode_fused(model, batch, n_partners, device)
@@ -64,8 +63,7 @@ class ContrastiveTrainingMode(TrainingMode):
             mu_t, mu_parts, is_pos = self._encode_per_sensor(model, batch, n_partners, device)
 
         if mu_t is None:
-            return torch.zeros((), device=device, requires_grad=True), \
-                   {"contrastive_loss": 0.0}
+            return torch.zeros((), device=device, requires_grad=True), {"contrastive_loss": 0.0}
 
         z_a = F.normalize(self.projection(mu_t), dim=-1)
         B, P, _ = mu_parts.shape
@@ -89,24 +87,21 @@ class ContrastiveTrainingMode(TrainingMode):
         _, _, mu_t, _ = model.encode_fused(x_a, x_s)
 
         mu_parts = []
-        strata   = []
+        strata = []
         for p in range(n_partners):
             xa = batch[f"x_audio_p{p}"][avail].to(dev)
             xs = batch[f"x_seismic_p{p}"][avail].to(dev)
             _, _, mu_p, _ = model.encode_fused(xa, xs)
             mu_parts.append(mu_p)
             strata.append(batch[f"partner_stratum_p{p}"][avail].to(dev))
-        mu_parts = torch.stack(mu_parts, dim=1)     # (B, P, d_z)
-        strata_t = torch.stack(strata, dim=1)        # (B, P)
+        mu_parts = torch.stack(mu_parts, dim=1)  # (B, P, d_z)
+        strata_t = torch.stack(strata, dim=1)  # (B, P)
         is_pos = self._positive_mask(strata_t)
         return mu_t, mu_parts, is_pos
 
     def _encode_per_sensor(self, model, batch, n_partners, dev):
         """Mean over available sensors — gives one anchor representation per
         sample even when only one modality is present."""
-        mu_a_list: list[torch.Tensor] = []
-        mu_p_list: list[torch.Tensor] = []
-        strata_list: list[torch.Tensor] = []
 
         # Build a per-sample mask of samples where at least one sensor is
         # available, and encode each available sensor.
@@ -156,14 +151,13 @@ class ContrastiveTrainingMode(TrainingMode):
                 mu_p_sum[idx, p] += mu_p
             mu_p_cnt[idx] += 1  # counts only depend on sample, not p
 
-        mu_t    = mu_t_sum / mu_t_cnt.clamp(min=1)
+        mu_t = mu_t_sum / mu_t_cnt.clamp(min=1)
         mu_parts = mu_p_sum / mu_p_cnt.clamp(min=1).unsqueeze(-1)
 
         # Strata are per-sample (not per-sensor). Use the mask of samples with
         # at least one sensor.
         strata = torch.stack(
-            [batch[f"partner_stratum_p{p}"][any_avail].to(dev)
-             for p in range(n_partners)],
+            [batch[f"partner_stratum_p{p}"][any_avail].to(dev) for p in range(n_partners)],
             dim=1,
         )
         is_pos = self._positive_mask(strata)

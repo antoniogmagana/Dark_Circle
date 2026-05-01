@@ -1,0 +1,76 @@
+# Repo-root tool config. Each sister project keeps its own pyproject.toml
+# for poetry/dependency metadata; this file holds linting/formatting config
+# applied uniformly across the whole repo.
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+extend-exclude = '''
+/(
+    \.venv
+  | __pycache__
+  | saved_crl
+  | scratch
+  | install
+  | build
+  | log
+  | data_exploration_notebooks
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+    ".venv",
+    "__pycache__",
+    "saved_crl",
+    "scratch",
+    "install",
+    "build",
+    "log",
+    "data_exploration_notebooks",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",   # line length (handled by black)
+    "B008",   # function call in default argument (common in torch)
+    "SIM108", # ternary if-else
+    "RUF001", # ambiguous unicode in strings (×, −, Δ are intentional in scientific docs)
+    "RUF002", # ambiguous unicode in docstrings
+    "RUF003", # ambiguous unicode in comments
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+"test/*" = ["B011"]
+"**/tests/*" = ["B011"]
+"**/test/*" = ["B011"]
+"__init__.py" = ["F401"]
+# Deferred imports after sys.path manipulation
+"crl-train/tests/data/test_id_split.py" = ["E402"]
+"crl-train/tests/data/test_id_split_dataset.py" = ["E402"]
+"crl-train/export_for_inference.py" = ["E402"]
+"enforced-train/eval.py" = ["E402"]
+"ensemble-train/eval.py" = ["E402"]
+"model-train/eval.py" = ["E402"]
+"test/test_models.py" = ["E402"]
+"test/test_dataset.py" = ["E402"]
+"test/test_ensemble.py" = ["E402"]
+# Smoke-test that imports modules to verify they load
+"test/test.py" = ["F401"]
+
+# Type checking is Pyright, configured in pyrightconfig.json. It runs in
+# Pylance/VS Code in real time and via `pyright .` on the CLI.

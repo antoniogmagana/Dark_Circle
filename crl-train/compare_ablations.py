@@ -19,6 +19,7 @@ Usage
 Output:
     ablations.md — one section per axis with a delta table, or "no pairs".
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,13 +30,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from crl_vehicle import analysis as A
 
-
 # --------------------------------------------------------------------------
 # Pairing
 # --------------------------------------------------------------------------
 
+
 def find_pairs_along_axis(
-    runs: list[A.RunMetrics], axis: str, all_axes: tuple[str, ...],
+    runs: list[A.RunMetrics],
+    axis: str,
+    all_axes: tuple[str, ...],
 ) -> list[tuple[A.RunMetrics, A.RunMetrics]]:
     """Return list of (baseline, variant) pairs where `axis` differs and all
     other axes match. Ordering within a pair is arbitrary; the report
@@ -72,6 +75,7 @@ def _fmt_run(rm: A.RunMetrics) -> str:
 # Markdown
 # --------------------------------------------------------------------------
 
+
 def render_axis_section(axis: str, pairs: list[tuple[A.RunMetrics, A.RunMetrics]]) -> str:
     lines = [f"## {axis}", ""]
     if not pairs:
@@ -79,8 +83,7 @@ def render_axis_section(axis: str, pairs: list[tuple[A.RunMetrics, A.RunMetrics]
         lines.append("")
         return "\n".join(lines)
     lines.append(
-        "| Baseline | Variant | Axis: base → variant | "
-        "Δpres_f1 | Δtype_f1 | Δref_elbo |"
+        "| Baseline | Variant | Axis: base → variant | " "Δpres_f1 | Δtype_f1 | Δref_elbo |"
     )
     lines.append("|---|---|---|---|---|---|")
     for a, b in pairs:
@@ -102,7 +105,8 @@ def render_axis_section(axis: str, pairs: list[tuple[A.RunMetrics, A.RunMetrics]
 
 
 def render_report(
-    axes: tuple[str, ...], runs: list[A.RunMetrics],
+    axes: tuple[str, ...],
+    runs: list[A.RunMetrics],
 ) -> str:
     header = [
         "# Ablation Pairs",
@@ -124,15 +128,25 @@ def render_report(
 # CLI
 # --------------------------------------------------------------------------
 
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--root", default="saved_crl/runs", type=Path)
-    p.add_argument("--out",  default="saved_crl/analysis/ablations.md", type=Path)
-    p.add_argument("--filter", action="append", default=[], metavar="key=val",
-                   help="Filter runs by config field before pairing (repeatable).")
+    p.add_argument("--out", default="saved_crl/analysis/ablations.md", type=Path)
+    p.add_argument(
+        "--filter",
+        action="append",
+        default=[],
+        metavar="key=val",
+        help="Filter runs by config field before pairing (repeatable).",
+    )
     p.add_argument("--include-diverged", action="store_true")
-    p.add_argument("--axes", nargs="+", default=list(A.ABLATION_AXES),
-                   help=f"Axes to pair along. Default: all of {A.ABLATION_AXES}.")
+    p.add_argument(
+        "--axes",
+        nargs="+",
+        default=list(A.ABLATION_AXES),
+        help=f"Axes to pair along. Default: all of {A.ABLATION_AXES}.",
+    )
     return p.parse_args()
 
 

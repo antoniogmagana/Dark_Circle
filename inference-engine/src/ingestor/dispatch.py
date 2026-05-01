@@ -4,15 +4,14 @@ Pure logic for SENSOR_ROLE_MAP parsing and per-role callback construction.
 Free of rclpy / nats imports so it can be unit-tested without the runtime.
 ``ingestor.main`` imports from here and adds the ROS2 / NATS plumbing.
 """
+
 import json
-from typing import Callable
+from collections.abc import Callable
 
 NATS_SUBJECT = "sensor.data"
 
 # Keys the SensorBuffer accepts as channel roles.
-VALID_ROLES = frozenset(
-    {"acoustic", "seismic", "accel_x", "accel_y", "accel_z"}
-)
+VALID_ROLES = frozenset({"acoustic", "seismic", "accel_x", "accel_y", "accel_z"})
 REQUIRED_ROLES = frozenset({"acoustic", "seismic"})
 ACCEL_ROLES = frozenset({"accel_x", "accel_y", "accel_z"})
 
@@ -83,9 +82,7 @@ def make_role_callback(
                 flush=True,
             )
         try:
-            payload = buffer.load_buffer(
-                role, msg.start_time, msg.amplitude_readings
-            )
+            payload = buffer.load_buffer(role, msg.start_time, msg.amplitude_readings)
         except Exception as exc:
             print(f"[dispatch:{role}] buffer error: {exc!r}", flush=True)
             raise

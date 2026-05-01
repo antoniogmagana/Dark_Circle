@@ -1,12 +1,17 @@
 """Tests using MagicMock — no parquet files required."""
+
+from unittest.mock import MagicMock
+
 import pytest
 import torch
-import numpy as np
-from unittest.mock import MagicMock
 from crl_vehicle.config import CRLConfig
 from crl_vehicle.data.dataset import (
-    StratifiedPairDataset, collate_pairs, collate_single,
-    STRATUM_CONSEC, STRATUM_SAME_TYPE, STRATUM_DIFF_TYPE, STRATUM_CROSS_DS,
+    STRATUM_CONSEC,
+    STRATUM_CROSS_DS,
+    STRATUM_DIFF_TYPE,
+    STRATUM_SAME_TYPE,
+    StratifiedPairDataset,
+    collate_pairs,
 )
 
 
@@ -17,20 +22,20 @@ def _make_mock_sensor_ds(cfg=None):
 
     # 3 groups: iobt/polaris(light=1), iobt/silverado(utility=3), focal/motor(light=1)
     gkeys = [
-        ("iobt",  "polaris0150pm",  "rs0", None),
-        ("iobt",  "silverado0255pm", "rs0", None),
-        ("focal", "motor",           "rs0", None),
+        ("iobt", "polaris0150pm", "rs0", None),
+        ("iobt", "silverado0255pm", "rs0", None),
+        ("focal", "motor", "rs0", None),
     ]
     vtypes = [1, 3, 1]
 
     index = []
     groups = {}
-    for seg_id, (gkey, vtype) in enumerate(zip(gkeys, vtypes)):
+    for seg_id, (gkey, vtype) in enumerate(zip(gkeys, vtypes, strict=False)):
         ds_name, vehicle, rs, seg_key = gkey
         for w in range(3):
             index.append((gkey, w, vtype, 1, seg_id, seg_id))
         groups[gkey] = {
-            "audio_stem":   f"{ds_name}_audio_{vehicle}_{rs}",
+            "audio_stem": f"{ds_name}_audio_{vehicle}_{rs}",
             "seismic_stem": f"{ds_name}_seismic_{vehicle}_{rs}",
             "seg_key": seg_key,
             "audio_nw": 3,
@@ -53,7 +58,6 @@ def _make_mock_sensor_ds(cfg=None):
 
 
 class TestStratifiedPairDataset:
-
     @pytest.fixture
     def pair_ds(self):
         return StratifiedPairDataset(_make_mock_sensor_ds())
@@ -64,8 +68,14 @@ class TestStratifiedPairDataset:
 
     def test_anchor_keys_present(self, pair_ds):
         item = pair_ds[0]
-        for key in ["x_audio_t", "x_seismic_t", "detection_label_t",
-                    "vehicle_type_t", "audio_avail", "seismic_avail"]:
+        for key in [
+            "x_audio_t",
+            "x_seismic_t",
+            "detection_label_t",
+            "vehicle_type_t",
+            "audio_avail",
+            "seismic_avail",
+        ]:
             assert key in item, f"Missing key: {key}"
 
     def test_partner_keys_present(self, pair_ds):
@@ -89,7 +99,7 @@ class TestStratifiedPairDataset:
         assert pair_ds[0]["x_audio_t"].shape == (1, 16000)
 
     def test_seismic_shape(self, pair_ds):
-        assert pair_ds[0]["x_seismic_t"].shape == (1, 200)
+        assert pair_ds[0]["x_seismic_t"].shape == (1, 100)
 
     def test_n_partners_matches_config(self, pair_ds):
         cfg = pair_ds.ds.cfg
@@ -104,7 +114,6 @@ class TestStratifiedPairDataset:
 
 
 class TestCollatePairs:
-
     def test_stacks_batch_dim(self):
         pair_ds = StratifiedPairDataset(_make_mock_sensor_ds())
         batch = [pair_ds[i] for i in range(2)]

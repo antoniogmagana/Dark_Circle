@@ -3,9 +3,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from crl_vehicle.config import CATEGORY_TO_IDX, LABEL_BACKGROUND, LABEL_MULTI
+from crl_vehicle.config import CATEGORY_TO_IDX, LABEL_MULTI
 from crl_vehicle.priors.base import Prior
-
 
 # Label-space size:
 #   LABEL_MULTI     = -2  → index 0
@@ -104,9 +103,5 @@ class ConditionalPrior(Prior):
         #   0.5 * (log σ_p² - log σ_q² + (σ_q² + (μ_q - μ_p)²) / σ_p² - 1)
         var_q = logvar.exp()
         inv_var_p = (-logvar_p).exp()
-        kl = 0.5 * (
-            logvar_p - logvar
-            + (var_q + (mu - mu_p).pow(2)) * inv_var_p
-            - 1.0
-        )
+        kl = 0.5 * (logvar_p - logvar + (var_q + (mu - mu_p).pow(2)) * inv_var_p - 1.0)
         return kl.sum(dim=-1).mean()

@@ -14,6 +14,7 @@ selection by val_ref_elbo and val_aux_type_f1). Future modes:
 Selection is via CRLConfig.training_mode. Factory function build_training_mode
 reads the config and instantiates the correct mode + prior.
 """
+
 from crl_vehicle.training_modes.base import CheckpointState, TrainingMode
 from crl_vehicle.training_modes.contrastive_mode import ContrastiveTrainingMode
 from crl_vehicle.training_modes.disentangled_mode import DisentangledVAETrainingMode

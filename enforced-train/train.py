@@ -1,21 +1,23 @@
 import csv
 import random
+
+import config
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-from torch.utils.data import DataLoader, Sampler, WeightedRandomSampler
-from sklearn.metrics import (
-    precision_score,
-    recall_score,
-    f1_score,
-    confusion_matrix,
-    matthews_corrcoef,
-)
 from data_generator import augment_batch
 from dataset import VehicleDataset
-from models import build_model
 from preprocess import preprocess_for_training
-import config
+from sklearn.metrics import (
+    confusion_matrix,
+    f1_score,
+    matthews_corrcoef,
+    precision_score,
+    recall_score,
+)
+from torch.utils.data import DataLoader, Sampler, WeightedRandomSampler
+
+from models import build_model
 
 
 class EpochShuffleSampler(Sampler):
@@ -40,8 +42,9 @@ class EpochShuffleSampler(Sampler):
         return len(self.dataset)
 
 
-def train_one_epoch(model, loader, optimizer, criterion, device, config, epoch,
-                    steps_per_epoch=None):
+def train_one_epoch(
+    model, loader, optimizer, criterion, device, config, epoch, steps_per_epoch=None
+):
     model.train()
     total_loss = 0
     total_correct = 0
@@ -50,7 +53,7 @@ def train_one_epoch(model, loader, optimizer, criterion, device, config, epoch,
     amp_enabled = getattr(config, "AMP_ENABLED", False) and device.type == "cuda"
     amp_dtype = getattr(torch, getattr(config, "AMP_DTYPE", "bfloat16"))
 
-    for batch_idx, (x, y, dataset_names) in enumerate(loader):
+    for batch_idx, (x, y, _dataset_names) in enumerate(loader):
         if steps_per_epoch is not None and batch_idx >= steps_per_epoch:
             break
 
@@ -88,7 +91,7 @@ def evaluate(model, loader, criterion, device, config, steps_per_epoch=None):
     amp_dtype = getattr(torch, getattr(config, "AMP_DTYPE", "bfloat16"))
 
     with torch.inference_mode():
-        for batch_idx, (x, y, dataset_names) in enumerate(loader):
+        for batch_idx, (x, y, _dataset_names) in enumerate(loader):
             if steps_per_epoch is not None and batch_idx >= steps_per_epoch:
                 break
 
@@ -111,9 +114,7 @@ def evaluate(model, loader, criterion, device, config, steps_per_epoch=None):
     total_samples = len(all_labels)
     avg_loss = total_loss / total_samples
 
-    precision = precision_score(
-        all_labels, all_preds, average="weighted", zero_division=0
-    )
+    precision = precision_score(all_labels, all_preds, average="weighted", zero_division=0)
     recall = recall_score(all_labels, all_preds, average="weighted", zero_division=0)
     f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
     accuracy = (np.array(all_preds) == np.array(all_labels)).mean()
@@ -130,9 +131,7 @@ def evaluate(model, loader, criterion, device, config, steps_per_epoch=None):
     return avg_loss, accuracy, precision, recall, f1, mcc, per_class_acc
 
 
-def _compute_class_weights(
-    train_ds, config, device, weight_cap: float = 10.0
-) -> torch.Tensor:
+def _compute_class_weights(train_ds, config, device, weight_cap: float = 10.0) -> torch.Tensor:
     """Compute inverse-frequency class weights from the training sample list.
 
     Mirrors the label resolution logic in VehicleDataset.__getitem__ so the
@@ -141,7 +140,14 @@ def _compute_class_weights(
     reverse_class_map = {v: k for k, v in config.CLASS_MAP.items()}
     counts = torch.zeros(config.NUM_CLASSES, dtype=torch.float32)
 
-    for dataset, instance, _sensor_node, _run_id, _step_idx, label_str in train_ds.samples:
+    for (
+        dataset,
+        instance,
+        _sensor_node,
+        _run_id,
+        _step_idx,
+        label_str,
+    ) in train_ds.samples:
         if config.TRAINING_MODE == "detection":
             label_int = 0 if label_str == "background" else 1
         elif config.TRAINING_MODE == "category":
@@ -166,10 +172,19 @@ def _build_weighted_sampler(train_ds, config, device, strength: float = 1.0):
     Intermediate values interpolate between the two.
     """
     reverse_class_map = {v: k for k, v in config.CLASS_MAP.items()}
-    class_weights = _compute_class_weights(train_ds, config, device, weight_cap=config.CLASS_WEIGHT_CAP)
+    class_weights = _compute_class_weights(
+        train_ds, config, device, weight_cap=config.CLASS_WEIGHT_CAP
+    )
 
     sample_weights = []
-    for dataset, instance, _sensor_node, _run_id, _step_idx, label_str in train_ds.samples:
+    for (
+        dataset,
+        instance,
+        _sensor_node,
+        _run_id,
+        _step_idx,
+        label_str,
+    ) in train_ds.samples:
         if config.TRAINING_MODE == "detection":
             label_int = 0 if label_str == "background" else 1
         elif config.TRAINING_MODE == "category":
@@ -266,7 +281,7 @@ def main():
     print("Performing dummy pass to initialize Lazy modules...")
     model.eval()
     with torch.no_grad():
-        for x_dummy, _, ds_names in train_loader:
+        for x_dummy, _, _ds_names in train_loader:
             x_dummy = x_dummy.to(device)
             x_dummy = preprocess_for_training(x_dummy, config=config)
             model(x_dummy)
@@ -277,7 +292,9 @@ def main():
         print(f"Using class weights from config: {weights.tolist()}")
     else:
         weights = _compute_class_weights(
-            train_ds, config, device,
+            train_ds,
+            config,
+            device,
             weight_cap=getattr(config, "CLASS_WEIGHT_CAP", 10.0),
         )
         print(f"Computed class weights from dataset: {weights.tolist()}")
@@ -303,9 +320,7 @@ def main():
     if config.TRAINING_MODE == "detection":
         class_names = ["Val_Acc_background", "Val_Acc_vehicle"]
     elif config.TRAINING_MODE == "category":
-        class_names = [
-            f"Val_Acc_{config.CLASS_MAP[i]}" for i in sorted(config.CLASS_MAP.keys())
-        ]
+        class_names = [f"Val_Acc_{config.CLASS_MAP[i]}" for i in sorted(config.CLASS_MAP.keys())]
     elif config.TRAINING_MODE == "instance":
         inv_map = {v: k for k, v in config.INSTANCE_TO_CLASS.items()}
         class_names = [f"Val_Acc_{inv_map[i]}" for i in range(config.NUM_CLASSES)]
@@ -322,7 +337,8 @@ def main():
         "Val_Recall",
         "Val_F1",
         "Val_MCC",
-    ] + class_names
+        *class_names,
+    ]
 
     with open(config.METRICS_LOG_PATH, mode="w", newline="") as f:
         writer = csv.writer(f)
@@ -347,12 +363,22 @@ def main():
             train_sampler.set_epoch(epoch - 1)
 
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, optimizer, criterion, device, config, epoch,
+            model,
+            train_loader,
+            optimizer,
+            criterion,
+            device,
+            config,
+            epoch,
             steps_per_epoch=getattr(config, "TRAIN_STEPS_PER_EPOCH", None),
         )
 
         val_loss, val_acc, val_prec, val_rec, val_f1, val_mcc, per_class_acc = evaluate(
-            model, val_loader, criterion, device, config,
+            model,
+            val_loader,
+            criterion,
+            device,
+            config,
             steps_per_epoch=getattr(config, "VAL_STEPS_PER_EPOCH", None),
         )
 
@@ -377,7 +403,8 @@ def main():
                 f"{val_rec:.4f}",
                 f"{val_f1:.4f}",
                 f"{val_mcc:.4f}",
-            ] + class_values
+                *class_values,
+            ]
             writer.writerow(row_data)
 
         metrics_dict = {
@@ -405,15 +432,11 @@ def main():
             epochs_no_improve = 0
             torch.save(model.state_dict(), config.MODEL_SAVE_PATH)
             print(
-                f"  --> New Best Model saved with "
-                f"{target_metric_name}: {best_metric_value:.4f}"
+                f"  --> New Best Model saved with " f"{target_metric_name}: {best_metric_value:.4f}"
             )
         else:
             epochs_no_improve += 1
-            print(
-                f"  --> No improvement: "
-                f"{epochs_no_improve}/{EARLY_STOP_PATIENCE} epochs."
-            )
+            print(f"  --> No improvement: " f"{epochs_no_improve}/{EARLY_STOP_PATIENCE} epochs.")
             if epochs_no_improve >= EARLY_STOP_PATIENCE:
                 print(f"Early stopping after {epoch} epochs.")
                 break
@@ -425,10 +448,7 @@ def main():
     meta["val_f1"] = best_val_f1
     torch.save(meta, config.META_SAVE_PATH)
 
-    print(
-        f"\nTraining Complete. Best {target_metric_name} Achieved: "
-        f"{best_metric_value:.4f}"
-    )
+    print(f"\nTraining Complete. Best {target_metric_name} Achieved: " f"{best_metric_value:.4f}")
     print(f"Model saved to {config.MODEL_SAVE_PATH}")
 
 

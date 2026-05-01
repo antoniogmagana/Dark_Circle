@@ -1,17 +1,11 @@
-import argparse
-import sys
+import io
+from multiprocessing import Pool
+
 import numpy as np
 import pandas as pd
 import psycopg2
-from scipy.signal import butter, sosfiltfilt
-from multiprocessing import Pool
-from pathlib import Path
-from typing import Optional, Tuple, List
-import matplotlib
-import io
-import os
-
 import variables
+from scipy.signal import butter, sosfiltfilt
 
 """Parse vehicle recordings to separate samples of interest from background noise"""
 
@@ -33,23 +27,23 @@ AUDIO_BAND = (10.0, 1000.0)
 
 # Per-sensor energy gate: dB above noise floor required (Gate 1)
 THRESHOLD_DB = {
-    "audio":   6.0,
+    "audio": 6.0,
     "seismic": 6.0,
-    "accel":   6.0,
+    "accel": 6.0,
 }
 
 # Per-sensor persistence: consecutive 1-second windows required (Gate 2)
 PERSISTENCE_WIN = {
-    "audio":   2,
+    "audio": 2,
     "seismic": 2,
-    "accel":   2,
+    "accel": 2,
 }
 
 # Spectral fraction gate — audio only (Gate 3)
 # Minimum fraction of energy within AUDIO_BAND required to pass
 AUDIO_SPECTRAL_FRAC = 0.30
 
-ROOT = str(".")
+ROOT = "."
 
 USE_FAST_COPY = True
 
@@ -73,9 +67,9 @@ def db_close(conn, cursor):
 
 def get_table_list(conn, cursor):
     query = """
-    SELECT table_name 
-    FROM information_schema.tables 
-    WHERE table_schema = 'public' 
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
     AND table_type = 'BASE TABLE';
     """
     cursor.execute(query)
@@ -122,7 +116,7 @@ def label_windows(amplitudes, sample_rate, sensor_type, raw_signal=None):
     # Raw ADC values carry a large constant bias (~16000 counts) that would dominate
     # the RMS and make all windows look equal, masking vehicle-induced variation.
     win_centered = windows - windows.mean(axis=1, keepdims=True)
-    rms = np.sqrt(np.mean(win_centered ** 2, axis=1))
+    rms = np.sqrt(np.mean(win_centered**2, axis=1))
     noise_floor = np.percentile(rms, NOISE_FACTOR)
     threshold = noise_floor * (10 ** (THRESHOLD_DB[sensor_type] / 20.0))
     energy_pass = rms >= threshold
@@ -140,9 +134,7 @@ def label_windows(amplitudes, sample_rate, sensor_type, raw_signal=None):
     # (thunder, HVAC hum) is distinguishable from in-band vehicle energy.
     if sensor_type == "audio":
         spectral_src = raw_signal if raw_signal is not None else amplitudes
-        raw_windows = (
-            spectral_src[: num_windows * window_size].reshape(num_windows, window_size)
-        )
+        raw_windows = spectral_src[: num_windows * window_size].reshape(num_windows, window_size)
         hann = np.hanning(window_size)
         freqs = np.fft.rfftfreq(window_size, d=1.0 / sample_rate)
         # Clamp upper bound to match what bandpass() actually passes at this rate
@@ -183,9 +175,7 @@ def process_seismic_table(df):
 
 
 def process_accel_table(df):
-    magnitude = np.sqrt(
-        df["accel_x_ew"] ** 2 + df["accel_y_ns"] ** 2 + df["accel_z_ud"] ** 2
-    )
+    magnitude = np.sqrt(df["accel_x_ew"] ** 2 + df["accel_y_ns"] ** 2 + df["accel_z_ud"] ** 2)
     window_size = BASE_RATES["seismic"]
     labels = label_windows(magnitude.values, BASE_RATES["seismic"], "accel")
     df["present"] = False
@@ -235,7 +225,7 @@ def process_table(table):
     # extract table designations
     table_type = table.split("_")
     # Add default false column for vehicle presence
-    query = f"""ALTER TABLE {table} 
+    query = f"""ALTER TABLE {table}
     ADD COLUMN IF NOT EXISTS present BOOLEAN NOT NULL DEFAULT FALSE;"""
     cursor.execute(query)
 
@@ -289,7 +279,7 @@ def process_table(table):
             )
         else:
             buf = io.StringIO()
-            for sid, pres in zip(df["sample_id"], df["present"]):
+            for sid, pres in zip(df["sample_id"], df["present"], strict=False):
                 buf.write(f"{sid}\t{pres}\n")
             buf.seek(0)
         cursor.execute(

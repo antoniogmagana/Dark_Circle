@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import warnings
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 LABEL_BACKGROUND = -1
 LABEL_MULTI = -2
@@ -8,46 +10,49 @@ CATEGORY_TO_IDX = {"pedestrian": 0, "light": 1, "medium": 2, "heavy": 3}
 
 DATASET_VEHICLE_MAP = {
     "iobt": {
-        "polaris0150pm":             ["light", "polaris", "train"],
-        "polaris0215pm":             ["light", "polaris", "val"],
+        "polaris0150pm": ["light", "polaris", "train"],
+        "polaris0215pm": ["light", "polaris", "val"],
         "polaris0235pm_nolineofsig": ["light", "polaris", "test"],
-        "warhog1135am":              ["light", "warhog",  "train"],
-        "warhog1149am":              ["light", "warhog",  "val"],
-        "warhog_nolineofsight":      ["light", "warhog",  "test"],
-        "silverado0255pm":           ["heavy", "pickup",  "train"],
-        "silverado0315pm":           ["heavy", "pickup",  "split"],
+        "warhog1135am": ["light", "warhog", "train"],
+        "warhog1149am": ["light", "warhog", "val"],
+        "warhog_nolineofsight": ["light", "warhog", "test"],
+        "silverado0255pm": ["heavy", "pickup", "train"],
+        "silverado0315pm": ["heavy", "pickup", "split"],
     },
     "focal": {
-        "walk":        ["pedestrian", "walk",       "train"],
-        "walk2":       ["pedestrian", "walk",       "split"],
-        "bicycle":     ["pedestrian", "bicycle",    "train"],
-        "bicycle2":    ["pedestrian", "bicycle",    "split"],
-        "motor":       ["light",      "motorcycle", "train"],
-        "motor2":      ["light",      "motorcycle", "split"],
-        "scooter":     ["light",      "scooter",    "train"],
-        "scooter2":    ["light",      "scooter",    "split"],
-        "forester":    ["medium",     "forester",   "train"],
-        "forester2":   ["medium",     "forester",   "split"],
-        "mustang":     ["medium",     "mustang",    "train"],
-        "mustang2":    ["medium",     "mustang",    "val"],
-        "mustang0528": ["medium",     "mustang",    "test"],
-        "pickup":      ["heavy",      "pickup",     "train"],
-        "pickup2":     ["heavy",      "pickup",     "split"],
+        "walk": ["pedestrian", "walk", "train"],
+        "walk2": ["pedestrian", "walk", "split"],
+        "bicycle": ["pedestrian", "bicycle", "train"],
+        "bicycle2": ["pedestrian", "bicycle", "split"],
+        "motor": ["light", "motorcycle", "train"],
+        "motor2": ["light", "motorcycle", "split"],
+        "scooter": ["light", "scooter", "train"],
+        "scooter2": ["light", "scooter", "split"],
+        "forester": ["medium", "forester", "train"],
+        "forester2": ["medium", "forester", "split"],
+        "mustang": ["medium", "mustang", "train"],
+        "mustang2": ["medium", "mustang", "val"],
+        "mustang0528": ["medium", "mustang", "test"],
+        "pickup": ["heavy", "pickup", "train"],
+        "pickup2": ["heavy", "pickup", "split"],
         # "tesla":       ["heavy",      "tesla",      "train"],
         # "tesla2":      ["heavy",      "tesla",      "split"],
     },
     "m3nvc": {
         "background": ["background", "background"],
-        "cx30":       ["medium", "cx30",    "split_runs"],
-        "miata":      ["medium", "miata",   "split_runs"],
-        "mustang":    ["medium", "mustang", "split_runs"],
-        "gle350":     ["heavy",  "gle350",  "split_runs"],
+        "cx30": ["medium", "cx30", "split_runs"],
+        "miata": ["medium", "miata", "split_runs"],
+        "mustang": ["medium", "mustang", "split_runs"],
+        "gle350": ["heavy", "gle350", "split_runs"],
     },
 }
 
 
 def _morlet_legacy_receptive_cycles(
-    kernel_size: int, freq_min: float, w0: float, sample_rate: int,
+    kernel_size: int,
+    freq_min: float,
+    w0: float,
+    sample_rate: int,
 ) -> float:
     """Inverse of `kernel_size = round(2·receptive_cycles·w0/(2π·freq_min)·SR)`.
 
@@ -56,6 +61,7 @@ def _morlet_legacy_receptive_cycles(
     receptive_cycles value that reproduces the given kernel_size.
     """
     import math
+
     return kernel_size * 2 * math.pi * freq_min / (2 * w0 * sample_rate)
 
 
@@ -85,7 +91,7 @@ class CRLConfig:
     # ("vae", "conditional") — iVAE (Checkpoint 2, not yet implemented).
     # ("contrastive", *)     — NT-Xent (Checkpoint 3, not yet implemented).
     training_mode: str = "vae"
-    prior_type:    str = "standard"
+    prior_type: str = "standard"
 
     # Audio resample target. Dataset always resamples to modality_cfg('audio')
     # .sample_rate at load time; this knob lets experiments downsample audio
@@ -111,7 +117,7 @@ class CRLConfig:
     # "morlet_learnable_fused"  — Early-fusion version of morlet_learnable
     #                             (matches morlet_fused topology).
     frontend_type: str = "multiscale"
-    fused_seq_len: int = 32             # per-sensor token count after AdaptiveAvgPool1d
+    fused_seq_len: int = 32  # per-sensor token count after AdaptiveAvgPool1d
     morlet_kernel_size: int = 257
     multiscale_pool_stride: int = 16
     morlet_pool_stride: int = 64
@@ -124,7 +130,7 @@ class CRLConfig:
     # happens in __post_init__ — set EITHER, not both. When only the legacy
     # frontend_type is set, the new fields are derived; when only the new
     # fields are set, frontend_type is reverse-derived for back-compat reads.
-    frontend_bank:   str = "multiscale"
+    frontend_bank: str = "multiscale"
     frontend_fusion: str = "early"
 
     # Single per-sensor params dict for both multiscale and morlet banks.
@@ -135,14 +141,20 @@ class CRLConfig:
     #   morlet, learnable: freq_min, freq_max, w0, receptive_cycles
     # Defaults below match a multiscale early-fusion config equivalent to the
     # legacy multiscale_kernel_sizes + fused_seq_len defaults.
-    frontend_per_sensor_params: dict = field(default_factory=lambda: {
-        "audio":   {"target_tokens": 32,
-                    "kernel_sizes": [9, 19, 39, 159],
-                    "out_channels_frac": 1.0},
-        "seismic": {"target_tokens": 32,
-                    "kernel_sizes": [9, 19, 39],
-                    "out_channels_frac": 1.0},
-    })
+    frontend_per_sensor_params: dict = field(
+        default_factory=lambda: {
+            "audio": {
+                "target_tokens": 32,
+                "kernel_sizes": [9, 19, 39, 159],
+                "out_channels_frac": 1.0,
+            },
+            "seismic": {
+                "target_tokens": 32,
+                "kernel_sizes": [9, 19, 39],
+                "out_channels_frac": 1.0,
+            },
+        }
+    )
 
     # Phase channels: when True, Morlet variants emit [log_power, cos_phase,
     # sin_phase] → 3× channel count. Preserves phase/onset structure that
@@ -156,29 +168,41 @@ class CRLConfig:
     # morlet_learnable_w0=True. LR multiplier keeps the init-near-optimal
     # filterbank from wandering — learnable-filterbank literature uses
     # 0.1× backbone LR as the safe default.
-    morlet_learnable_w0:       bool  = False
-    morlet_learnable_lr_mult:  float = 0.1
+    morlet_learnable_w0: bool = False
+    morlet_learnable_lr_mult: float = 0.1
 
     # Two-stage training (stage 2): when train.py --init-from-run loads a
     # converged fixed-Morlet checkpoint into a learnable model, this
     # multiplier reduces the encoder/decoder LR so filters are the primary
     # mover and the encoder just fine-tunes. Filter LR stays on
     # morlet_learnable_lr_mult. Only active in stage-2 runs.
-    stage2_encoder_lr_mult:    float = 0.3
+    stage2_encoder_lr_mult: float = 0.3
 
     # Per-sensor Morlet frequency ranges for frontend_type="morlet_per_sensor".
     # Audio: 20 Hz–8 kHz (SR/2 band above speech; engine harmonics + tire noise).
     # Seismic: 2–40 Hz (typical vehicle ground-vibration band).
     # out_channels_frac scales d_model to produce the per-sensor channel count;
     # keep at 1.0 unless you want one sensor to dominate channel budget.
-    morlet_per_sensor_params: dict = field(default_factory=lambda: {
-        "audio":   {"freq_min": 20.0,  "freq_max": 8000.0,
-                    "out_channels_frac": 1.0, "w0": 6.0,
-                    "target_tokens": 32, "receptive_cycles": 3.0},
-        "seismic": {"freq_min": 2.0,   "freq_max": 40.0,
-                    "out_channels_frac": 1.0, "w0": 6.0,
-                    "target_tokens": 32, "receptive_cycles": 3.0},
-    })
+    morlet_per_sensor_params: dict = field(
+        default_factory=lambda: {
+            "audio": {
+                "freq_min": 20.0,
+                "freq_max": 8000.0,
+                "out_channels_frac": 1.0,
+                "w0": 6.0,
+                "target_tokens": 32,
+                "receptive_cycles": 3.0,
+            },
+            "seismic": {
+                "freq_min": 2.0,
+                "freq_max": 40.0,
+                "out_channels_frac": 1.0,
+                "w0": 6.0,
+                "target_tokens": 32,
+                "receptive_cycles": 3.0,
+            },
+        }
+    )
 
     # Per-sensor kernel-size lists for frontend_type="multiscale".
     #
@@ -205,11 +229,13 @@ class CRLConfig:
     # Practically, kernels approaching window size give no localization;
     # treat ks ≈ window/2 as the soft ceiling for keeping multiple
     # receptive fields per token.
-    multiscale_kernel_sizes: dict = field(default_factory=lambda: {
-        "audio": [9, 19, 39, 159],
-        # seismic intentionally absent → uses [9, 19, 39] default,
-        # which already covers ~2.5 Hz–11 Hz at SR=100.
-    })
+    multiscale_kernel_sizes: dict = field(
+        default_factory=lambda: {
+            "audio": [9, 19, 39, 159],
+            # seismic intentionally absent → uses [9, 19, 39] default,
+            # which already covers ~2.5 Hz–11 Hz at SR=100.
+        }
+    )
 
     # Training
     batch_size: int = 128
@@ -245,7 +271,7 @@ class CRLConfig:
     # train/val/test assignments from DATASET_VEHICLE_MAP rather than
     # from on-disk directory layout. See
     # docs/superpowers/specs/2026-04-25-id-split-schema-design.md.
-    use_id_split: bool = False
+    use_id_split: bool = True
 
     # Stratified partner sampling
     n_partners_same_type: int = 1
@@ -263,15 +289,14 @@ class CRLConfig:
     # invariance), not by per-feature dim assignment. Aux pres+type heads
     # read the full d_signal block.
     d_signal: int = 12
-    lambda_align:      float = 1.0   # cross-modal coherence on z_signal (per-sensor only)
-    lambda_stab:       float = 0.1   # env temporal stability on consecutive partners
-    lambda_interv_inv: float = 1.0   # z_signal invariance under noise interventions
+    lambda_align: float = 1.0  # cross-modal coherence on z_signal (per-sensor only)
+    lambda_stab: float = 0.1  # env temporal stability on consecutive partners
+    lambda_interv_inv: float = 1.0  # z_signal invariance under noise interventions
 
     def __post_init__(self) -> None:
         if not isinstance(self.audio_target_rate, int) or self.audio_target_rate < 1:
             raise ValueError(
-                f"audio_target_rate must be a positive int, got "
-                f"{self.audio_target_rate!r}"
+                f"audio_target_rate must be a positive int, got " f"{self.audio_target_rate!r}"
             )
         self._reconcile_frontend_schema()
         self._validate_frontend_per_sensor_params()
@@ -293,23 +318,23 @@ class CRLConfig:
     # Map between the legacy `frontend_type` string and the new
     # (frontend_bank, frontend_fusion) decomposition. Single source of truth;
     # used in both directions during __post_init__ reconciliation.
-    _LEGACY_TYPE_TO_BANK_FUSION = {
-        "multiscale":             ("multiscale",       "early"),
-        "morlet":                 ("morlet",           "late"),
-        "morlet_per_sensor":      ("morlet",           "late"),
-        "morlet_fused":           ("morlet",           "early"),
-        "morlet_learnable":       ("morlet_learnable", "late"),
+    _LEGACY_TYPE_TO_BANK_FUSION: ClassVar[dict[str, tuple[str, str]]] = {
+        "multiscale": ("multiscale", "early"),
+        "morlet": ("morlet", "late"),
+        "morlet_per_sensor": ("morlet", "late"),
+        "morlet_fused": ("morlet", "early"),
+        "morlet_learnable": ("morlet_learnable", "late"),
         "morlet_learnable_fused": ("morlet_learnable", "early"),
     }
 
     # Canonical reverse map: which frontend_type to emit when reverse-mapping
     # from (bank, fusion). Two legacy types map to (morlet, late) — pick the
     # newer/preferred one (`morlet_per_sensor`) as canonical.
-    _BANK_FUSION_TO_LEGACY_TYPE = {
-        ("multiscale",       "early"): "multiscale",
-        ("morlet",           "late"):  "morlet_per_sensor",
-        ("morlet",           "early"): "morlet_fused",
-        ("morlet_learnable", "late"):  "morlet_learnable",
+    _BANK_FUSION_TO_LEGACY_TYPE: ClassVar[dict[tuple[str, str], str]] = {
+        ("multiscale", "early"): "multiscale",
+        ("morlet", "late"): "morlet_per_sensor",
+        ("morlet", "early"): "morlet_fused",
+        ("morlet_learnable", "late"): "morlet_learnable",
         ("morlet_learnable", "early"): "morlet_learnable_fused",
     }
 
@@ -392,11 +417,12 @@ class CRLConfig:
                         "freq_max": sr / 4.0,
                         "w0": 6.0,
                         "receptive_cycles": _morlet_legacy_receptive_cycles(
-                            self.morlet_kernel_size, freq_min, 6.0, sr,
+                            self.morlet_kernel_size,
+                            freq_min,
+                            6.0,
+                            sr,
                         ),
-                        "target_tokens": max(
-                            1, mc.window_size // self.morlet_pool_stride
-                        ),
+                        "target_tokens": max(1, mc.window_size // self.morlet_pool_stride),
                         "out_channels_frac": 1.0,
                     }
             else:
@@ -431,13 +457,16 @@ class CRLConfig:
                         f"frontend_bank='multiscale' requires 'kernel_sizes' in "
                         f"frontend_per_sensor_params[{sensor!r}]"
                     )
-                if "strides" in sp and sp["strides"] is not None:
-                    if len(sp["strides"]) != len(sp["kernel_sizes"]):
-                        raise ValueError(
-                            f"frontend_per_sensor_params[{sensor!r}] strides "
-                            f"length {len(sp['strides'])} must match "
-                            f"kernel_sizes length {len(sp['kernel_sizes'])}"
-                        )
+                if (
+                    "strides" in sp
+                    and sp["strides"] is not None
+                    and len(sp["strides"]) != len(sp["kernel_sizes"])
+                ):
+                    raise ValueError(
+                        f"frontend_per_sensor_params[{sensor!r}] strides "
+                        f"length {len(sp['strides'])} must match "
+                        f"kernel_sizes length {len(sp['kernel_sizes'])}"
+                    )
             elif bank in ("morlet", "morlet_learnable"):
                 for key in ("freq_min", "freq_max", "w0", "receptive_cycles"):
                     if key not in sp:

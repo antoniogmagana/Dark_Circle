@@ -1,6 +1,7 @@
+import re
+
 import psycopg2
 from psycopg2 import sql
-import re
 
 # NOTICE: global 'config' is no longer imported
 
@@ -74,15 +75,12 @@ def get_time_bounds(cursor, table_name, run_id=None):
     """
 
     if run_id is None:
-        query = sql.SQL(
-            "SELECT MIN(time_stamp), MAX(time_stamp) FROM {table}"
-        ).format(
+        query = sql.SQL("SELECT MIN(time_stamp), MAX(time_stamp) FROM {table}").format(
             table=sql.Identifier(table_name)
         )
     else:
         query = sql.SQL(
-            "SELECT MIN(time_stamp), MAX(time_stamp) "
-            "FROM {table} WHERE run_id = {run_id}"
+            "SELECT MIN(time_stamp), MAX(time_stamp) " "FROM {table} WHERE run_id = {run_id}"
         ).format(
             table=sql.Identifier(table_name),
             run_id=sql.Literal(run_id),
@@ -142,9 +140,7 @@ def fetch_table_segment(cursor, table_name, from_time, run_id=None):
 # ---------------------------------------------------------------------
 # 3. Fetch N samples starting at a timestamp WITH optional run_id
 # ---------------------------------------------------------------------
-def fetch_sensor_batch(
-    cursor, table_name, sample_count, start_time, run_id=None
-):
+def fetch_sensor_batch(cursor, table_name, sample_count, start_time, run_id=None):
     """
     Fetches `sample_count` rows starting at `start_time`.
     Uses the B-tree index on time_stamp (and run_id if present).
@@ -163,9 +159,7 @@ def fetch_sensor_batch(
             start_time=sql.Literal(start_time)
         )
     else:
-        where_clause = sql.SQL(
-            "time_stamp >= {start_time} AND run_id = {run_id}"
-        ).format(
+        where_clause = sql.SQL("time_stamp >= {start_time} AND run_id = {run_id}").format(
             start_time=sql.Literal(start_time),
             run_id=sql.Literal(run_id),
         )

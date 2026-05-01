@@ -25,11 +25,17 @@ def _empty_aux_metrics() -> dict:
     empty_f = torch.empty(0)
     empty_l = torch.empty(0, dtype=torch.long)
     return {
-        "recon": 0.0, "kl": 0.0, "raw_kl": 0.0,
-        "align": 0.0, "stab": 0.0, "interv_inv": 0.0,
+        "recon": 0.0,
+        "kl": 0.0,
+        "raw_kl": 0.0,
+        "align": 0.0,
+        "stab": 0.0,
+        "interv_inv": 0.0,
         "total": 0.0,
-        "aux_pres_logits": empty_f, "aux_pres_labels": empty_l,
-        "aux_type_logits": empty_f, "aux_type_labels": empty_l,
+        "aux_pres_logits": empty_f,
+        "aux_pres_labels": empty_l,
+        "aux_type_logits": empty_f,
+        "aux_type_labels": empty_l,
     }
 
 
@@ -62,7 +68,7 @@ class DisentangledVAETrainingMode(TrainingMode):
       - crl_best_aux_type.pth → best val_aux_type_f1 (downstream-proxy)
     """
 
-    CKPT_REF_ELBO    = "crl_best.pth"
+    CKPT_REF_ELBO = "crl_best.pth"
     CKPT_AUX_TYPE_F1 = "crl_best_aux_type.pth"
 
     def __init__(self, config) -> None:
@@ -74,9 +80,9 @@ class DisentangledVAETrainingMode(TrainingMode):
         # Trainer's mode-params optimizer group picks them up via mode.parameters().
         self.pres_head = LinearPresenceHead(d_in=config.d_signal)
         self.type_head = LinearTypeHead(d_in=config.d_signal, n_classes=4)
-        self.lambda_align       = config.lambda_align
-        self.lambda_stab        = config.lambda_stab
-        self.lambda_interv_inv  = config.lambda_interv_inv
+        self.lambda_align = config.lambda_align
+        self.lambda_stab = config.lambda_stab
+        self.lambda_interv_inv = config.lambda_interv_inv
 
     # ------------------------------------------------------------------
     # Forward pair — dispatches by frontend topology.
@@ -98,9 +104,7 @@ class DisentangledVAETrainingMode(TrainingMode):
     # cross-modal alignment loss. Stability + invariance still apply.
     # ------------------------------------------------------------------
 
-    def _forward_pair_fused(
-        self, model, batch, beta, dev
-    ) -> tuple[torch.Tensor, dict]:
+    def _forward_pair_fused(self, model, batch, beta, dev) -> tuple[torch.Tensor, dict]:
         cfg = self.config
         avail = batch["audio_avail"].bool() & batch["seismic_avail"].bool()
         if not avail.any():
@@ -113,12 +117,12 @@ class DisentangledVAETrainingMode(TrainingMode):
         features, z_t, mu_t, lv_t = model.encode_fused(x_a, x_s)
         x_hat = model.decode_fused(z_t)
 
-        recon  = reconstruction_loss(x_hat, features.detach())
+        recon = reconstruction_loss(x_hat, features.detach())
         raw_kl = kl_divergence(mu_t, lv_t, beta=1.0)
-        kl     = beta * raw_kl
+        kl = beta * raw_kl
 
         mu_signal, mu_env = self.latent.split(mu_t)
-        det_t  = batch["detection_label_t"][avail].float().to(dev)
+        det_t = batch["detection_label_t"][avail].float().to(dev)
         type_t = batch["vehicle_type_t"][avail].to(dev)
 
         aux_pres_logit = self.pres_head(mu_signal).squeeze(-1)
@@ -126,15 +130,17 @@ class DisentangledVAETrainingMode(TrainingMode):
 
         valid_type = type_t >= 0
         aux_type = torch.tensor(0.0, device=dev)
-        type_logit_valid  = torch.empty(0, device=dev)
+        type_logit_valid = torch.empty(0, device=dev)
         type_labels_valid = torch.empty(0, dtype=torch.long, device=dev)
         if valid_type.any():
-            type_logit_valid  = self.type_head(mu_signal[valid_type])
+            type_logit_valid = self.type_head(mu_signal[valid_type])
             type_labels_valid = type_t[valid_type].long()
             if cfg.use_focal_type:
                 aux_type = focal_cross_entropy(
-                    type_logit_valid, type_labels_valid,
-                    weight=None, gamma=cfg.focal_type_gamma,
+                    type_logit_valid,
+                    type_labels_valid,
+                    weight=None,
+                    gamma=cfg.focal_type_gamma,
                 )
             else:
                 aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
@@ -148,14 +154,12 @@ class DisentangledVAETrainingMode(TrainingMode):
             _, _, mu_tn, _ = model.encode_fused(x_a_p0, x_s_p0)
             _, mu_env_tn = self.latent.split(mu_tn)
             strata_p0 = batch["partner_stratum_p0"][avail].to(dev)
-            consec_mask = (strata_p0 == STRATUM_CONSEC)
+            consec_mask = strata_p0 == STRATUM_CONSEC
             stab = temporal_stability_loss(mu_env, mu_env_tn, consec_mask)
 
         # Intervention invariance: re-encode anchor with random noise applied.
         # Sample rates come from config so they track _SOURCE_RATES targets.
-        x_a_int = _apply_intervention_batch(
-            x_a, sample_rate=cfg.modality_cfg("audio").sample_rate
-        )
+        x_a_int = _apply_intervention_batch(x_a, sample_rate=cfg.modality_cfg("audio").sample_rate)
         x_s_int = _apply_intervention_batch(
             x_s, sample_rate=cfg.modality_cfg("seismic").sample_rate
         )
@@ -163,20 +167,23 @@ class DisentangledVAETrainingMode(TrainingMode):
         mu_signal_int, _ = self.latent.split(mu_int)
         interv_inv = intervention_invariance_loss(mu_signal, mu_signal_int)
 
-        total = (recon + kl
-                 + cfg.lambda_aux_pres * aux_pres
-                 + cfg.lambda_aux_type * aux_type
-                 + self.lambda_stab        * stab
-                 + self.lambda_interv_inv  * interv_inv)
+        total = (
+            recon
+            + kl
+            + cfg.lambda_aux_pres * aux_pres
+            + cfg.lambda_aux_type * aux_type
+            + self.lambda_stab * stab
+            + self.lambda_interv_inv * interv_inv
+        )
 
         metrics = {
-            "recon":      recon.item(),
-            "kl":         kl.item(),
-            "raw_kl":     raw_kl.item(),
-            "align":      0.0,                      # n/a for fused frontends
-            "stab":       stab.item(),
+            "recon": recon.item(),
+            "kl": kl.item(),
+            "raw_kl": raw_kl.item(),
+            "align": 0.0,  # n/a for fused frontends
+            "stab": stab.item(),
             "interv_inv": interv_inv.item(),
-            "total":      total.item(),
+            "total": total.item(),
             "aux_pres_logits": aux_pres_logit.detach().cpu(),
             "aux_pres_labels": det_t.detach().long().cpu(),
             "aux_type_logits": type_logit_valid.detach().cpu(),
@@ -189,9 +196,7 @@ class DisentangledVAETrainingMode(TrainingMode):
     # the full loss recipe including cross-modal alignment.
     # ------------------------------------------------------------------
 
-    def _forward_pair_per_sensor(
-        self, model, batch, beta, dev
-    ) -> tuple[torch.Tensor, dict]:
+    def _forward_pair_per_sensor(self, model, batch, beta, dev) -> tuple[torch.Tensor, dict]:
         cfg = self.config
         # Per-sensor sample rates from config so canonical-rate changes flow through.
         sample_rates = {s: cfg.modality_cfg(s).sample_rate for s in model.sensors}
@@ -206,44 +211,47 @@ class DisentangledVAETrainingMode(TrainingMode):
             x_hat = model.decode(sensor, z_t)
             mu_signal, mu_env = self.latent.split(mu_t)
             per_sensor[sensor] = {
-                "avail":     avail_cpu.to(dev),  # device-resident for batch-level masking
-                "avail_cpu": avail_cpu,           # original CPU mask for batch[...] indexing
-                "x": x, "features": features,
-                "z_t": z_t, "mu_t": mu_t, "lv_t": lv_t,
-                "mu_signal": mu_signal, "mu_env": mu_env, "x_hat": x_hat,
+                "avail": avail_cpu.to(dev),  # device-resident for batch-level masking
+                "avail_cpu": avail_cpu,  # original CPU mask for batch[...] indexing
+                "x": x,
+                "features": features,
+                "z_t": z_t,
+                "mu_t": mu_t,
+                "lv_t": lv_t,
+                "mu_signal": mu_signal,
+                "mu_env": mu_env,
+                "x_hat": x_hat,
             }
 
         if not per_sensor:
             zero = torch.tensor(0.0, device=dev, requires_grad=True)
             return zero, _empty_aux_metrics()
 
-        det_t  = batch["detection_label_t"].float().to(dev)
+        det_t = batch["detection_label_t"].float().to(dev)
         type_t = batch["vehicle_type_t"].to(dev)
 
         # Per-sensor recon + KL aggregated across sensors.
-        recon_total  = torch.tensor(0.0, device=dev)
-        kl_total     = torch.tensor(0.0, device=dev)
+        recon_total = torch.tensor(0.0, device=dev)
+        kl_total = torch.tensor(0.0, device=dev)
         raw_kl_total = torch.tensor(0.0, device=dev)
-        for sensor, p in per_sensor.items():
-            recon_total  = recon_total  + reconstruction_loss(p["x_hat"], p["features"].detach())
-            raw_kl       = kl_divergence(p["mu_t"], p["lv_t"], beta=1.0)
-            kl_total     = kl_total     + beta * raw_kl
+        for p in per_sensor.values():
+            recon_total = recon_total + reconstruction_loss(p["x_hat"], p["features"].detach())
+            raw_kl = kl_divergence(p["mu_t"], p["lv_t"], beta=1.0)
+            kl_total = kl_total + beta * raw_kl
             raw_kl_total = raw_kl_total + raw_kl
         n_active = len(per_sensor)
-        recon_total  = recon_total  / n_active
-        kl_total     = kl_total     / n_active
+        recon_total = recon_total / n_active
+        kl_total = kl_total / n_active
         raw_kl_total = raw_kl_total / n_active
 
         # Aux heads — average mu_signal across available sensors per sample.
         mu_signal_avg = _average_per_sensor(per_sensor, "mu_signal", dev, key_dim=cfg.d_signal)
-        mu_env_avg    = _average_per_sensor(
-            per_sensor, "mu_env", dev, key_dim=cfg.d_z - cfg.d_signal
-        )
+        _average_per_sensor(per_sensor, "mu_env", dev, key_dim=cfg.d_z - cfg.d_signal)
         any_avail = torch.zeros_like(det_t, dtype=torch.bool)
         for p in per_sensor.values():
             any_avail = any_avail | p["avail"]
 
-        det_valid  = det_t[any_avail]
+        det_valid = det_t[any_avail]
         type_valid = type_t[any_avail]
 
         aux_pres_logit = self.pres_head(mu_signal_avg).squeeze(-1)
@@ -251,15 +259,17 @@ class DisentangledVAETrainingMode(TrainingMode):
 
         valid_type_mask = type_valid >= 0
         aux_type = torch.tensor(0.0, device=dev)
-        type_logit_valid  = torch.empty(0, device=dev)
+        type_logit_valid = torch.empty(0, device=dev)
         type_labels_valid = torch.empty(0, dtype=torch.long, device=dev)
         if valid_type_mask.any():
-            type_logit_valid  = self.type_head(mu_signal_avg[valid_type_mask])
+            type_logit_valid = self.type_head(mu_signal_avg[valid_type_mask])
             type_labels_valid = type_valid[valid_type_mask].long()
             if cfg.use_focal_type:
                 aux_type = focal_cross_entropy(
-                    type_logit_valid, type_labels_valid,
-                    weight=None, gamma=cfg.focal_type_gamma,
+                    type_logit_valid,
+                    type_labels_valid,
+                    weight=None,
+                    gamma=cfg.focal_type_gamma,
                 )
             else:
                 aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
@@ -287,7 +297,7 @@ class DisentangledVAETrainingMode(TrainingMode):
                 _, _, mu_tn, _ = model.encode(sensor, x_p0)
                 _, mu_env_tn = self.latent.split(mu_tn)
                 strata_p0 = batch["partner_stratum_p0"][p["avail_cpu"]].to(dev)
-                consec_mask = (strata_p0 == STRATUM_CONSEC)
+                consec_mask = strata_p0 == STRATUM_CONSEC
                 stab_terms.append(temporal_stability_loss(p["mu_env"], mu_env_tn, consec_mask))
             stab = torch.stack(stab_terms).mean() if stab_terms else stab
 
@@ -298,24 +308,30 @@ class DisentangledVAETrainingMode(TrainingMode):
             _, _, mu_int, _ = model.encode(sensor, x_int)
             mu_signal_int, _ = self.latent.split(mu_int)
             interv_inv_terms.append(intervention_invariance_loss(p["mu_signal"], mu_signal_int))
-        interv_inv = torch.stack(interv_inv_terms).mean() if interv_inv_terms \
-                     else torch.tensor(0.0, device=dev)
+        interv_inv = (
+            torch.stack(interv_inv_terms).mean()
+            if interv_inv_terms
+            else torch.tensor(0.0, device=dev)
+        )
 
-        total = (recon_total + kl_total
-                 + cfg.lambda_aux_pres * aux_pres
-                 + cfg.lambda_aux_type * aux_type
-                 + self.lambda_align       * align
-                 + self.lambda_stab        * stab
-                 + self.lambda_interv_inv  * interv_inv)
+        total = (
+            recon_total
+            + kl_total
+            + cfg.lambda_aux_pres * aux_pres
+            + cfg.lambda_aux_type * aux_type
+            + self.lambda_align * align
+            + self.lambda_stab * stab
+            + self.lambda_interv_inv * interv_inv
+        )
 
         metrics = {
-            "recon":      recon_total.item(),
-            "kl":         kl_total.item(),
-            "raw_kl":     raw_kl_total.item(),
-            "align":      align.item(),
-            "stab":       stab.item(),
+            "recon": recon_total.item(),
+            "kl": kl_total.item(),
+            "raw_kl": raw_kl_total.item(),
+            "align": align.item(),
+            "stab": stab.item(),
             "interv_inv": interv_inv.item(),
-            "total":      total.item(),
+            "total": total.item(),
             "aux_pres_logits": aux_pres_logit.detach().cpu(),
             "aux_pres_labels": det_valid.detach().long().cpu(),
             "aux_type_logits": type_logit_valid.detach().cpu(),
@@ -329,18 +345,14 @@ class DisentangledVAETrainingMode(TrainingMode):
 
     def val_metrics_summary(self, val_m: dict) -> dict:
         out = dict(val_m)
-        out["val_ref_elbo"] = (
-            val_m.get("val_recon", 0.0) + val_m.get("val_raw_kl", 0.0)
-        )
+        out["val_ref_elbo"] = val_m.get("val_recon", 0.0) + val_m.get("val_raw_kl", 0.0)
         return out
 
     def update_beta(
         self, beta: float, val_m: dict, state: CheckpointState, config
     ) -> tuple[float, str]:
         raw_kl = val_m["val_raw_kl"]
-        recon_improving = (
-            val_m["val_recon"] < state.prev_val_recon - config.recon_min_delta
-        )
+        recon_improving = val_m["val_recon"] < state.prev_val_recon - config.recon_min_delta
         state.prev_val_recon = val_m["val_recon"]
         if raw_kl < config.kl_floor:
             return (max(0.0, beta - config.beta_step), "↓collapse")
@@ -383,13 +395,13 @@ class DisentangledVAETrainingMode(TrainingMode):
 
     def checkpoint_summary(self, state: CheckpointState) -> dict:
         return {
-            "best_ref_elbo":       round(state.bests.get("val_ref_elbo", float("inf")), 6),
-            "best_aux_type_f1":    round(state.bests.get("val_aux_type_f1", -1.0), 4),
+            "best_ref_elbo": round(state.bests.get("val_ref_elbo", float("inf")), 6),
+            "best_aux_type_f1": round(state.bests.get("val_aux_type_f1", -1.0), 4),
             "best_aux_type_epoch": state.best_epochs.get("val_aux_type_f1", -1),
             "checkpoints": {
-                self.CKPT_REF_ELBO:    "selected by val_ref_elbo (recon + raw_kl at beta=1)",
+                self.CKPT_REF_ELBO: "selected by val_ref_elbo (recon + raw_kl at beta=1)",
                 self.CKPT_AUX_TYPE_F1: "selected by val_aux_type_f1 (downstream-proxy signal)",
-                "crl_final.pth":       "last epoch (may be post-early-stop)",
+                "crl_final.pth": "last epoch (may be post-early-stop)",
             },
         }
 
@@ -397,6 +409,7 @@ class DisentangledVAETrainingMode(TrainingMode):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _apply_intervention_batch(x: torch.Tensor, sample_rate: int) -> torch.Tensor:
     """Apply a random NON-noop intervention (1..N) to each sample in the batch.
@@ -406,6 +419,7 @@ def _apply_intervention_batch(x: torch.Tensor, sample_rate: int) -> torch.Tensor
     Stays on the input device — no host↔device bounces.
     """
     from crl_vehicle.data.transforms import N_INTERVENTIONS
+
     B = x.shape[0]
     interv_ids = torch.randint(1, N_INTERVENTIONS + 1, (B,), device=x.device)
     return apply_intervention_batch(x.detach(), sample_rate, interv_ids=interv_ids)

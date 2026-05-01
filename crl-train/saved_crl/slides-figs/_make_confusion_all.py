@@ -9,6 +9,7 @@ run's meta.json) and emits two figures:
 Both figures are row-normalized (recall view). Soft-exits if any run is
 missing an eval — won't half-render. Override defaults with --runs.
 """
+
 from __future__ import annotations
 import argparse
 import json
@@ -32,18 +33,20 @@ DEFAULT_RUNS = [
 CLASS_ORDER = ["pedestrian", "light", "medium", "heavy"]
 PRESENCE_LABELS = ["no vehicle", "vehicle"]
 
-mpl.rcParams.update({
-    "font.family": "sans-serif",
-    "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
-    "axes.labelsize": 16,
-    "axes.titlesize": 16,
-    "xtick.labelsize": 13,
-    "ytick.labelsize": 13,
-    "savefig.dpi": 300,
-    "savefig.bbox": "tight",
-    "savefig.facecolor": "white",
-    "figure.facecolor": "white",
-})
+mpl.rcParams.update(
+    {
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
+        "axes.labelsize": 16,
+        "axes.titlesize": 16,
+        "xtick.labelsize": 13,
+        "ytick.labelsize": 13,
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+        "savefig.facecolor": "white",
+        "figure.facecolor": "white",
+    }
+)
 
 
 def headline_probe_ckpt(run_dir: Path) -> tuple[str | None, str | None]:
@@ -73,15 +76,18 @@ def find_eval_report(run_dir: Path) -> Path | None:
     probe, ckpt_name = headline_probe_ckpt(run_dir)
     if probe and ckpt_name:
         ckpt_stem = Path(ckpt_name).stem
-        preferred = run_dir / "eval" / f"{probe}__{ckpt_stem}" / "full" / "eval_report.json"
+        preferred = (
+            run_dir / "eval" / f"{probe}__{ckpt_stem}" / "full" / "eval_report.json"
+        )
         if preferred.is_file():
             return preferred
     full_only = sorted(run_dir.glob("eval/**/full/eval_report.json"))
     return full_only[0] if full_only else None
 
 
-def cm_panel(ax, cm, title: str, labels, *, show_y: bool = True,
-             value_fontsize: int = 11):
+def cm_panel(
+    ax, cm, title: str, labels, *, show_y: bool = True, value_fontsize: int = 11
+):
     """Plot a row-normalized confusion heatmap."""
     cm = np.asarray(cm, dtype=float)
     row_sums = cm.sum(axis=1, keepdims=True)
@@ -102,9 +108,15 @@ def cm_panel(ax, cm, title: str, labels, *, show_y: bool = True,
     for i in range(n):
         for j in range(n):
             v = norm[i, j]
-            ax.text(j, i, f"{v:.2f}", ha="center", va="center",
-                    color="white" if v < 0.5 else "black",
-                    fontsize=value_fontsize)
+            ax.text(
+                j,
+                i,
+                f"{v:.2f}",
+                ha="center",
+                va="center",
+                color="white" if v < 0.5 else "black",
+                fontsize=value_fontsize,
+            )
     return im
 
 
@@ -116,8 +128,7 @@ def presence_cm(rep: dict) -> list[list[int]]:
        [fn, tp]]
     """
     p = rep["presence"]
-    return [[int(p["tn"]), int(p["fp"])],
-            [int(p["fn"]), int(p["tp"])]]
+    return [[int(p["tn"]), int(p["fp"])], [int(p["fn"]), int(p["tp"])]]
 
 
 def render_grid(reports, kind: str, out: Path) -> None:
@@ -150,11 +161,14 @@ def render_grid(reports, kind: str, out: Path) -> None:
         else:
             cm = presence_cm(rep)
             score_label = f"F1 {rep['presence']['f1']:.3f}"
-        title = (f"{run.name}\n"
-                 f"{rep['probe_mode']} · {rep['ckpt_name']}\n"
-                 f"{score_label}  ·  n={nw:,}")
-        last_im = cm_panel(axes[i], cm, title, labels,
-                           show_y=(i == 0), value_fontsize=value_fs)
+        title = (
+            f"{run.name}\n"
+            f"{rep['probe_mode']} · {rep['ckpt_name']}\n"
+            f"{score_label}  ·  n={nw:,}"
+        )
+        last_im = cm_panel(
+            axes[i], cm, title, labels, show_y=(i == 0), value_fontsize=value_fs
+        )
 
     cbar = fig.colorbar(last_im, ax=axes, fraction=0.022, pad=0.04, shrink=0.85)
     cbar.set_label("Row-normalized rate (recall view)", fontsize=13)
@@ -166,14 +180,25 @@ def render_grid(reports, kind: str, out: Path) -> None:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--runs", type=Path, nargs="+", default=DEFAULT_RUNS,
-                   help="Run dirs to render (default: three completed id_split runs)")
-    p.add_argument("--out-type", type=Path,
-                   default=ROOT / "fig13_confusion_type_all_runs.png",
-                   help="Output PNG path for the type confusion figure")
-    p.add_argument("--out-presence", type=Path,
-                   default=ROOT / "fig14_confusion_presence_all_runs.png",
-                   help="Output PNG path for the presence confusion figure")
+    p.add_argument(
+        "--runs",
+        type=Path,
+        nargs="+",
+        default=DEFAULT_RUNS,
+        help="Run dirs to render (default: three completed id_split runs)",
+    )
+    p.add_argument(
+        "--out-type",
+        type=Path,
+        default=ROOT / "fig13_confusion_type_all_runs.png",
+        help="Output PNG path for the type confusion figure",
+    )
+    p.add_argument(
+        "--out-presence",
+        type=Path,
+        default=ROOT / "fig14_confusion_presence_all_runs.png",
+        help="Output PNG path for the presence confusion figure",
+    )
     args = p.parse_args()
 
     reports = []
@@ -196,7 +221,7 @@ def main() -> int:
         print("No usable runs found.")
         return 0
 
-    render_grid(reports, "type",     args.out_type)
+    render_grid(reports, "type", args.out_type)
     render_grid(reports, "presence", args.out_presence)
     print(f"wrote {args.out_type}")
     print(f"wrote {args.out_presence}")

@@ -25,6 +25,7 @@ Usage
     python supervised_baseline.py --frontend multiscale --epochs 30 \
         --out-dir saved_crl/runs/supervised/file_split/multiscale/
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,7 +34,6 @@ import json
 import sys
 import time
 from dataclasses import asdict
-from datetime import datetime
 from pathlib import Path
 
 import torch
@@ -45,33 +45,47 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from crl_vehicle.config import CRLConfig
 from crl_vehicle.data.dataset import (
-    SensorDataset, collate_single, compute_class_weights,
+    SensorDataset,
+    collate_single,
+    compute_class_weights,
 )
+from crl_vehicle.seeding import seed_everything, seeded_dataloader_kwargs
 from training.trainer import CRLModel
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--data-dir",   default="../data_files/parsed/train/")
-    p.add_argument("--val-dir",    default="../data_files/parsed/val/")
-    p.add_argument("--test-dir",   default="../data_files/parsed/test/")
-    p.add_argument("--cache-dir",  default="./saved_crl/caches/waveform")
-    p.add_argument("--out-dir",    required=True)
-    p.add_argument("--use-id-split", action="store_true")
-    p.add_argument("--id-root",    default="../data_files/parsed/")
-    p.add_argument("--frontend",
-                   choices=["multiscale", "morlet", "morlet_per_sensor",
-                            "morlet_fused"],
-                   default="multiscale")
+    p.add_argument("--data-dir", default="../data_files/parsed/train/")
+    p.add_argument("--val-dir", default="../data_files/parsed/val/")
+    p.add_argument("--test-dir", default="../data_files/parsed/test/")
+    p.add_argument("--cache-dir", default="./saved_crl/caches/waveform")
+    p.add_argument("--out-dir", required=True)
+    p.add_argument("--use-id-split", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--id-root", default="../data_files/parsed/")
+    p.add_argument(
+        "--frontend",
+        choices=["multiscale", "morlet", "morlet_per_sensor", "morlet_fused"],
+        default="multiscale",
+    )
     p.add_argument("--morlet-use-phase", action="store_true")
     p.add_argument("--sensors", nargs="+", default=["audio", "seismic"])
-    p.add_argument("--epochs",     type=int,   default=30)
-    p.add_argument("--batch-size", type=int,   default=128)
-    p.add_argument("--lr",         type=float, default=3e-4)
-    p.add_argument("--wd",         type=float, default=1e-4)
-    p.add_argument("--num-workers", type=int,  default=8)
-    p.add_argument("--head-hidden", type=int,  default=64,
-                   help="MLP head hidden dim. Set 0 for a single Linear.")
+    p.add_argument("--epochs", type=int, default=30)
+    p.add_argument("--batch-size", type=int, default=128)
+    p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--wd", type=float, default=1e-4)
+    p.add_argument("--num-workers", type=int, default=8)
+    p.add_argument(
+        "--head-hidden",
+        type=int,
+        default=64,
+        help="MLP head hidden dim. Set 0 for a single Linear.",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Master RNG seed (default 42). Persisted into " "summary.json.",
+    )
     return p.parse_args()
 
 
@@ -81,8 +95,8 @@ class SupervisedClassifier(nn.Module):
     Reads mu from the encoder (deterministic, no sampling) and feeds it to
     a 2-layer MLP. Training is end-to-end across frontend + encoder + head.
     """
-    def __init__(self, crl: CRLModel, d_z: int, head_hidden: int = 64,
-                 n_classes: int = 4) -> None:
+
+    def __init__(self, crl: CRLModel, d_z: int, head_hidden: int = 64, n_classes: int = 4) -> None:
         super().__init__()
         self.crl = crl
         if head_hidden > 0:
@@ -122,11 +136,12 @@ class SupervisedClassifier(nn.Module):
                 mus_per_sample.setdefault(global_i, []).append(mu_s[local_i])
 
         if not mus_per_sample:
-            return (torch.empty(0, device=dev),
-                    torch.zeros(len(batch["vehicle_type"]), dtype=torch.bool))
+            return (
+                torch.empty(0, device=dev),
+                torch.zeros(len(batch["vehicle_type"]), dtype=torch.bool),
+            )
         order = sorted(mus_per_sample.keys())
-        mus = torch.stack([torch.stack(mus_per_sample[i]).mean(dim=0)
-                           for i in order])
+        mus = torch.stack([torch.stack(mus_per_sample[i]).mean(dim=0) for i in order])
         mask = torch.zeros(len(batch["vehicle_type"]), dtype=torch.bool)
         mask[order] = True
         return mus, mask
@@ -138,7 +153,9 @@ class SupervisedClassifier(nn.Module):
         return self.head(mu), mask
 
 
-def macro_f1(logits: torch.Tensor, labels: torch.Tensor, n_classes: int = 4) -> tuple[float, float, list[float]]:
+def macro_f1(
+    logits: torch.Tensor, labels: torch.Tensor, n_classes: int = 4
+) -> tuple[float, float, list[float]]:
     """Returns (macro_f1, accuracy, per_class_f1)."""
     if logits.numel() == 0:
         return 0.0, 0.0, [0.0] * n_classes
@@ -157,16 +174,25 @@ def make_dataset(args, cfg, role: str, parquet_dir: str, is_train: bool) -> Sens
     cache_dir = Path(args.cache_dir)
     if args.use_id_split:
         return SensorDataset(
-            parquet_dir, cfg, is_train=is_train, cache_dir=cache_dir,
-            use_id_split=True, role=role,
-            id_root=args.id_root, id_cache_dir=Path("saved_crl/caches/id_split"),
+            parquet_dir,
+            cfg,
+            is_train=is_train,
+            cache_dir=cache_dir,
+            use_id_split=True,
+            role=role,
+            id_root=args.id_root,
+            id_cache_dir=Path("saved_crl/caches/id_split"),
         )
     return SensorDataset(parquet_dir, cfg, is_train=is_train, cache_dir=cache_dir)
 
 
-def run_one_pass(model: SupervisedClassifier, loader: DataLoader,
-                 dev: torch.device, opt: torch.optim.Optimizer | None,
-                 type_weights: torch.Tensor | None) -> tuple[float, float, float, list[float]]:
+def run_one_pass(
+    model: SupervisedClassifier,
+    loader: DataLoader,
+    dev: torch.device,
+    opt: torch.optim.Optimizer | None,
+    type_weights: torch.Tensor | None,
+) -> tuple[float, float, float, list[float]]:
     is_train = opt is not None
     model.train(is_train)
     total_loss = 0.0
@@ -200,6 +226,7 @@ def run_one_pass(model: SupervisedClassifier, loader: DataLoader,
 
 def main() -> None:
     args = parse_args()
+    seed_everything(args.seed)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -219,10 +246,12 @@ def main() -> None:
     print(f"\nPreloading datasets (use_id_split={args.use_id_split}) …")
     t0 = time.time()
     train_ds = make_dataset(args, cfg, "train", args.data_dir, is_train=True)
-    val_ds   = make_dataset(args, cfg, "val",   args.val_dir,  is_train=False)
-    test_ds  = make_dataset(args, cfg, "test",  args.test_dir, is_train=False)
-    print(f"  Done in {(time.time()-t0)/60:.1f} min  "
-          f"({len(train_ds):,} train / {len(val_ds):,} val / {len(test_ds):,} test)")
+    val_ds = make_dataset(args, cfg, "val", args.val_dir, is_train=False)
+    test_ds = make_dataset(args, cfg, "test", args.test_dir, is_train=False)
+    print(
+        f"  Done in {(time.time()-t0)/60:.1f} min  "
+        f"({len(train_ds):,} train / {len(val_ds):,} val / {len(test_ds):,} test)"
+    )
 
     pres_w, type_w = compute_class_weights(train_ds)
     type_w = type_w.to(dev)
@@ -232,21 +261,50 @@ def main() -> None:
     model = SupervisedClassifier(crl, d_z=cfg.d_z, head_hidden=args.head_hidden).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                              num_workers=args.num_workers, collate_fn=collate_single,
-                              pin_memory=True, drop_last=True)
-    val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False,
-                              num_workers=args.num_workers, collate_fn=collate_single,
-                              pin_memory=True)
-    test_loader  = DataLoader(test_ds,  batch_size=args.batch_size, shuffle=False,
-                              num_workers=args.num_workers, collate_fn=collate_single,
-                              pin_memory=True)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        collate_fn=collate_single,
+        pin_memory=True,
+        drop_last=True,
+        **seeded_dataloader_kwargs(args.seed),
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        collate_fn=collate_single,
+        pin_memory=True,
+        **seeded_dataloader_kwargs(args.seed),
+    )
+    test_loader = DataLoader(
+        test_ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        collate_fn=collate_single,
+        pin_memory=True,
+        **seeded_dataloader_kwargs(args.seed),
+    )
 
     csv_path = out_dir / "metrics.csv"
-    fields = ["epoch", "train_loss", "train_f1", "train_acc",
-              "val_loss", "val_f1", "val_acc",
-              "ped_f1", "light_f1", "medium_f1", "heavy_f1"]
-    csv_f = open(csv_path, "w", newline="")
+    fields = [
+        "epoch",
+        "train_loss",
+        "train_f1",
+        "train_acc",
+        "val_loss",
+        "val_f1",
+        "val_acc",
+        "ped_f1",
+        "light_f1",
+        "medium_f1",
+        "heavy_f1",
+    ]
+    csv_f = open(csv_path, "w", newline="")  # noqa: SIM115  # fmt: skip
     writer = csv.DictWriter(csv_f, fieldnames=fields)
     writer.writeheader()
 
@@ -257,19 +315,29 @@ def main() -> None:
         tr_loss, tr_f1, tr_acc, _ = run_one_pass(model, train_loader, dev, opt, type_w)
         with torch.no_grad():
             va_loss, va_f1, va_acc, va_per = run_one_pass(model, val_loader, dev, None, type_w)
-        writer.writerow({
-            "epoch": epoch,
-            "train_loss": round(tr_loss, 4), "train_f1": round(tr_f1, 4), "train_acc": round(tr_acc, 4),
-            "val_loss":   round(va_loss, 4), "val_f1":   round(va_f1, 4), "val_acc":   round(va_acc, 4),
-            "ped_f1": round(va_per[0], 4), "light_f1": round(va_per[1], 4),
-            "medium_f1": round(va_per[2], 4), "heavy_f1": round(va_per[3], 4),
-        })
+        writer.writerow(
+            {
+                "epoch": epoch,
+                "train_loss": round(tr_loss, 4),
+                "train_f1": round(tr_f1, 4),
+                "train_acc": round(tr_acc, 4),
+                "val_loss": round(va_loss, 4),
+                "val_f1": round(va_f1, 4),
+                "val_acc": round(va_acc, 4),
+                "ped_f1": round(va_per[0], 4),
+                "light_f1": round(va_per[1], 4),
+                "medium_f1": round(va_per[2], 4),
+                "heavy_f1": round(va_per[3], 4),
+            }
+        )
         csv_f.flush()
         elapsed = time.time() - t_e
-        print(f"  E{epoch:3d} | {elapsed:5.1f}s | "
-              f"train loss={tr_loss:.4f} f1={tr_f1:.3f} | "
-              f"val loss={va_loss:.4f} f1={va_f1:.3f} acc={va_acc:.3f} | "
-              f"per-class={[round(x, 2) for x in va_per]}")
+        print(
+            f"  E{epoch:3d} | {elapsed:5.1f}s | "
+            f"train loss={tr_loss:.4f} f1={tr_f1:.3f} | "
+            f"val loss={va_loss:.4f} f1={va_f1:.3f} acc={va_acc:.3f} | "
+            f"per-class={[round(x, 2) for x in va_per]}"
+        )
         if va_f1 > best_val_f1:
             best_val_f1 = va_f1
             best_epoch = epoch
@@ -281,8 +349,10 @@ def main() -> None:
     model.load_state_dict(torch.load(out_dir / "best.pth", map_location=dev))
     with torch.no_grad():
         te_loss, te_f1, te_acc, te_per = run_one_pass(model, test_loader, dev, None, type_w)
-    print(f"  TEST | loss={te_loss:.4f} f1={te_f1:.4f} acc={te_acc:.4f}  "
-          f"per-class={[round(x, 4) for x in te_per]}")
+    print(
+        f"  TEST | loss={te_loss:.4f} f1={te_f1:.4f} acc={te_acc:.4f}  "
+        f"per-class={[round(x, 4) for x in te_per]}"
+    )
 
     summary = {
         "config": asdict(cfg),
@@ -293,11 +363,13 @@ def main() -> None:
         "test_acc": round(te_acc, 4),
         "test_per_class_f1": {
             "pedestrian": round(te_per[0], 4),
-            "light":      round(te_per[1], 4),
-            "medium":     round(te_per[2], 4),
-            "heavy":      round(te_per[3], 4),
+            "light": round(te_per[1], 4),
+            "medium": round(te_per[2], 4),
+            "heavy": round(te_per[3], 4),
         },
-        "n_train": len(train_ds), "n_val": len(val_ds), "n_test": len(test_ds),
+        "n_train": len(train_ds),
+        "n_val": len(val_ds),
+        "n_test": len(test_ds),
         "type_class_weights": [round(w, 4) for w in type_w.cpu().tolist()],
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
