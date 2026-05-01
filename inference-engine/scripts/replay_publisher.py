@@ -308,27 +308,16 @@ class ReplayNode(Node):
         a_chunk = self.audio_amp[self.audio_idx : a_end]
         s_chunk = self.seis_amp[self.seismic_idx : s_end]
 
-        msg = RawSensorReading()
-        msg.sensor_id = self.args.sensor_id
-        msg.start_time = now
-        msg.amplitude_readings = [int(x) for x in a_chunk]
-        self.audio_pub.publish(msg)
-
-        smsg = RawSensorReading()
-        smsg.sensor_id = self.args.sensor_id.replace("aud", "ehz")
-        smsg.start_time = now
-        smsg.amplitude_readings = [int(x) for x in s_chunk]
-        self.seismic_pub.publish(smsg)
-
-        self.audio_idx = a_end
-        self.seismic_idx = s_end
-        self.tick_count += 1
-
-        # Once per window (10 ticks at TICK_HZ=10), record the window's
-        # ground truth + publish wall-clock so we can match it to an
-        # InferenceResult later.
-        if self.tick_count % TICK_HZ == 0:
-            window_idx = (self.tick_count // TICK_HZ) - 1
+        # When this is the FIRST tick of a new window, capture the
+        # publish wall-clock — this is what the Ingestor will record as
+        # SensorData.time_stamp for the window, and what egress will
+        # echo back as InferenceResult.timestamp. Matching off this
+        # actual value (vs. a synthetic ``start_wall + N*WINDOW_SEC``
+        # estimate) avoids fractional-second drift between the replay
+        # node's start_time and the Ingestor's first-message wall-clock.
+        is_window_first_tick = (self.tick_count % TICK_HZ) == 0
+        if is_window_first_tick:
+            window_idx = self.tick_count // TICK_HZ
             gt = None
             if self.has_gt:
                 window_first_audio = window_idx * self.audio_per_tick * TICK_HZ
@@ -348,32 +337,53 @@ class ReplayNode(Node):
                     else []
                 )
                 gt = majority_presence(a_pres) or majority_presence(s_pres)
-            window_start_wall = self.start_wall + window_idx * WINDOW_SEC
             with self.lock:
-                self.window_state[round(window_start_wall, 3)] = {
-                    "publish_wall": window_start_wall,
+                self.window_state[round(now, 3)] = {
+                    "publish_wall": now,
                     "gt_present": gt,
                     "matched": False,
                 }
 
+        msg = RawSensorReading()
+        msg.sensor_id = self.args.sensor_id
+        msg.start_time = now
+        msg.amplitude_readings = [int(x) for x in a_chunk]
+        self.audio_pub.publish(msg)
+
+        smsg = RawSensorReading()
+        smsg.sensor_id = self.args.sensor_id.replace("aud", "ehz")
+        smsg.start_time = now
+        smsg.amplitude_readings = [int(x) for x in s_chunk]
+        self.seismic_pub.publish(smsg)
+
+        self.audio_idx = a_end
+        self.seismic_idx = s_end
+        self.tick_count += 1
+
     def _on_inference(self, msg: InferenceResult):
-        # TEMP DEBUG: confirm callback is firing at all
-        self.get_logger().info(
-            f"[debug] callback fired! ts={msg.timestamp} "
-            f"detected={msg.vehicle_detected} det_conf={msg.detection_confidence:.3f}"
-        )
         recv_wall = time.time()
         key = round(msg.timestamp, 3)
         with self.lock:
             entry = self.window_state.get(key)
             if entry is None:
-                # Inference for an unknown window — usually a slight
-                # rounding mismatch. Try near-neighbor lookup within 10ms.
+                # Inference for a window we don't have a record of —
+                # could be a stale message from a prior run still in
+                # flight on JetStream (60s max-age) or sub-millisecond
+                # rounding. Try a near-neighbor lookup; the timestamps
+                # round-trip through several time.time() calls, so allow
+                # ±100ms before giving up.
+                best = None
+                best_dt = float("inf")
                 for k in list(self.window_state.keys()):
-                    if abs(k - key) < 0.01:
-                        entry = self.window_state[k]
-                        key = k
-                        break
+                    if self.window_state[k]["matched"]:
+                        continue
+                    dt = abs(k - key)
+                    if dt < best_dt and dt < 0.1:
+                        best = k
+                        best_dt = dt
+                if best is not None:
+                    entry = self.window_state[best]
+                    key = best
             if entry is None or entry["matched"]:
                 return
             entry["matched"] = True
