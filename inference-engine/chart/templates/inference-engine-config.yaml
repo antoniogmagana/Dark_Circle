@@ -12,13 +12,16 @@ data:
   {{- if .Values.ros2.fastddsBuiltinTransports }}
   FASTDDS_BUILTIN_TRANSPORTS: {{ .Values.ros2.fastddsBuiltinTransports | quote }}
   {{- end }}
-{{- if .Values.ros2.fastddsProfile }}
 ---
+# fastdds-profiles is always rendered (even when empty) because the
+# Ingestor Deployment template baked into the Discovery image
+# unconditionally mounts it. An empty XML is fine — FastDDS falls back
+# to its built-in defaults, which combined with FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+# is exactly what the kind smoke test needs.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: fastdds-profiles
 data:
   fastdds.xml: |
-{{ .Values.ros2.fastddsProfile | indent 4 }}
-{{- end }}
+{{ .Values.ros2.fastddsProfile | default "" | indent 4 }}

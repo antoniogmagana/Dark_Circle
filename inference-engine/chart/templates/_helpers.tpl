@@ -32,7 +32,11 @@ dnsPolicy: ClusterFirstWithHostNet
 {{- end -}}
 
 {{/*
-FastDDS profile mount + env, only emitted when ros2.fastddsProfile is non-empty.
+FastDDS profile mount + env. The mount and volume always render so the
+baked-in Ingestor template (which mounts unconditionally) doesn't fail
+on a missing ConfigMap. The env var only renders when a profile is
+configured, so an empty XML doesn't get pointed at.
+
 Usage: {{ include "inference-engine.fastddsEnv" . | nindent 12 }}
        {{ include "inference-engine.fastddsMount" . | nindent 12 }}
        {{ include "inference-engine.fastddsVolume" . | nindent 6 }}
@@ -45,17 +49,13 @@ Usage: {{ include "inference-engine.fastddsEnv" . | nindent 12 }}
 {{- end -}}
 
 {{- define "inference-engine.fastddsMount" -}}
-{{- if .Values.ros2.fastddsProfile -}}
 - name: fastdds-profiles
   mountPath: /etc/fastdds
   readOnly: true
 {{- end -}}
-{{- end -}}
 
 {{- define "inference-engine.fastddsVolume" -}}
-{{- if .Values.ros2.fastddsProfile -}}
 - name: fastdds-profiles
   configMap:
     name: fastdds-profiles
-{{- end -}}
 {{- end -}}
