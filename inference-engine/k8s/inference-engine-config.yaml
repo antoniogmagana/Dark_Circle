@@ -1,0 +1,45 @@
+# Unified, customer-facing configuration for the inference engine.
+#
+# Customers edit this single ConfigMap to adapt the pipeline to their
+# environment without touching individual Deployment manifests. The Helm
+# chart in step 2 will surface the same keys as values.yaml; for now the
+# raw ConfigMap is what manifests reference via envFrom / configMapKeyRef.
+#
+# Cluster-internal defaults (NATS) are kept here for visibility, but
+# changing them only makes sense if the customer is replacing the
+# in-cluster NATS deployment with their own.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inference-engine-config
+  namespace: default
+data:
+  # --- ROS2 / DDS (customer-facing) ---
+  # ROS_DOMAIN_ID partitions DDS networks. Use a unique value per customer
+  # site to avoid crosstalk with other ROS2 systems on the same network.
+  ROS_DOMAIN_ID: "0"
+
+  # RMW implementation. rmw_fastrtps_cpp (FastDDS) is ROS2 Jazzy's default
+  # and what this pipeline is tested with; rmw_cyclonedds_cpp is supported
+  # by ros:jazzy if the customer prefers Cyclone.
+  RMW_IMPLEMENTATION: "rmw_fastrtps_cpp"
+
+  # ROS2 topic on which egress publishes InferenceResult messages. The
+  # customer's downstream consumers subscribe to this.
+  INFERENCE_RESULT_TOPIC: "/inference_result"
+
+  # --- Cluster-internal (defaults; rarely customer-edited) ---
+  NATS_URL: "nats://nats-service:4222"
+---
+# Optional FastDDS unicast profile. When the customer's network blocks
+# multicast (most enterprise networks), populate fastdds.xml below with
+# explicit peer addresses and reference it via FASTRTPS_DEFAULT_PROFILES_FILE
+# in the relevant Deployments. The smoke test relies on hostNetwork +
+# multicast, so this file is empty by default.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastdds-profiles
+  namespace: default
+data:
+  fastdds.xml: ""

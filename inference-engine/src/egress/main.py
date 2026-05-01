@@ -19,10 +19,13 @@ from inference_protos import inference_pb2
 from rclpy.node import Node
 from ros2_interfaces.msg import InferenceResult
 
+DEFAULT_OUTPUT_TOPIC = "/inference_result"
+
+
 class EgressNode(Node):
-    def __init__(self):
+    def __init__(self, output_topic: str):
         super().__init__("egressor")
-        self.publisher = self.create_publisher(InferenceResult, "inference_result", 10)
+        self.publisher = self.create_publisher(InferenceResult, output_topic, 10)
 
     def _publish(self, payload):
         msg = InferenceResult()
@@ -64,8 +67,10 @@ def main():
     nc = loop.run_until_complete(start_nats())
     js = nc.jetstream()
 
+    output_topic = os.environ.get("INFERENCE_RESULT_TOPIC", DEFAULT_OUTPUT_TOPIC)
+
     rclpy.init()
-    node = EgressNode()
+    node = EgressNode(output_topic)
 
     # Two durable push consumers, pre-created by jetstream-init with
     # deliver_group="egress" so multiple egress replicas (KEDA) share work

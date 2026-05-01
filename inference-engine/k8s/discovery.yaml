@@ -14,18 +14,22 @@ spec:
       labels:
         app: discovery
     spec:
-      # On macOS+kind, DDS multicast does not traverse pods cleanly. Local
-      # smoke users may add ``hostNetwork: true`` +
-      # ``dnsPolicy: ClusterFirstWithHostNet`` here; production Linux
-      # clusters with a multicast-capable CNI do not need it.
+      # DDS multicast does not traverse Calico-VXLAN, so kind-based smoke
+      # tests need hostNetwork even on Linux. A real cluster on a
+      # multicast-capable CNI (Calico in IP-in-IP mode, Cilium, Flannel
+      # with multicast, etc.) can drop hostNetwork and use
+      # FASTRTPS_DEFAULT_PROFILES_FILE for unicast peers instead.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       serviceAccountName: discovery-sa
       containers:
         - name: discovery
           image: inference-engine/discovery:dev
           imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: inference-engine-config
           env:
-            - name: ROS_DOMAIN_ID
-              value: "0"
             - name: NAMESPACE
               valueFrom:
                 fieldRef:

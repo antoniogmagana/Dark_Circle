@@ -22,20 +22,20 @@ spec:
         app: ingestor
         sensor-array: placeholder
     spec:
-      # On macOS+kind add ``hostNetwork: true`` and
-      # ``dnsPolicy: ClusterFirstWithHostNet`` for DDS multicast. Linux
-      # clusters with a multicast-capable CNI do not need it.
+      # DDS multicast does not traverse Calico-VXLAN, so kind-based smoke
+      # tests need hostNetwork even on Linux.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: ingestor
           image: inference-engine/ingestor:dev
           imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: inference-engine-config
           env:
-            - name: ROS_DOMAIN_ID
-              value: "0"
             - name: NATIVE_RATES
               value: "1"
-            - name: NATS_URL
-              value: "nats://nats-service:4222"
             - name: SENSOR_ARRAY
               value: "placeholder"
             - name: SENSOR_ROLE_MAP

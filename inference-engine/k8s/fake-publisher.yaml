@@ -16,16 +16,19 @@ spec:
       labels:
         app: fake-publisher
     spec:
-      # On macOS+kind add ``hostNetwork: true`` and
-      # ``dnsPolicy: ClusterFirstWithHostNet`` for DDS multicast.
+      # DDS multicast does not traverse Calico-VXLAN, so kind-based smoke
+      # tests need hostNetwork even on Linux.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: fake-publisher
           image: inference-engine/fake-publisher:dev
           imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: inference-engine-config
           env:
             - name: FAKE_TOPICS
               value: "/shake_001/aud,/shake_001/ehz,/shake_001/ene,/shake_001/enn,/shake_001/enz"
             - name: FAKE_RATE_HZ
               value: "10"
-            - name: ROS_DOMAIN_ID
-              value: "0"

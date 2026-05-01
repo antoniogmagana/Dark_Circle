@@ -27,8 +27,6 @@ spec:
         - name: egress
           image: inference-engine/egress:dev
           imagePullPolicy: IfNotPresent
-          env:
-            - name: ROS_DOMAIN_ID
-              value: "0"
-            - name: NATS_URL
-              value: "nats://nats-service:4222"
+          envFrom:
+            - configMapRef:
+                name: inference-engine-config

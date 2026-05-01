@@ -25,8 +25,9 @@ spec:
         - name: infer-classify
           image: inference-engine/infer-classify:dev
           imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: inference-engine-config
           env:
-            - name: NATS_URL
-              value: "nats://nats-service:4222"
             - name: MODEL_DIR
               value: "/app/model"

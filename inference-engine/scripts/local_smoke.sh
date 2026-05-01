@@ -89,6 +89,7 @@ kubectl apply -f k8s/nats/jetstream-streams.yaml
 kubectl wait --for=condition=complete --timeout=120s job/jetstream-init -n "$NAMESPACE"
 
 kubectl apply -f k8s/rbac/
+kubectl apply -f k8s/inference-engine-config.yaml
 kubectl apply -f k8s/sensor-config.yaml
 kubectl apply -f k8s/expected-sensors.yaml
 kubectl apply -f k8s/discovery.yaml
