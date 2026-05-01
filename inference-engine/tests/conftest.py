@@ -8,18 +8,26 @@ import pytest
 from unittest.mock import Mock, MagicMock, AsyncMock, patch
 import asyncio
 
-# Add src to Python path for imports
+# Mirror the container layout: each node ships flat into /app, so its
+# siblings are imported via top-level names (``from whitelist import ...``,
+# ``from dispatch import ...``). Put each per-node directory on sys.path
+# so tests resolve those names the same way the deployed images do.
 INFERENCE_ENGINE_ROOT = Path(__file__).parent.parent
 SRC_PATH = INFERENCE_ENGINE_ROOT / "src"
 sys.path.insert(0, str(SRC_PATH))
+for node_dir in SRC_PATH.iterdir():
+    if node_dir.is_dir():
+        sys.path.insert(0, str(node_dir))
 
 # Import protobuf definitions
 try:
     from inference_protos import inference_pb2
+    from google.protobuf.timestamp_pb2 import Timestamp as ProtoTimestamp
     PROTOS_AVAILABLE = True
 except ImportError:
     PROTOS_AVAILABLE = False
     inference_pb2 = None
+    ProtoTimestamp = None
 
 
 # ============================================================================
@@ -108,26 +116,38 @@ def mock_ros2_node():
 
 @pytest.fixture
 def mock_nats_client():
-    """Mock async NATS client for testing."""
+    """Mock async NATS client (with JetStream stub) for testing."""
     client = AsyncMock()
-    
+
     # Mock async methods
     client.connect = AsyncMock()
     client.subscribe = AsyncMock(return_value=MagicMock())
     client.publish = AsyncMock()
     client.close = AsyncMock()
-    
+
     # Mock connection state
     client.is_connected = True
-    
+
     # Store published messages for verification in tests
     client._published_messages = []
-    
+
     async def publish_spy(subject, data):
         client._published_messages.append({'subject': subject, 'data': data})
-    
+
     client.publish.side_effect = publish_spy
-    
+
+    # JetStream context: same shape (subscribe / publish) as the core API
+    # so tests reach in through ``nc.jetstream()`` if they want.
+    js_ctx = AsyncMock()
+    js_ctx.subscribe = AsyncMock(return_value=MagicMock())
+    js_ctx._published_messages = client._published_messages
+
+    async def js_publish_spy(subject, data, **_kwargs):
+        client._published_messages.append({'subject': subject, 'data': data})
+
+    js_ctx.publish = AsyncMock(side_effect=js_publish_spy)
+    client.jetstream = MagicMock(return_value=js_ctx)
+
     return client
 
 
@@ -186,10 +206,10 @@ def sample_sensor_data_proto(sensor_id, base_timestamp):
     if not PROTOS_AVAILABLE:
         pytest.skip("inference_protos not available")
     
-    ts = inference_pb2.google_dot_protobuf_dot_timestamp__pb2.Timestamp()
+    ts = ProtoTimestamp()
     ts.seconds = int(base_timestamp)
     ts.nanos = int((base_timestamp - int(base_timestamp)) * 1e9)
-    
+
     payload = inference_pb2.SensorData(
         sensor_id=sensor_id,
         time_stamp=ts
@@ -227,7 +247,7 @@ def create_timestamp_proto():
         pytest.skip("inference_protos not available")
     
     def _create(unix_time: float):
-        ts = inference_pb2.google_dot_protobuf_dot_timestamp__pb2.Timestamp()
+        ts = ProtoTimestamp()
         ts.seconds = int(unix_time)
         ts.nanos = int((unix_time - int(unix_time)) * 1e9)
         return ts

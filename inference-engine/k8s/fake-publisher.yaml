@@ -1,0 +1,31 @@
+# Fake ROS2 publisher for local smoke testing only.
+# Lives in-cluster so DDS multicast stays on the kind pod network.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-publisher
+  labels:
+    app: fake-publisher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fake-publisher
+  template:
+    metadata:
+      labels:
+        app: fake-publisher
+    spec:
+      # On macOS+kind add ``hostNetwork: true`` and
+      # ``dnsPolicy: ClusterFirstWithHostNet`` for DDS multicast.
+      containers:
+        - name: fake-publisher
+          image: inference-engine/fake-publisher:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: FAKE_TOPICS
+              value: "/shake_001/aud,/shake_001/ehz,/shake_001/ene,/shake_001/enn,/shake_001/enz"
+            - name: FAKE_RATE_HZ
+              value: "10"
+            - name: ROS_DOMAIN_ID
+              value: "0"

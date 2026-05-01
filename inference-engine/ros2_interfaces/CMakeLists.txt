@@ -14,11 +14,11 @@ find_package(sensor_msgs REQUIRED)
 # find message generator
 find_package(rosidl_default_generators REQUIRED)
 
-# tell generator to compile custom message
-rosidl_default_generators(${PROJECT_NAME}
+# tell generator to compile custom messages
+rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RawSensorReading.msg"
   "msg/InferenceResult.msg"
-  DEPENDENCIES std_msgs sensor_msgs
+  DEPENDENCIES std_msgs sensor_msgs builtin_interfaces
 )
 
 if(BUILD_TESTING)

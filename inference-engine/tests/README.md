@@ -4,16 +4,16 @@ Comprehensive test suite for the Dark_Circle inference-engine microservices pipe
 
 ## ✅ Current Status
 
-**All Tests: 97/97 passing ✅ (100% Complete)**
+**All Tests: 125/125 passing ✅ (100% Complete)**
 
 ```
-Discovery:        13 passed  (100% coverage)
-Ingestor:         17 passed  (100% coverage)
+Discovery:        37 passed  (100% coverage)
+Ingestor:         21 passed  (100% coverage)
 Egress:           21 passed  (100% coverage)
 Infer Detect:     23 passed  (100% coverage)
 Infer Classify:   23 passed  (100% coverage)
 
-TOTAL:            97 passed, 0 skipped, 0 failed ✅
+TOTAL:            125 passed, 0 skipped, 0 failed ✅
 ```
 
 **Recent Completion:**
@@ -32,8 +32,8 @@ TOTAL:            97 passed, 0 skipped, 0 failed ✅
 
 The inference-engine test suite covers:
 - **SensorBuffer** (`test_buffer.py`) - ✅ **Complete** (33 comprehensive tests, all passing)
-- **Discovery Node** (`test_discovery.py`) - ✅ **Complete** (13 tests: ROS2 discovery, K8s orchestration, config, error handling)
-- **Ingestor Node** (`test_ingestor.py`) - ✅ **Complete** (17 tests: ROS2/NATS integration, buffer, ADC normalization, performance)
+- **Discovery Node** (`test_discovery.py`) - ✅ **Complete** (37 tests: ConfigMap parsing, completeness checks, PollState grace logic, manifest construction)
+- **Ingestor Node** (`test_ingestor.py`) - ✅ **Complete** (21 tests: SENSOR_ROLE_MAP parsing, role-bound callbacks, subscription wiring, ADC normalization, performance)
 - **Egress Node** (`test_egress.py`) - ✅ **Complete** (21 tests: protobuf conversion, NATS/ROS2 integration, edge cases, latency)
 - **Infer Detect Node** (`test_infer_detect.py`) - ✅ **Complete** (23 tests: model loading, binary detection, tensor preprocessing, NATS integration)
 - **Infer Classify Node** (`test_infer_classify.py`) - ✅ **Complete** (23 tests: multi-class classification, Mel spectrograms, CLASS_MAP, confidence scoring)
@@ -153,65 +153,69 @@ inference-engine/
 - Interleaved multi-channel
 - Sparse seismic with dense acoustic
 
-### ✅ Discovery Node (`test_discovery.py`) - 13 tests
+### ✅ Discovery Node (`test_discovery.py`) - 37 tests
 
-**Complete test coverage for ROS2 discovery and Kubernetes orchestration:**
+**Coverage for the ConfigMap-driven sensor whitelist and Kubernetes orchestration:**
 
-#### Topic Discovery (4 tests)
-- ROS2 topic discovery with filtering
-- Topic name parsing (sensor array extraction)
-- Grouping topics by sensor array prefix
-- Handling multiple sensor arrays
+#### Config loading (9 tests)
+- Audio + seismic only / with optional accel block
+- Multiple arrays
+- Missing audio / missing seismic / partial accel rejected
+- Empty arrays block, missing top-level key, malformed YAML
 
-#### Kubernetes Orchestration (4 tests)
-- Deployment spawning with YAML templates
-- Deployment teardown
-- Grace period counter (3-poll delay before teardown)
-- Idempotent spawning (no duplicates)
+#### Completeness checks (7 tests)
+- ``required_topics`` builds correct set with and without accel
+- ``is_complete`` for full / partial / extra-visible cases
+- ``missing_topics`` returns just the gap
 
-#### Configuration (3 tests)
-- Poll interval configuration
-- Namespace configuration
-- Deployment template loading and substitution
+#### Role-map injection (3 tests)
+- ``build_role_map`` for audio+seismic and full accel
+- JSON round-trip safe for env-var transport
 
-#### Integration & Error Handling (2 tests)
-- Full discovery cycle (discover → spawn → teardown)
-- K8s API error handling, malformed topics
+#### Poll-state machine (12 tests)
+- Spawn when complete; no spawn while incomplete; idempotency
+- Topic-absence grace period + reset on reappearance
+- Config-removal grace period + reset on re-add
+- Unknown topics ignored
+- ``log_awaiting`` state-change throttle (logs only when missing set changes)
 
-### ✅ Ingestor Node (`test_ingestor.py`) - 17 tests
+#### Manifest construction (2 tests)
+- Template substitution carries SENSOR_ROLE_MAP JSON intact
+- Teardown calls ``delete_namespaced_deployment``
 
-**Complete test coverage for ROS2 to NATS bridge:**
+#### Integration (1 test)
+- Full poll cycle: incomplete → complete → spawn → loss → grace → teardown
 
-#### Channel Mapping (2 tests)
-- Channel code translation (aud→acoustic, ehz→seismic, etc.)
-- Invalid channel code handling
+### ✅ Ingestor Node (`test_ingestor.py`) - 21 tests
 
-#### ROS2 Subscription (3 tests)
-- Topic subscription creation
-- Callback invocation on message arrival
-- RawSensorReading message data extraction
+**Coverage for the SENSOR_ROLE_MAP-driven ROS2 → NATS bridge:**
 
-#### Buffer Integration (2 tests)
-- SensorBuffer receives data from callbacks
-- Window completion triggers NATS publish
+#### SENSOR_ROLE_MAP parsing (7 tests)
+- Audio + seismic only / with full accel
+- Invalid JSON / missing acoustic / missing seismic / unknown role / partial accel rejected
 
-#### NATS Publishing (3 tests)
-- Publishing SensorData protobuf to NATS (async)
-- NATS connection retry logic (async)
-- Protobuf serialization validation
+#### Role-bound callbacks (4 tests)
+- Callback routes to buffer with its bound role
+- Callback publishes when buffer returns a payload
+- Two callbacks for two roles dispatch independently
+- Callback ignores ``msg.sensor_id`` (no suffix derivation)
 
-#### ADC Normalization (2 tests)
-- 16-bit audio normalization (-32768 to 32767 → [-1.0, 1.0])
-- 24-bit seismic/accel normalization (-8388608 to 8388607 → [-1.0, 1.0])
+#### Subscription wiring (2 tests)
+- One ``create_subscription`` call per role
+- Renamed (non-conventional) topic names still dispatch correctly
+
+#### ADC normalization (2 tests)
+- 16-bit audio scale (-32768 / 32768 = -1.0, etc.)
+- 24-bit seismic / accel scale
 
 #### Configuration (2 tests)
-- Sensor array prefix configuration
-- NATS subject configuration
+- Node name uses array id; NATS subject constant
 
-#### Integration & Error Handling (3 tests)
-- End-to-end flow (ROS2 → Buffer → NATS)
-- Error handling (invalid channels, disconnections)
-- Performance testing (1000 msg/s throughput)
+#### NATS / end-to-end (4 tests)
+- Async publish with mocked NATS client
+- End-to-end role dispatch + payload publish
+- Buffer returns None → no publish
+- Throughput sanity (≥100 msg/s on mocks)
 
 ### ✅ Egress Node (`test_egress.py`) - 21 tests
 

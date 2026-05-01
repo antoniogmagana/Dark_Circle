@@ -1,35 +1,45 @@
-# ConfigMap: Ingestor Deployment Template
-# Used by the Discovery Node to instantiate per-sensor-array Ingestor pods
-# SENSOR_TOPICS and sensor array name are injected at runtime
+# Ingestor Deployment template, baked into the Discovery image at
+# /app/ingestor-template.yaml. Discovery loads this once at startup, then
+# clones-and-mutates it per sensor array (see whitelist.build_ingestor_manifest).
+# The sensor_array placeholder values below are overwritten at spawn time;
+# they exist only so this YAML parses cleanly on its own.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ingestor-<sensor_array_id>        # discovery node substitutes this
+  name: ingestor-placeholder
   labels:
     app: ingestor
-    sensor-array: <sensor_array_id>        # discovery node substitutes this
+    sensor-array: placeholder
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: ingestor
-      sensor-array: <sensor_array_id>      # discovery node substitutes this
+      sensor-array: placeholder
   template:
     metadata:
       labels:
         app: ingestor
-        sensor-array: <sensor_array_id>    # discovery node substitutes this
+        sensor-array: placeholder
     spec:
+      # On macOS+kind add ``hostNetwork: true`` and
+      # ``dnsPolicy: ClusterFirstWithHostNet`` for DDS multicast. Linux
+      # clusters with a multicast-capable CNI do not need it.
       containers:
         - name: ingestor
-          image: your-registry/ingestor:latest   # update with your registry
+          image: inference-engine/ingestor:dev
+          imagePullPolicy: IfNotPresent
           env:
+            - name: ROS_DOMAIN_ID
+              value: "0"
+            - name: NATIVE_RATES
+              value: "1"
             - name: NATS_URL
               value: "nats://nats-service:4222"
             - name: SENSOR_ARRAY
-              value: "<sensor_array_id>"          # discovery node substitutes this
-            - name: SENSOR_TOPICS
-              value: "<comma,separated,topics>"   # discovery node substitutes this
+              value: "placeholder"
+            - name: SENSOR_ROLE_MAP
+              value: "{}"
             - name: AUDIO_BIT_DEPTH
               valueFrom:
                 configMapKeyRef:

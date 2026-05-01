@@ -7,6 +7,17 @@ to ROS2 InferenceResult topics.
 import pytest
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 
+try:
+    import rclpy  # noqa: F401
+    RCLPY_AVAILABLE = True
+except ImportError:
+    RCLPY_AVAILABLE = False
+
+
+skip_if_no_rclpy = pytest.mark.skipif(
+    not RCLPY_AVAILABLE, reason="rclpy not available; egress.main requires ROS2"
+)
+
 
 # ============================================================================
 # Test Message Conversion
@@ -191,89 +202,90 @@ class TestNATSSubscription:
 class TestPublishingLogic:
     """Test ROS2 publishing logic."""
     
+    @skip_if_no_rclpy
     @pytest.mark.integration
     @pytest.mark.ros2
-    def test_publish_on_detection(self, mock_ros2_node):
-        """Test publishing immediately on positive detection."""
-        # Create mock publisher
-        publisher = MagicMock()
-        mock_ros2_node.create_publisher.return_value = publisher
-        
-        # Simulate detection result
-        detection_result = {
-            'sensor_id': 'sensor_array_01',
-            'timestamp': 1700000000.5,
-            'vehicle_detected': True,
-            'detection_confidence': 0.85
-        }
-        
-        # Should publish when vehicle_detected=True
-        if detection_result['vehicle_detected']:
-            publisher.publish(detection_result)
-        
-        # Verify publish was called
-        publisher.publish.assert_called_once()
-        assert publisher.publish.call_args[0][0]['vehicle_detected'] is True
-    
+    @pytest.mark.asyncio
+    async def test_on_detection_skips_positives(
+        self, skip_if_no_protos, mock_ros2_node, create_timestamp_proto,
+    ):
+        """Egress on_detection forwards only negatives; positives are
+        owned by on_classification so /inference_result is not duplicated."""
+        from inference_protos import inference_pb2
+        from egress.main import EgressNode
+
+        with patch("egress.main.Node.__init__", return_value=None):
+            node = EgressNode.__new__(EgressNode)
+            node.publisher = MagicMock()
+
+            positive = inference_pb2.DetectionResult()
+            positive.sensor_data.sensor_id = "shake-001"
+            positive.sensor_data.time_stamp.CopyFrom(create_timestamp_proto(1.0))
+            positive.vehicle_detected = True
+            positive.confidence = 0.9
+
+            msg = Mock()
+            msg.data = positive.SerializeToString()
+            await EgressNode.on_detection(node, msg)
+
+            node.publisher.publish.assert_not_called()
+
+    @skip_if_no_rclpy
     @pytest.mark.integration
     @pytest.mark.ros2
-    def test_no_publish_on_no_detection(self, mock_ros2_node):
-        """Test no publish when detected=False."""
-        # Create mock publisher
-        publisher = MagicMock()
-        mock_ros2_node.create_publisher.return_value = publisher
-        
-        # Simulate detection result with no detection
-        detection_result = {
-            'sensor_id': 'sensor_array_01',
-            'timestamp': 1700000000.5,
-            'vehicle_detected': False,
-            'detection_confidence': 0.3
-        }
-        
-        # Should NOT publish when vehicle_detected=False (early return)
-        if not detection_result['vehicle_detected']:
-            return  # Early return in on_detection()
-        publisher.publish(detection_result)
-        
-        # Verify publish was NOT called
-        publisher.publish.assert_not_called()
-    
+    @pytest.mark.asyncio
+    async def test_on_detection_publishes_negatives(
+        self, skip_if_no_protos, mock_ros2_node, create_timestamp_proto,
+    ):
+        """Negatives surface on /inference_result so consumers can record
+        'no vehicle' decisions."""
+        from inference_protos import inference_pb2
+        from egress.main import EgressNode
+
+        with patch("egress.main.Node.__init__", return_value=None):
+            node = EgressNode.__new__(EgressNode)
+            node.publisher = MagicMock()
+
+            negative = inference_pb2.DetectionResult()
+            negative.sensor_data.sensor_id = "shake-001"
+            negative.sensor_data.time_stamp.CopyFrom(create_timestamp_proto(1.0))
+            negative.vehicle_detected = False
+            negative.confidence = 0.1
+
+            msg = Mock()
+            msg.data = negative.SerializeToString()
+            await EgressNode.on_detection(node, msg)
+
+            node.publisher.publish.assert_called_once()
+
+    @skip_if_no_rclpy
     @pytest.mark.integration
     @pytest.mark.ros2
-    def test_publish_twice_on_classification(self, mock_ros2_node):
-        """Test publishing twice: detection + classification."""
-        # Create mock publisher
-        publisher = MagicMock()
-        mock_ros2_node.create_publisher.return_value = publisher
-        
-        # First publish: detection result
-        detection_msg = {
-            'sensor_id': 'sensor_array_01',
-            'vehicle_detected': True,
-            'detection_confidence': 0.85,
-            'vehicle_class': '',
-            'classification_confidence': 0.0
-        }
-        publisher.publish(detection_msg)
-        
-        # Second publish: classification result
-        classification_msg = {
-            'sensor_id': 'sensor_array_01',
-            'vehicle_detected': True,
-            'detection_confidence': 0.85,
-            'vehicle_class': 'tesla',
-            'classification_confidence': 0.92
-        }
-        publisher.publish(classification_msg)
-        
-        # Verify published twice
-        assert publisher.publish.call_count == 2
-        
-        # Verify second call has classification info
-        second_call = publisher.publish.call_args_list[1][0][0]
-        assert second_call['vehicle_class'] == 'tesla'
-        assert second_call['classification_confidence'] > 0.0
+    @pytest.mark.asyncio
+    async def test_on_classification_publishes_once(
+        self, skip_if_no_protos, mock_ros2_node, create_timestamp_proto,
+    ):
+        """Classifier message produces exactly one ROS2 publish."""
+        from inference_protos import inference_pb2
+        from egress.main import EgressNode
+
+        with patch("egress.main.Node.__init__", return_value=None):
+            node = EgressNode.__new__(EgressNode)
+            node.publisher = MagicMock()
+
+            payload = inference_pb2.EgressPayload()
+            payload.sensor_id = "shake-001"
+            payload.time_stamp.CopyFrom(create_timestamp_proto(1.0))
+            payload.vehicle_detected = True
+            payload.detection_confidence = 0.9
+            payload.vehicle_class = "light"
+            payload.classification_confidence = 0.8
+
+            msg = Mock()
+            msg.data = payload.SerializeToString()
+            await EgressNode.on_classification(node, msg)
+
+            node.publisher.publish.assert_called_once()
     
     @pytest.mark.unit
     def test_merge_detection_and_classification(self):
@@ -444,10 +456,10 @@ class TestEgressConfiguration:
         custom_topic = 'vehicle_detection_result'
         assert custom_topic != ROS2_TOPIC
         
-        # Test node name prefix from sensor_array
-        sensor_array = "sensor_array_01"
-        node_name = f'egressor_{sensor_array}'
-        assert node_name == 'egressor_sensor_array_01'
+        # Egress now uses a single shared ROS2 node name; sensor_id flows
+        # on every published message instead.
+        node_name = "egressor"
+        assert node_name == "egressor"
 
 
 # ============================================================================
@@ -554,52 +566,41 @@ class TestEgressEdgeCases:
 @pytest.mark.nats
 @pytest.mark.ros2
 def test_egress_end_to_end(mock_nats_client, mock_ros2_node, skip_if_no_protos):
-    """End-to-end test: NATS message -> Convert -> ROS2 publish."""
+    """End-to-end: classifier output -> Convert -> ROS2 publish.
+
+    For positives the classifier owns the publish; the detection topic only
+    surfaces negatives. This test covers the positive (classifier) path.
+    """
     from inference_protos import inference_pb2
-    
-    # Arrange - create DetectionResult
-    detection = inference_pb2.DetectionResult()
-    detection.sensor_data.sensor_id = "sensor_array_01"
-    detection.sensor_data.time_stamp.seconds = 1700000000
-    detection.sensor_data.time_stamp.nanos = 500000000
-    detection.vehicle_detected = True
-    detection.confidence = 0.89
-    
-    # Simulate NATS message
-    nats_msg = Mock()
-    nats_msg.data = detection.SerializeToString()
-    
-    # Act - simulate on_detection callback
-    # 1. Deserialize from NATS
-    result = inference_pb2.DetectionResult()
-    result.ParseFromString(nats_msg.data)
-    
-    # 2. Convert to EgressPayload
+
     payload = inference_pb2.EgressPayload()
-    payload.sensor_id = result.sensor_data.sensor_id
-    payload.time_stamp.CopyFrom(result.sensor_data.time_stamp)
-    payload.vehicle_detected = result.vehicle_detected
-    payload.detection_confidence = result.confidence
-    
-    # 3. Check if should publish (vehicle_detected)
-    should_publish = payload.vehicle_detected
-    
-    # 4. Convert to ROS2 message
-    if should_publish:
-        ros2_msg = Mock()
-        ros2_msg.sensor_id = payload.sensor_id
-        ros2_msg.timestamp = payload.time_stamp.seconds + payload.time_stamp.nanos * 1e-9
-        ros2_msg.vehicle_detected = payload.vehicle_detected
-        ros2_msg.detection_confidence = payload.detection_confidence
-        ros2_msg.vehicle_class = payload.vehicle_class
-        ros2_msg.classification_confidence = payload.classification_confidence
-    
-    # Assert full pipeline
-    assert result.vehicle_detected is True
-    assert payload.sensor_id == "sensor_array_01"
-    assert should_publish is True
+    payload.sensor_id = "sensor_array_01"
+    payload.time_stamp.seconds = 1700000000
+    payload.time_stamp.nanos = 500000000
+    payload.vehicle_detected = True
+    payload.detection_confidence = 0.89
+    payload.vehicle_class = "light"
+    payload.classification_confidence = 0.91
+
+    nats_msg = Mock()
+    nats_msg.data = payload.SerializeToString()
+
+    parsed = inference_pb2.EgressPayload()
+    parsed.ParseFromString(nats_msg.data)
+
+    ros2_msg = Mock()
+    ros2_msg.sensor_id = parsed.sensor_id
+    ros2_msg.timestamp = parsed.time_stamp.seconds + parsed.time_stamp.nanos * 1e-9
+    ros2_msg.vehicle_detected = parsed.vehicle_detected
+    ros2_msg.detection_confidence = parsed.detection_confidence
+    ros2_msg.vehicle_class = parsed.vehicle_class
+    ros2_msg.classification_confidence = parsed.classification_confidence
+
+    assert parsed.vehicle_detected is True
     assert ros2_msg.timestamp == 1700000000.5
-    assert abs(ros2_msg.detection_confidence - 0.89) < 1e-6  # Float precision tolerance
+    assert ros2_msg.vehicle_class == "light"
+    assert abs(ros2_msg.detection_confidence - 0.89) < 1e-6
+    assert abs(ros2_msg.classification_confidence - 0.91) < 1e-6
 
 
 @pytest.mark.unit

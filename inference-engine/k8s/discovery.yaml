@@ -14,14 +14,31 @@ spec:
       labels:
         app: discovery
     spec:
+      # On macOS+kind, DDS multicast does not traverse pods cleanly. Local
+      # smoke users may add ``hostNetwork: true`` +
+      # ``dnsPolicy: ClusterFirstWithHostNet`` here; production Linux
+      # clusters with a multicast-capable CNI do not need it.
       serviceAccountName: discovery-sa
       containers:
         - name: discovery
-          image: your-registry/discovery:latest   # update with your registry
+          image: inference-engine/discovery:dev
+          imagePullPolicy: IfNotPresent
           env:
+            - name: ROS_DOMAIN_ID
+              value: "0"
             - name: NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: TEMPLATE_PATH
               value: "/app/ingestor-template.yaml"
+            - name: CONFIG_PATH
+              value: "/etc/inference-engine/expected-sensors.yaml"
+          volumeMounts:
+            - name: expected-sensors
+              mountPath: /etc/inference-engine
+              readOnly: true
+      volumes:
+        - name: expected-sensors
+          configMap:
+            name: expected-sensors

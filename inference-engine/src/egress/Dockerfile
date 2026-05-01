@@ -1,29 +1,35 @@
 FROM ros:jazzy
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y \
     python3-pip \
-    python3-rclpy \
+    python3-colcon-common-extensions \
     ros-jazzy-rclpy \
+    ros-jazzy-ament-cmake \
+    ros-jazzy-rosidl-default-generators \
+    ros-jazzy-rosidl-default-runtime \
+    ros-jazzy-builtin-interfaces \
+    ros-jazzy-std-msgs \
+    ros-jazzy-sensor-msgs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install poetry
-RUN pip3 install poetry --break-system-packages
-
-# Set working directory
 WORKDIR /app
 
-# Copy dependency files and install
-COPY pyproject.toml poetry.lock ./
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-root
+# Build context is the inference-engine root.
+RUN pip3 install --break-system-packages \
+        nats-py
 
-# Copy and install shared proto package
-COPY ../../inference-protos /inference-protos
-RUN pip install /inference-protos --break-system-packages
+# Shared proto package
+COPY inference-protos /inference-protos
+RUN pip3 install --break-system-packages /inference-protos
 
-# Copy source
-COPY main.py ./
+# Build the ros2_interfaces package so InferenceResult is importable.
+COPY ros2_interfaces /ros2_ws/src/ros2_interfaces
+RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash \
+    && cd /ros2_ws \
+    && colcon build --packages-select ros2_interfaces"
 
-# Source ROS2 and run
-CMD ["/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && python3 main.py"]
+# Source for the egress node
+COPY src/egress/main.py .
+
+ENV PYTHONUNBUFFERED=1
+CMD ["/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && python3 main.py"]

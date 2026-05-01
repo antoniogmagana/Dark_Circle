@@ -495,16 +495,33 @@ def load_trained_model(save_dir: Path, ckpt_name: str) -> tuple[CRLModel, dict]:
 
     frontend_type = cfg_dict.get("frontend_type", "multiscale")
 
-    # Older checkpoints don't store multiscale_kernel_sizes in meta.json. The
-    # live CRLConfig default has shifted (3 → 4 branches in commit b9fb0ef), so
-    # reconstruct the actual sizes from the state_dict before instantiating
-    # the model.
+    # Older checkpoints don't store the per-sensor kernel sizes in meta.json.
+    # The live CRLConfig default has shifted (3 → 4 branches in commit
+    # b9fb0ef), so reconstruct the actual sizes from the state_dict before
+    # instantiating the model. The model reads kernel_sizes off
+    # ``frontend_per_sensor_params[sensor]['kernel_sizes']`` (new schema),
+    # not the legacy ``multiscale_kernel_sizes`` dict — overriding the
+    # legacy field had no effect, leaving the model rebuilt with the live
+    # default branch count and triggering a state_dict shape mismatch on
+    # ``frontends.{sensor}.0.proj.weight``.
     if frontend_type == "multiscale":
-        if "multiscale_kernel_sizes" not in cfg_kwargs:
-            inferred = _infer_multiscale_kernels_from_checkpoint(state, sensors)
-            if inferred:
-                cfg_kwargs["multiscale_kernel_sizes"] = inferred
-                print(f"  Inferred multiscale_kernel_sizes from checkpoint: {inferred}")
+        inferred = _infer_multiscale_kernels_from_checkpoint(state, sensors)
+        if inferred:
+            # Start from CRLConfig's live default for any sensor the saved
+            # meta.json doesn't override -- otherwise we'd drop required keys
+            # like ``target_tokens`` and ``out_channels_frac``.
+            default_params = CRLConfig().frontend_per_sensor_params
+            existing = cfg_kwargs.get("frontend_per_sensor_params") or {}
+            params: dict[str, dict] = {
+                s: dict(default_params.get(s, {})) for s in inferred
+            }
+            for s, p in existing.items():
+                params.setdefault(s, {}).update(p)
+            for sensor, ks in inferred.items():
+                params[sensor]["kernel_sizes"] = ks
+            cfg_kwargs["frontend_per_sensor_params"] = params
+            cfg_kwargs.setdefault("multiscale_kernel_sizes", inferred)
+            print(f"  Inferred multiscale kernel_sizes from checkpoint: {inferred}")
 
     cfg = CRLConfig(**cfg_kwargs)
 

@@ -1,121 +1,144 @@
 # Discovery Node
-# Watches the ROS2 network for active RawSensorReading topics
-# Groups topics by sensor array prefix
-# Spawns/destroys Ingestor deployments via the k8s API
+# Reads an expected-sensors ConfigMap each poll, checks the ROS2 graph for
+# completeness, and spawns / tears down per-array Ingestor Deployments.
 import os
-import yaml
-import rclpy
-from rclpy.node import Node
-from collections import defaultdict
-from kubernetes import client, config
 
-SENSOR_MSG_TYPE = 'ros2_interfaces/msg/RawSensorReading'
-POLL_INTERVAL   = 5.0   # seconds between ROS2 graph polls
-GRACE_POLLS     = 3     # consecutive absent polls before teardown (~15 seconds)
+import rclpy
+from kubernetes import client, config as k8s_config
+from rclpy.node import Node
+
+from whitelist import (
+    ArraySpec,
+    InvalidConfigError,
+    PollState,
+    build_ingestor_manifest,
+    load_config,
+)
+
+SENSOR_MSG_TYPE = "ros2_interfaces/msg/RawSensorReading"
+POLL_INTERVAL = 5.0
+GRACE_POLLS = 3
+DEFAULT_CONFIG_PATH = "/etc/inference-engine/expected-sensors.yaml"
 
 
 class DiscoveryNode(Node):
+    def __init__(self, k8s_apps, namespace, template, config_path):
+        super().__init__("discovery")
+        self.k8s_apps = k8s_apps
+        self.namespace = namespace
+        self.template = template
+        self.config_path = config_path
+        self.state = PollState(grace_polls=GRACE_POLLS)
+        self.active_arrays: set[str] = set()
+        self._last_unknown: frozenset[str] = frozenset()
 
-    def __init__(self, k8s_apps, namespace, template):
-        super().__init__('discovery')
-        self.k8s_apps   = k8s_apps
-        self.namespace  = namespace
-        self.template   = template
-
-        # tracks consecutive absent polls per sensor array
-        self.absent_counts = defaultdict(int)
-
-        # tracks which arrays currently have a running deployment
-        self.active_arrays = set()
-
-        # seed from deployments already running so we don't double-spawn on restart
         self._sync_existing_deployments()
-
         self.timer = self.create_timer(POLL_INTERVAL, self._poll)
 
     def _sync_existing_deployments(self):
         deployments = self.k8s_apps.list_namespaced_deployment(
             namespace=self.namespace,
-            label_selector='app=ingestor'
+            label_selector="app=ingestor",
         )
         for d in deployments.items:
-            sensor_array = d.metadata.labels.get('sensor-array')
+            sensor_array = d.metadata.labels.get("sensor-array")
             if sensor_array:
                 self.active_arrays.add(sensor_array)
                 self.get_logger().info(f"Found existing ingestor for {sensor_array}")
 
-    def _get_sensor_arrays(self):
-        arrays = defaultdict(list)
-        for topic, types in self.get_topic_names_and_types():
-            if SENSOR_MSG_TYPE in types:
-                parts = topic.strip('/').split('/')
-                if len(parts) >= 2:
-                    sensor_array = parts[0]
-                    arrays[sensor_array].append(topic)
-        return arrays
+    def _load_config(self) -> dict[str, ArraySpec]:
+        try:
+            with open(self.config_path) as f:
+                return load_config(f.read())
+        except FileNotFoundError:
+            self.get_logger().error(
+                f"config file {self.config_path} not found; treating as empty"
+            )
+            return {}
+        except InvalidConfigError as exc:
+            self.get_logger().error(f"invalid config, ignoring this poll: {exc}")
+            return {}
 
-    def _spawn(self, sensor_array, topics):
-        topics_str = ','.join(topics)
-        manifest   = self.template.replace('<sensor_array_id>', sensor_array)
-        manifest   = manifest.replace('<comma,separated,topics>', topics_str)
-        body       = yaml.safe_load(manifest)
+    def _visible_topics(self) -> set[str]:
+        return {
+            topic
+            for topic, types in self.get_topic_names_and_types()
+            if SENSOR_MSG_TYPE in types
+        }
+
+    def _spawn(self, sensor_array: str, spec: ArraySpec):
+        body = build_ingestor_manifest(self.template, sensor_array, spec)
         self.k8s_apps.create_namespaced_deployment(
             namespace=self.namespace,
-            body=body
+            body=body,
         )
         self.active_arrays.add(sensor_array)
         self.get_logger().info(f"Spawned ingestor for {sensor_array}")
 
-    def _teardown(self, sensor_array):
+    def _teardown(self, sensor_array: str):
         self.k8s_apps.delete_namespaced_deployment(
-            name=f'ingestor-{sensor_array}',
-            namespace=self.namespace
+            name=f"ingestor-{sensor_array}",
+            namespace=self.namespace,
         )
         self.active_arrays.discard(sensor_array)
-        self.absent_counts.pop(sensor_array, None)
         self.get_logger().info(f"Removed ingestor for {sensor_array}")
 
     def _poll(self):
-        visible_arrays = self._get_sensor_arrays()
+        cfg = self._load_config()
+        visible = self._visible_topics()
+        decision = self.state.evaluate(
+            config=cfg,
+            visible=visible,
+            active=self.active_arrays,
+        )
 
-        # spawn deployments for newly visible arrays
-        for sensor_array, topics in visible_arrays.items():
-            if sensor_array not in self.active_arrays:
-                self._spawn(sensor_array, topics)
-            else:
-                self.absent_counts.pop(sensor_array, None)  # reset grace counter
+        for array_id in decision.to_spawn:
+            self._spawn(array_id, cfg[array_id])
 
-        # increment absent counter for arrays no longer visible
-        for sensor_array in list(self.active_arrays):
-            if sensor_array not in visible_arrays:
-                self.absent_counts[sensor_array] += 1
-                self.get_logger().warning(
-                    f"{sensor_array} absent for "
-                    f"{self.absent_counts[sensor_array]}/{GRACE_POLLS} polls"
-                )
-                if self.absent_counts[sensor_array] >= GRACE_POLLS:
-                    self._teardown(sensor_array)
+        for array_id in decision.to_teardown:
+            self._teardown(array_id)
+
+        for array_id, missing in decision.log_awaiting.items():
+            self.get_logger().info(
+                f"awaiting {array_id}: missing {sorted(missing)}"
+            )
+
+        self._log_unknown_topics(cfg, visible)
+
+    def _log_unknown_topics(self, cfg: dict[str, ArraySpec], visible: set[str]):
+        configured = set()
+        for spec in cfg.values():
+            configured.add(spec.audio)
+            configured.add(spec.seismic)
+            if spec.accel is not None:
+                configured.update(spec.accel.values())
+        unknown = frozenset(visible - configured)
+        if unknown != self._last_unknown:
+            for topic in sorted(unknown - self._last_unknown):
+                self.get_logger().info(f"ignoring unconfigured topic {topic}")
+            self._last_unknown = unknown
 
 
 def main():
-    namespace     = os.environ.get("NAMESPACE", "default")
+    namespace = os.environ.get("NAMESPACE", "default")
     template_path = os.environ.get("TEMPLATE_PATH", "/app/ingestor-template.yaml")
+    config_path = os.environ.get("CONFIG_PATH", DEFAULT_CONFIG_PATH)
 
     with open(template_path) as f:
         template = f.read()
 
     try:
-        config.load_incluster_config()       # running inside a k8s pod
-    except config.ConfigException:
-        config.load_kube_config()            # fallback for local dev
+        k8s_config.load_incluster_config()
+    except k8s_config.ConfigException:
+        k8s_config.load_kube_config()
 
     k8s_apps = client.AppsV1Api()
 
     rclpy.init()
-    node = DiscoveryNode(k8s_apps, namespace, template)
+    node = DiscoveryNode(k8s_apps, namespace, template, config_path)
     rclpy.spin(node)
     rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

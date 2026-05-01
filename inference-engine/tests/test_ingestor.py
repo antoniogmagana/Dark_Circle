@@ -1,557 +1,359 @@
 """
-Tests for Ingestor Node (ROS2 to NATS bridge).
+Tests for Ingestor Node (ROS2 -> Buffer -> NATS).
 
-The Ingestor subscribes to ROS2 sensor topics, buffers data,
-and publishes to NATS.
+The Ingestor now binds each ROS2 subscription to a known buffer role
+(``acoustic`` / ``seismic`` / ``accel_x|y|z``) at construction time, using
+the ``SENSOR_ROLE_MAP`` JSON env var produced by Discovery. Pure logic
+(env-var parsing, role dispatch) lives in ``ingestor.dispatch`` and is
+imported directly. ROS2 / NATS plumbing is exercised through inline
+simulation.
 """
-import pytest
+import json
+from unittest.mock import AsyncMock, Mock
+
 import numpy as np
-from unittest.mock import Mock, patch, AsyncMock
+import pytest
+
+from dispatch import (
+    InvalidRoleMapError,
+    UnknownRoleError,
+    make_role_callback,
+    parse_role_map,
+)
 
 
-# ============================================================================
-# Test Channel Mapping
-# ============================================================================
+# ---------------------------------------------------------------------------
+# parse_role_map
+# ---------------------------------------------------------------------------
 
-class TestChannelMapping:
-    """Test channel code translation."""
-    
+class TestParseRoleMap:
+    """``parse_role_map`` validates and decodes the SENSOR_ROLE_MAP env var."""
+
     @pytest.mark.unit
-    def test_channel_code_mapping(self):
-        """Test channel codes are mapped correctly."""
-        # From ingestor/main.py CHANNEL_MAP
-        CHANNEL_MAP = {
-            'aud': 'acoustic',
-            'ehz': 'seismic',
-            'ene': 'accel_x',
-            'enn': 'accel_y',
-            'enz': 'accel_z'
+    def test_audio_seismic_only(self):
+        env = json.dumps({
+            "acoustic": "/shake_001/aud",
+            "seismic": "/shake_001/ehz",
+        })
+        assert parse_role_map(env) == {
+            "acoustic": "/shake_001/aud",
+            "seismic": "/shake_001/ehz",
         }
-        
-        assert CHANNEL_MAP['aud'] == 'acoustic'
-        assert CHANNEL_MAP['ehz'] == 'seismic' 
-        assert CHANNEL_MAP['ene'] == 'accel_x'
-        assert CHANNEL_MAP['enn'] == 'accel_y'
-        assert CHANNEL_MAP['enz'] == 'accel_z'
-        
-        # Test extraction from sensor_id
-        sensor_id = "sensor_array_01.aud"
-        channel_code = sensor_id.split('.')[-1]
-        assert channel_code == 'aud'
-        assert CHANNEL_MAP.get(channel_code) == 'acoustic'
-    
+
     @pytest.mark.unit
-    def test_invalid_channel_code(self):
-        """Test handling of invalid channel codes."""
-        CHANNEL_MAP = {
-            'aud': 'acoustic',
-            'ehz': 'seismic',
-            'ene': 'accel_x',
-            'enn': 'accel_y',
-            'enz': 'accel_z'
-        }
-        
-        # Test invalid channel code
-        invalid_sensor_id = "sensor_array_01.xyz"
-        channel_code = invalid_sensor_id.split('.')[-1]
-        channel = CHANNEL_MAP.get(channel_code)
-        
-        assert channel is None  # Should return None for invalid codes
-        
-        # Test another invalid code
-        invalid_code = "unknown"
-        assert CHANNEL_MAP.get(invalid_code) is None
+    def test_with_accel(self):
+        env = json.dumps({
+            "acoustic": "/a/aud",
+            "seismic": "/a/ehz",
+            "accel_x": "/a/ene",
+            "accel_y": "/a/enn",
+            "accel_z": "/a/enz",
+        })
+        result = parse_role_map(env)
+        assert result["accel_x"] == "/a/ene"
+        assert result["accel_y"] == "/a/enn"
+        assert result["accel_z"] == "/a/enz"
+
+    @pytest.mark.unit
+    def test_invalid_json_rejected(self):
+        with pytest.raises(InvalidRoleMapError):
+            parse_role_map("not-json")
+
+    @pytest.mark.unit
+    def test_missing_acoustic_rejected(self):
+        env = json.dumps({"seismic": "/a/ehz"})
+        with pytest.raises(InvalidRoleMapError):
+            parse_role_map(env)
+
+    @pytest.mark.unit
+    def test_missing_seismic_rejected(self):
+        env = json.dumps({"acoustic": "/a/aud"})
+        with pytest.raises(InvalidRoleMapError):
+            parse_role_map(env)
+
+    @pytest.mark.unit
+    def test_unknown_role_rejected(self):
+        env = json.dumps({
+            "acoustic": "/a/aud",
+            "seismic": "/a/ehz",
+            "lidar": "/a/lidar",  # not a valid buffer channel
+        })
+        with pytest.raises(UnknownRoleError):
+            parse_role_map(env)
+
+    @pytest.mark.unit
+    def test_partial_accel_rejected(self):
+        """If any accel role is present, all three must be."""
+        env = json.dumps({
+            "acoustic": "/a/aud",
+            "seismic": "/a/ehz",
+            "accel_x": "/a/ene",
+            "accel_y": "/a/enn",
+        })
+        with pytest.raises(InvalidRoleMapError):
+            parse_role_map(env)
 
 
-# ============================================================================
-# Test ROS2 Subscription
-# ============================================================================
+# ---------------------------------------------------------------------------
+# make_role_callback
+# ---------------------------------------------------------------------------
 
-class TestROS2Subscription:
-    """Test ROS2 topic subscription."""
-    
+class TestRoleCallback:
+    """``make_role_callback`` returns a closure that dispatches msg -> role."""
+
+    @pytest.mark.unit
+    def test_callback_routes_to_buffer_with_role(self):
+        buffer = Mock()
+        buffer.load_buffer.return_value = None
+        publish = Mock()
+
+        cb = make_role_callback(
+            role="acoustic",
+            buffer=buffer,
+            publish_payload=publish,
+        )
+
+        msg = Mock()
+        msg.start_time = 1700000000.0
+        msg.amplitude_readings = [1, 2, 3]
+        cb(msg)
+
+        buffer.load_buffer.assert_called_once_with(
+            "acoustic", 1700000000.0, [1, 2, 3]
+        )
+        publish.assert_not_called()
+
+    @pytest.mark.unit
+    def test_callback_publishes_when_buffer_returns_payload(self):
+        buffer = Mock()
+        payload = Mock()
+        payload.SerializeToString.return_value = b"serialized"
+        buffer.load_buffer.return_value = payload
+
+        publish = Mock()
+
+        cb = make_role_callback(
+            role="acoustic",
+            buffer=buffer,
+            publish_payload=publish,
+        )
+
+        msg = Mock()
+        msg.start_time = 0.0
+        msg.amplitude_readings = list(range(10))
+        cb(msg)
+
+        publish.assert_called_once_with(payload)
+
+    @pytest.mark.unit
+    def test_callback_uses_its_bound_role(self):
+        """Two callbacks for two different roles must route correctly."""
+        buffer = Mock()
+        buffer.load_buffer.return_value = None
+        publish = Mock()
+
+        ac_cb = make_role_callback("acoustic", buffer, publish)
+        seismic_cb = make_role_callback("seismic", buffer, publish)
+
+        msg_ac = Mock(start_time=1.0, amplitude_readings=[1])
+        msg_se = Mock(start_time=2.0, amplitude_readings=[2])
+
+        ac_cb(msg_ac)
+        seismic_cb(msg_se)
+
+        calls = buffer.load_buffer.call_args_list
+        assert calls[0].args == ("acoustic", 1.0, [1])
+        assert calls[1].args == ("seismic", 2.0, [2])
+
+    @pytest.mark.unit
+    def test_callback_does_not_inspect_sensor_id(self):
+        """Role binding is independent of msg.sensor_id (no suffix parsing)."""
+        buffer = Mock()
+        buffer.load_buffer.return_value = None
+        publish = Mock()
+
+        cb = make_role_callback("seismic", buffer, publish)
+
+        msg = Mock(
+            sensor_id="completely.unrelated.name",
+            start_time=0.0,
+            amplitude_readings=[],
+        )
+        cb(msg)
+
+        # Routed to 'seismic' regardless of sensor_id contents.
+        buffer.load_buffer.assert_called_once_with("seismic", 0.0, [])
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: env -> subscriptions -> dispatch
+# ---------------------------------------------------------------------------
+
+class TestSubscriptionWiring:
+    """One subscription created per role; each callback bound to its role."""
+
     @pytest.mark.integration
     @pytest.mark.ros2
-    def test_subscribe_to_topics(self, mock_ros2_node, mock_nats_client):
-        """Test subscribing to sensor topics."""
-        # Arrange
-        topics = ["/sensor_array_01/acoustic", "/sensor_array_01/seismic"]
-        
-        # Act - create IngestorNode (without importing to avoid buffer.py CUDA issue)
-        # Simulate subscription creation
-        subscriptions = []
-        for topic in topics:
-            sub = mock_ros2_node.create_subscription(
-                Mock(),  # RawSensorReading type
-                topic,
-                Mock(),  # callback
-                10
-            )
-            subscriptions.append(sub)
-        
-        # Assert
-        assert len(subscriptions) == 2
-        assert mock_ros2_node.create_subscription.call_count == 2
-        
-        # Verify subscription calls have correct topics
-        call_args = [call[0][1] for call in mock_ros2_node.create_subscription.call_args_list]
-        assert "/sensor_array_01/acoustic" in call_args
-        assert "/sensor_array_01/seismic" in call_args
-    
+    def test_one_subscription_per_role(self, mock_ros2_node):
+        role_map = {
+            "acoustic": "/shake_001/aud",
+            "seismic": "/shake_001/ehz",
+        }
+        buffer = Mock()
+        buffer.load_buffer.return_value = None
+        publish = Mock()
+
+        # Simulate IngestorNode.__init__ subscription loop.
+        for role, topic in role_map.items():
+            cb = make_role_callback(role, buffer, publish)
+            mock_ros2_node.create_subscription(Mock(), topic, cb, 10)
+
+        topics_subscribed = [
+            call.args[1] for call in mock_ros2_node.create_subscription.call_args_list
+        ]
+        assert sorted(topics_subscribed) == [
+            "/shake_001/aud",
+            "/shake_001/ehz",
+        ]
+
     @pytest.mark.integration
     @pytest.mark.ros2
-    def test_callback_invoked_on_message(self, mock_ros2_node):
-        """Test callback is invoked when ROS2 message arrives."""
-        # Arrange
-        callback = Mock()
-        topic = "/sensor_array_01/acoustic"
-        
-        # Create subscription with callback
-        subscription = mock_ros2_node.create_subscription(
-            Mock(),  # RawSensorReading type
-            topic,
-            callback,
-            10
-        )
-        
-        # Simulate ROS2 message arrival
-        class MockRawSensorReading:
-            def __init__(self):
-                self.sensor_id = "sensor_array_01.aud"
-                self.start_time = 1700000000.0
-                self.amplitude_readings = [1.0, 2.0, 3.0]
-        
-        msg = MockRawSensorReading()
-        
-        # Act - invoke callback as ROS2 would
-        callback(msg)
-        
-        # Assert
-        assert callback.called
-        assert callback.call_count == 1
-        callback.assert_called_once_with(msg)
-    
-    @pytest.mark.unit
-    def test_extract_data_from_ros_message(self):
-        """Test extracting data from RawSensorReading message."""
-        # Simulate RawSensorReading message structure
-        class MockRawSensorReading:
-            def __init__(self):
-                self.sensor_id = "sensor_array_01.aud"
-                self.start_time = 1700000000.5
-                self.amplitude_readings = [1.0, 2.0, 3.0, 4.0, 5.0]
-        
-        msg = MockRawSensorReading()
-        
-        # Extract channel code (as done in listener_callback)
-        channel_code = msg.sensor_id.split('.')[-1]
-        assert channel_code == 'aud'
-        
-        # Extract timestamp
-        timestamp = msg.start_time
-        assert timestamp == 1700000000.5
-        
-        # Extract data
-        data = msg.amplitude_readings
-        assert len(data) == 5
-        assert data[0] == 1.0
-        assert data[-1] == 5.0
+    def test_renamed_topic_still_dispatches_to_correct_role(self, mock_ros2_node):
+        """A non-conventional topic name still works because role binding is explicit."""
+        role_map = {
+            "acoustic": "/weird/microphone_channel",
+            "seismic": "/weird/ground_motion",
+        }
+        buffer = Mock()
+        buffer.load_buffer.return_value = None
+        publish = Mock()
+
+        callbacks = {}
+        for role, topic in role_map.items():
+            cb = make_role_callback(role, buffer, publish)
+            callbacks[topic] = cb
+            mock_ros2_node.create_subscription(Mock(), topic, cb, 10)
+
+        msg = Mock(start_time=0.0, amplitude_readings=[42])
+        callbacks["/weird/microphone_channel"](msg)
+        callbacks["/weird/ground_motion"](msg)
+
+        roles_called = [c.args[0] for c in buffer.load_buffer.call_args_list]
+        assert roles_called == ["acoustic", "seismic"]
 
 
-# ============================================================================
-# Test Buffer Integration
-# ============================================================================
-
-class TestBufferIntegration:
-    """Test integration with SensorBuffer."""
-    
-    @pytest.mark.unit
-    def test_buffer_receives_data(self, sensor_id):
-        """Test SensorBuffer receives data from callbacks."""
-        # Arrange
-        mock_buffer = Mock()
-        mock_buffer.load_buffer.return_value = None  # No window complete yet
-        
-        # Simulate listener_callback logic from ingestor/main.py
-        class MockRawSensorReading:
-            def __init__(self):
-                self.sensor_id = "sensor_array_01.aud"
-                self.start_time = 1700000000.0
-                self.amplitude_readings = [1, 2, 3, 4, 5]
-        
-        msg = MockRawSensorReading()
-        
-        # Act - simulate callback logic
-        channel_code = msg.sensor_id.split('.')[-1]
-        CHANNEL_MAP = {'aud': 'acoustic', 'ehz': 'seismic'}
-        channel = CHANNEL_MAP.get(channel_code)
-        
-        if channel is not None:
-            mock_buffer.load_buffer(channel, msg.start_time, msg.amplitude_readings)
-        
-        # Assert
-        assert channel == 'acoustic'
-        mock_buffer.load_buffer.assert_called_once_with(
-            'acoustic',
-            1700000000.0,
-            [1, 2, 3, 4, 5]
-        )
-    
-    @pytest.mark.unit
-    def test_buffer_window_triggers_publish(self):
-        """Test buffer window completion triggers NATS publish."""
-        # Arrange
-        mock_buffer = Mock()
-        mock_nats_client = AsyncMock()
-        
-        # Simulate buffer returning a payload (window complete)
-        mock_payload = Mock()
-        mock_payload.SerializeToString.return_value = b'serialized_data'
-        mock_buffer.load_buffer.return_value = mock_payload
-        
-        # Simulate listener_callback logic
-        class MockRawSensorReading:
-            def __init__(self):
-                self.sensor_id = "sensor_array_01.aud"
-                self.start_time = 1700000000.0
-                self.amplitude_readings = [1, 2, 3, 4, 5]
-        
-        msg = MockRawSensorReading()
-        
-        # Act - simulate callback logic
-        channel_code = msg.sensor_id.split('.')[-1]
-        CHANNEL_MAP = {'aud': 'acoustic'}
-        channel = CHANNEL_MAP.get(channel_code)
-        
-        payload = mock_buffer.load_buffer(channel, msg.start_time, msg.amplitude_readings)
-        
-        # Assert payload is returned (window complete)
-        assert payload is not None
-        assert payload.SerializeToString() == b'serialized_data'
-        
-        # In actual code, this triggers asyncio.run_coroutine_threadsafe(
-        #   self.nc.publish(NATS_SUBJECT, payload.SerializeToString()), self.loop
-        # )
-        # We verify the publish would be called with correct data
-        serialized = payload.SerializeToString()
-        assert len(serialized) > 0
-
-
-# ============================================================================
-# Test NATS Publishing
-# ============================================================================
-
-class TestNATSPublishing:
-    """Test NATS message publishing."""
-    
-    @pytest.mark.integration
-    @pytest.mark.nats
-    @pytest.mark.asyncio
-    async def test_publish_to_nats(self, mock_nats_client, sample_sensor_data_proto):
-        """Test publishing SensorData to NATS."""
-        # Arrange
-        payload = sample_sensor_data_proto
-        serialized_data = payload.SerializeToString()
-        NATS_SUBJECT = "sensor.data"
-        
-        # Act - publish to NATS
-        await mock_nats_client.publish(NATS_SUBJECT, serialized_data)
-        
-        # Assert
-        mock_nats_client.publish.assert_called_once_with(NATS_SUBJECT, serialized_data)
-        
-        # Verify message was tracked (using publish_spy from conftest)
-        assert len(mock_nats_client._published_messages) == 1
-        published_msg = mock_nats_client._published_messages[0]
-        assert published_msg['subject'] == NATS_SUBJECT
-        assert published_msg['data'] == serialized_data
-    
-    @pytest.mark.integration
-    @pytest.mark.nats
-    @pytest.mark.asyncio
-    async def test_nats_connection_retry(self, mock_nats_client):
-        """Test NATS connection retry on failure."""
-        # Arrange - mock connection that fails first, then succeeds
-        connection_attempts = []
-        
-        async def connect_with_retry():
-            connection_attempts.append(1)
-            if len(connection_attempts) == 1:
-                # First attempt fails
-                raise Exception("Connection failed")
-            # Second attempt succeeds
-            return mock_nats_client
-        
-        # Act - simulate retry logic
-        result = None
-        for attempt in range(2):
-            try:
-                result = await connect_with_retry()
-                break
-            except Exception:
-                continue
-        
-        # Assert
-        assert len(connection_attempts) == 2
-        assert result is mock_nats_client
-    
-    @pytest.mark.unit
-    def test_serialize_sensor_data(self, sample_sensor_data_proto):
-        """Test SensorData protobuf serialization."""
-        # This doesn't require NATS, just protobuf
-        data = sample_sensor_data_proto.SerializeToString()
-        assert len(data) > 0
-        
-        # Test that serialization is deterministic
-        data2 = sample_sensor_data_proto.SerializeToString()
-        assert data == data2
-        
-        # Test that data is bytes
-        assert isinstance(data, bytes)
-
-
-# ============================================================================
-# Test ADC Normalization
-# ============================================================================
+# ---------------------------------------------------------------------------
+# ADC normalization sanity checks (kept from the prior suite — protect against
+# regressions in the unchanged buffer math).
+# ---------------------------------------------------------------------------
 
 class TestADCNormalization:
-    """Test ADC scale application (16-bit audio, 24-bit seismic/accel)."""
-    
     @pytest.mark.unit
-    def test_16bit_audio_normalization(self):
-        """Test 16-bit audio ADC normalization."""
-        # Test the normalization formula for 16-bit audio ADC values
-        # Range: -32768 to 32767 → normalized to [-1.0, 1.0]
-        import numpy as np
-        
-        # Test max positive value
-        adc_max = 32767
-        normalized_max = adc_max / 32768.0
-        assert abs(normalized_max - 0.999969482421875) < 1e-6
-        
-        # Test max negative value
-        adc_min = -32768
-        normalized_min = adc_min / 32768.0
-        assert normalized_min == -1.0
-        
-        # Test zero
-        adc_zero = 0
-        normalized_zero = adc_zero / 32768.0
-        assert normalized_zero == 0.0
-        
-        # Test typical audio samples
-        audio_samples = np.array([100, -200, 16384, -16384], dtype=np.int16)
-        normalized = audio_samples / 32768.0
-        
-        assert len(normalized) == 4
-        assert abs(normalized[0] - 0.003051757) < 1e-6
-        assert abs(normalized[1] - (-0.006103515)) < 1e-6
-        assert normalized[2] == 0.5
-        assert normalized[3] == -0.5
-    
+    def test_16bit_audio_scale(self):
+        sample = np.array([16384, -16384], dtype=np.int16)
+        normalized = sample / 32768.0
+        assert normalized[0] == 0.5
+        assert normalized[1] == -0.5
+
     @pytest.mark.unit
-    def test_24bit_seismic_normalization(self):
-        """Test 24-bit seismic/accel ADC normalization."""
-        # Test the normalization formula for 24-bit seismic/accel ADC values
-        # Range: -8388608 to 8388607 → normalized to [-1.0, 1.0]
-        import numpy as np
-        
-        # Test max positive value
-        adc_max = 8388607
-        normalized_max = adc_max / 8388608.0
-        assert abs(normalized_max - 0.999999880790710) < 1e-6
-        
-        # Test max negative value
-        adc_min = -8388608
-        normalized_min = adc_min / 8388608.0
-        assert normalized_min == -1.0
-        
-        # Test zero
-        adc_zero = 0
-        normalized_zero = adc_zero / 8388608.0
-        assert normalized_zero == 0.0
-        
-        # Test typical seismic samples
-        seismic_samples = np.array([1000, -2000, 4194304, -4194304], dtype=np.int32)
-        normalized = seismic_samples / 8388608.0
-        
-        assert len(normalized) == 4
-        assert abs(normalized[0] - 0.000119209) < 1e-6
-        assert abs(normalized[1] - (-0.000238418)) < 1e-6
-        assert normalized[2] == 0.5
-        assert normalized[3] == -0.5
+    def test_24bit_seismic_scale(self):
+        sample = np.array([4194304, -4194304], dtype=np.int32)
+        normalized = sample / 8388608.0
+        assert normalized[0] == 0.5
+        assert normalized[1] == -0.5
 
 
-# ============================================================================
-# Test Configuration
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
 class TestIngestorConfiguration:
-    """Test Ingestor node configuration."""
-    
     @pytest.mark.unit
-    def test_sensor_array_prefix(self):
-        """Test sensor array prefix is configurable."""
-        # Arrange
-        sensor_array = "sensor_array_02"
-        
-        # Simulate IngestorNode initialization logic
-        # Node name is f"ingestor_{sensor_array}"
-        node_name = f"ingestor_{sensor_array}"
-        
-        # Assert
-        assert node_name == "ingestor_sensor_array_02"
-        
-        # Test different array ID
-        sensor_array_alt = "sensor_array_10"
-        node_name_alt = f"ingestor_{sensor_array_alt}"
-        assert node_name_alt == "ingestor_sensor_array_10"
-    
+    def test_node_name_translates_hyphens_to_underscores(self):
+        """Array IDs use hyphens (RFC 1123); ROS2 node names require underscores."""
+        sensor_array = "shake-002"
+        node_name = "ingestor_" + sensor_array.replace("-", "_")
+        assert node_name == "ingestor_shake_002"
+
     @pytest.mark.unit
-    def test_nats_subject_configuration(self):
-        """Test NATS subject is configurable."""
-        # Arrange - from ingestor/main.py
-        NATS_SUBJECT = "sensor.data"
-        
-        # Assert default value
+    def test_nats_subject_constant(self):
+        from dispatch import NATS_SUBJECT
         assert NATS_SUBJECT == "sensor.data"
-        
-        # Test that subject can be overridden
-        custom_subject = "custom.sensor.stream"
-        assert custom_subject != NATS_SUBJECT
-        
-        # Verify subject format is valid (no leading/trailing slashes for NATS)
-        assert not NATS_SUBJECT.startswith('/')
-        assert not NATS_SUBJECT.endswith('/')
 
 
-# ============================================================================
-# Placeholders for Future Implementation
-# ============================================================================
+# ---------------------------------------------------------------------------
+# NATS publish (mocked)
+# ---------------------------------------------------------------------------
+
+class TestNATSPublishing:
+    @pytest.mark.integration
+    @pytest.mark.nats
+    @pytest.mark.asyncio
+    async def test_publish_serialized_payload(self, mock_nats_client):
+        from dispatch import NATS_SUBJECT
+
+        payload = b"serialized-bytes"
+        await mock_nats_client.publish(NATS_SUBJECT, payload)
+
+        mock_nats_client.publish.assert_called_once_with(NATS_SUBJECT, payload)
+        assert mock_nats_client._published_messages[0]["subject"] == NATS_SUBJECT
+        assert mock_nats_client._published_messages[0]["data"] == payload
+
+
+# ---------------------------------------------------------------------------
+# End-to-end happy path
+# ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_ingestor_end_to_end(mock_ros2_node, mock_nats_client):
-    """End-to-end test: ROS2 message -> Buffer -> NATS publish."""
-    # Arrange
-    mock_buffer = Mock()
-    mock_payload = Mock()
-    mock_payload.SerializeToString.return_value = b'test_payload'
-    mock_buffer.load_buffer.return_value = mock_payload
-    
-    CHANNEL_MAP = {'aud': 'acoustic', 'ehz': 'seismic'}
-    NATS_SUBJECT = "sensor.data"
-    
-    # Simulate ROS2 message
-    class MockRawSensorReading:
-        def __init__(self):
-            self.sensor_id = "sensor_array_01.aud"
-            self.start_time = 1700000000.0
-            self.amplitude_readings = list(range(100))
-    
-    msg = MockRawSensorReading()
-    
-    # Act - simulate full flow
-    # 1. ROS2 message arrives
-    channel_code = msg.sensor_id.split('.')[-1]
-    channel = CHANNEL_MAP.get(channel_code)
-    
-    # 2. Load into buffer
-    payload = mock_buffer.load_buffer(channel, msg.start_time, msg.amplitude_readings)
-    
-    # 3. If payload returned, publish to NATS
-    published = False
-    if payload is not None:
-        serialized = payload.SerializeToString()
-        # In real code: asyncio.run_coroutine_threadsafe(nc.publish(...))
-        published = True
-    
-    # Assert
-    assert channel == 'acoustic'
-    mock_buffer.load_buffer.assert_called_once_with(
-        'acoustic', 1700000000.0, list(range(100))
+def test_ingestor_end_to_end():
+    role_map = {
+        "acoustic": "/shake_001/aud",
+        "seismic": "/shake_001/ehz",
+    }
+    buffer = Mock()
+    payload = Mock()
+    payload.SerializeToString.return_value = b"e2e_payload"
+    buffer.load_buffer.return_value = payload
+
+    published = []
+    publish = lambda p: published.append(p.SerializeToString())
+
+    cb = make_role_callback("acoustic", buffer, publish)
+    msg = Mock(start_time=1700000000.0, amplitude_readings=list(range(100)))
+    cb(msg)
+
+    buffer.load_buffer.assert_called_once_with(
+        "acoustic", 1700000000.0, list(range(100))
     )
-    assert payload is not None
-    assert published == True
-    assert payload.SerializeToString() == b'test_payload'
+    assert published == [b"e2e_payload"]
 
 
 @pytest.mark.unit
-def test_ingestor_error_handling():
-    """Test error handling (buffer errors, NATS disconnection)."""
-    # Arrange
-    CHANNEL_MAP = {'aud': 'acoustic', 'ehz': 'seismic'}
-    
-    # Test 1: Invalid channel code
-    class MockRawSensorReading:
-        def __init__(self, sensor_id):
-            self.sensor_id = sensor_id
-            self.start_time = 1700000000.0
-            self.amplitude_readings = [1, 2, 3]
-    
-    msg_invalid = MockRawSensorReading("sensor_array_01.xyz")
-    channel_code_invalid = msg_invalid.sensor_id.split('.')[-1]
-    channel_invalid = CHANNEL_MAP.get(channel_code_invalid)
-    
-    # Act & Assert - invalid channel returns None, callback should return early
-    assert channel_invalid is None
-    # In real code, this would trigger early return from listener_callback
-    
-    # Test 2: Buffer returns None (window not complete)
-    mock_buffer = Mock()
-    mock_buffer.load_buffer.return_value = None
-    
-    msg_valid = MockRawSensorReading("sensor_array_01.aud")
-    channel_code = msg_valid.sensor_id.split('.')[-1]
-    channel = CHANNEL_MAP.get(channel_code)
-    
-    payload = mock_buffer.load_buffer(channel, msg_valid.start_time, msg_valid.amplitude_readings)
-    
-    # Assert - None payload means window not complete, should not publish
-    assert payload is None
-    
-    # Test 3: NATS client disconnect simulation
-    mock_nats = Mock()
-    mock_nats.is_connected = False
-    
-    assert mock_nats.is_connected == False
+def test_ingestor_handles_buffer_returns_none():
+    buffer = Mock()
+    buffer.load_buffer.return_value = None
+    publish = Mock()
+
+    cb = make_role_callback("seismic", buffer, publish)
+    cb(Mock(start_time=0.0, amplitude_readings=[]))
+    publish.assert_not_called()
 
 
 @pytest.mark.unit
-def test_ingestor_performance():
-    """Test Ingestor can handle high-frequency data streams."""
+def test_ingestor_throughput_is_low_overhead():
+    """Mirror the prior suite's perf check; primarily protects against accidental quadratic deserialization."""
     import time
-    
-    # Simulate high-frequency message processing
-    # Acoustic: 16kHz with 100-sample chunks = 160 messages/second
-    # Seismic: 100Hz with 10-sample chunks = 10 messages/second
-    
-    mock_buffer = Mock()
-    mock_buffer.load_buffer.return_value = None  # Most calls don't complete window
-    
-    CHANNEL_MAP = {'aud': 'acoustic', 'ehz': 'seismic'}
-    
-    # Simulate processing burst of messages
-    message_count = 1000
-    start_time = time.time()
-    
-    for i in range(message_count):
-        # Simulate listener_callback logic
-        sensor_id = f"sensor_array_01.aud"
-        channel_code = sensor_id.split('.')[-1]
-        channel = CHANNEL_MAP.get(channel_code)
-        
-        if channel is not None:
-            mock_buffer.load_buffer(channel, 1700000000.0 + i * 0.00625, [1, 2, 3, 4, 5])
-    
-    end_time = time.time()
-    elapsed = end_time - start_time
-    
-    # Assert performance
-    assert mock_buffer.load_buffer.call_count == message_count
-    
-    # Should process 1000 messages in < 1 second (accounting for mock overhead)
-    messages_per_second = message_count / elapsed if elapsed > 0 else float('inf')
-    assert messages_per_second > 100  # At least 100 msg/sec even with test overhead
-    
-    # Real system needs ~160 msg/sec for acoustic, this validates overhead is low
-    print(f"Processed {message_count} messages in {elapsed:.3f}s ({messages_per_second:.0f} msg/s)")
+
+    buffer = Mock()
+    buffer.load_buffer.return_value = None
+    publish = Mock()
+    cb = make_role_callback("acoustic", buffer, publish)
+
+    n = 1000
+    t0 = time.time()
+    for _ in range(n):
+        cb(Mock(start_time=0.0, amplitude_readings=[1, 2, 3, 4, 5]))
+    elapsed = time.time() - t0
+
+    assert buffer.load_buffer.call_count == n
+    assert n / max(elapsed, 1e-6) > 100

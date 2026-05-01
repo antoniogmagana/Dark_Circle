@@ -1,6 +1,10 @@
 import os
+
 import numpy as np
+import torch
 import torchaudio.functional as F
+from google.protobuf.timestamp_pb2 import Timestamp
+
 from inference_protos import inference_pb2
 
 _AUDIO_BITS = int(os.environ.get("AUDIO_BIT_DEPTH", "16"))
@@ -14,8 +18,8 @@ class SensorBuffer:
         self.sensor_id = sensor_id
         self.start_time = None
         self.window = 1.0
-        self.target_rate = int(os.environ.get("TARGET_RATE", "16000"))
 
+        # Per-channel native (incoming) sample rates.
         self.rates = {
             "acoustic": int(os.environ.get("AUDIO_SAMPLE_RATE", "16000")),
             "seismic": int(os.environ.get("SEISMIC_SAMPLE_RATE", "100")),
@@ -23,21 +27,23 @@ class SensorBuffer:
             "accel_y": int(os.environ.get("ACCEL_SAMPLE_RATE", "100")),
             "accel_z": int(os.environ.get("ACCEL_SAMPLE_RATE", "100")),
         }
+
+        # Per-channel TARGET (post-resample) rates. The buffer resamples each
+        # incoming channel to its target rate before packaging.
+        # When NATIVE_RATES=1 we ship every channel at its native rate
+        # (CRL expects audio=16k, seismic=100). Otherwise everything goes
+        # through the legacy "upsample to TARGET_RATE" path that the older
+        # WaveformClassificationCNN model expected.
+        if os.environ.get("NATIVE_RATES", "0") == "1":
+            self.target_rates = dict(self.rates)
+        else:
+            tr = int(os.environ.get("TARGET_RATE", "16000"))
+            self.target_rates = {ch: tr for ch in self.rates}
+
         self.limits = {
-            "acoustic": int(self.window * self.rates["acoustic"]),
-            "seismic": int(self.window * self.rates["seismic"]),
-            "accel_x": int(self.window * self.rates["accel_x"]),
-            "accel_y": int(self.window * self.rates["accel_y"]),
-            "accel_z": int(self.window * self.rates["accel_z"]),
+            ch: int(self.window * self.target_rates[ch]) for ch in self.rates
         }
-        # change to np.zeros(self.limits[<sensor>] * self.rates[<sensor]) if using ensemble learning with individual feeds
-        self.buffers = {
-            "acoustic": np.zeros(self.target_rate),
-            "seismic": np.zeros(self.target_rate),
-            "accel_x": np.zeros(self.target_rate),
-            "accel_y": np.zeros(self.target_rate),
-            "accel_z": np.zeros(self.target_rate),
-        }
+        self.buffers = {ch: np.zeros(self.limits[ch]) for ch in self.rates}
 
         self.holding_pen = {
             "acoustic": [],
@@ -53,10 +59,13 @@ class SensorBuffer:
         }
 
     def _resample(self, signal, channel):
-        return F.resample(signal, self.rates[channel], self.target_rate)
+        # Incoming ROS2 int32[] arrives as array.array; torchaudio needs a Tensor.
+        tensor = torch.as_tensor(signal, dtype=torch.float32)
+        out = F.resample(tensor, self.rates[channel], self.target_rates[channel])
+        return out.numpy()
 
     def _package_window(self):
-        ts = inference_pb2.google_dot_protobuf_dot_timestamp__pb2.Timestamp()
+        ts = Timestamp()
         ts.seconds = int(self.start_time)
         ts.nanos = int((self.start_time - int(self.start_time)) * 1e9)
 
@@ -98,60 +107,67 @@ class SensorBuffer:
 
             payload.accel_data.CopyFrom(
                 inference_pb2.Tensor(
-                    shape=list(accel_matrix.shape), data=accel_matrix.flatten().tolist()
+                    shape=list(accel_matrix.shape),
+                    data=accel_matrix.flatten().tolist(),
                 )
             )
         return payload
 
     def _reset_buffers(self):
-        # 1. Wipe the slate clean for the new second
         self.active_channels.clear()
 
         for ch in self.buffers:
             self.buffers[ch].fill(0)
-            pen_len = len(self.holding_pen[ch])
+            limit = self.limits[ch]
+            pen = self.holding_pen[ch]
+            pen_len = len(pen)
 
-            # 2. Check if this channel has leftovers in the pen
+            # Capping the holding pen by the buffer size keeps a runaway
+            # publisher (incoming rate above configured rate) from growing
+            # the pen without bound.
             if pen_len > 0:
-                self.buffers[ch][0:pen_len] = self.holding_pen[ch]
+                if pen_len > limit:
+                    pen = pen[-limit:]
+                    pen_len = limit
+                self.buffers[ch][0:pen_len] = pen
                 self.holding_pen[ch].clear()
-
-                # 3. Re-register this channel so it gets packaged!
                 self.active_channels.add(ch)
 
-        # 4. Advance the anchor
         self.start_time += self.window
         return None
 
     def load_buffer(self, channel, timestamp, data):
-
-        rate = self.rates[channel]
+        rate = self.target_rates[channel]
         limit = self.limits[channel]
         buffer = self.buffers[channel]
 
         if self.start_time is None:
             self.start_time = timestamp
 
-        current_time = timestamp
-        time_diff = current_time - self.start_time
+        time_diff = timestamp - self.start_time
 
         if time_diff < 0:
             return None
 
         if time_diff >= self.window:
-            if channel == "acoustic":
+            # Stream-restart guard: if no channel has loaded any sample into
+            # the current window AND no holding-pen carry is queued, the
+            # source has been silent. Snap start_time to the new timestamp
+            # rather than emit phantom zero-windows for every silent second.
+            if not self.active_channels and not any(self.holding_pen.values()):
+                self.start_time = timestamp
+                time_diff = 0.0
+            elif channel == "acoustic":
                 ready_payload = self._package_window()
                 self._reset_buffers()
-
-                self.load_buffer(channel, data, timestamp)
-
+                self.load_buffer(channel, timestamp, data)
                 return ready_payload
             else:
                 self.holding_pen[channel].extend(data)
                 return None
 
         self.active_channels.add(channel)
-        if self.rates[channel] < self.target_rate:
+        if self.rates[channel] != self.target_rates[channel]:
             data = self._resample(data, channel)
         start_index = int(time_diff * rate)
         data_length = len(data)
@@ -160,17 +176,16 @@ class SensorBuffer:
         if end_index < limit:
             buffer[start_index:end_index] = data
             return None
-        else:
-            space_left = limit - start_index
-            chunk_1 = data[0:space_left]
-            chunk_2 = data[space_left:]
-            buffer[start_index:limit] = chunk_1
 
-            if channel == "acoustic":
-                ready_payload = self._package_window()
-                self.holding_pen[channel].extend(chunk_2)
-                self._reset_buffers()
-                return ready_payload
-            else:
-                self.holding_pen[channel].extend(chunk_2)
-                return None
+        space_left = limit - start_index
+        chunk_1 = data[0:space_left]
+        chunk_2 = data[space_left:]
+        buffer[start_index:limit] = chunk_1
+
+        if channel == "acoustic":
+            ready_payload = self._package_window()
+            self.holding_pen[channel].extend(chunk_2)
+            self._reset_buffers()
+            return ready_payload
+        self.holding_pen[channel].extend(chunk_2)
+        return None

@@ -1,0 +1,33 @@
+# Expected-sensors whitelist consumed by the Discovery node.
+#
+# Each top-level array key must be a lowercase RFC 1123 subdomain
+# (letters, digits, hyphens; start with a letter; end alphanumeric;
+# no underscores), since Discovery uses it as the Kubernetes Deployment
+# name for the array's Ingestor pod (``ingestor-<array_id>``).
+#
+# `audio` and `seismic` topic strings are firmware-defined ROS2 topics
+# and may contain underscores or other characters that ROS2 allows --
+# they are values, not keys.
+#
+# `accel` is optional; if present it must define all three of x, y, z.
+#
+# Edits propagate via kubelet ConfigMap sync (~60s) and are picked up
+# on the next 5-second poll without a Discovery restart.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: expected-sensors
+  namespace: default
+data:
+  expected-sensors.yaml: |
+    arrays:
+      shake-001:
+        audio: /shake_001/aud
+        seismic: /shake_001/ehz
+        accel:
+          x: /shake_001/ene
+          y: /shake_001/enn
+          z: /shake_001/enz
+      shake-002:
+        audio: /shake_002/aud
+        seismic: /shake_002/ehz

@@ -1,502 +1,769 @@
 """
-Tests for Discovery Node (Kubernetes orchestration).
+Tests for Discovery Node (ConfigMap-driven whitelist + Kubernetes orchestration).
 
-The Discovery node watches ROS2 topics and dynamically spawns
-Ingestor deployments via Kubernetes API.
+The Discovery node reads an expected-sensors ConfigMap each poll, checks the
+ROS2 graph for completeness of each configured array, and spawns / tears down
+Ingestor Deployments accordingly. Pure logic (config parsing, completeness
+checking, state tracking) lives in ``discovery.whitelist`` and is imported
+directly. The ROS2 / Kubernetes plumbing in ``discovery.main`` is exercised
+through inline simulation, since rclpy / kubernetes are not importable in
+this test environment.
 """
+import json
+import textwrap
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+
+from whitelist import (
+    ArraySpec,
+    InvalidConfigError,
+    PartialAccelError,
+    PollState,
+    build_role_map,
+    is_complete,
+    load_config,
+    missing_topics,
+    required_topics,
+)
 
 
-# ============================================================================
-# Test Topic Discovery
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Config loading
+# ---------------------------------------------------------------------------
 
-class TestTopicDiscovery:
-    """Test ROS2 topic discovery and parsing."""
-    
-    @pytest.mark.integration
-    @pytest.mark.ros2
-    def test_get_sensor_arrays_basic(self, mock_ros2_node):
-        """Test basic sensor array discovery from topics."""
-        from collections import defaultdict
-        
-        # Mock ROS2 node with topic names and types
-        mock_ros2_node.get_topic_names_and_types.return_value = [
-            ('/sensor_array_01/acoustic', ['ros2_interfaces/msg/RawSensorReading']),
-            ('/sensor_array_01/seismic', ['ros2_interfaces/msg/RawSensorReading']),
-            ('/sensor_array_02/acoustic', ['ros2_interfaces/msg/RawSensorReading']),
-        ]
-        
-        # Simulate _get_sensor_arrays() logic
-        SENSOR_MSG_TYPE = 'ros2_interfaces/msg/RawSensorReading'
-        arrays = defaultdict(list)
-        
-        for topic, types in mock_ros2_node.get_topic_names_and_types():
-            if SENSOR_MSG_TYPE in types:
-                parts = topic.strip('/').split('/')
-                if len(parts) >= 2:
-                    sensor_array = parts[0]
-                    arrays[sensor_array].append(topic)
-        
-        # Verify discovery logic worked
-        assert 'sensor_array_01' in arrays
-        assert 'sensor_array_02' in arrays
-        assert len(arrays['sensor_array_01']) == 2
-        assert '/sensor_array_01/acoustic' in arrays['sensor_array_01']
-        assert '/sensor_array_01/seismic' in arrays['sensor_array_01']
-    
+class TestLoadConfig:
+    """``load_config`` parses the YAML ConfigMap into ArraySpec objects."""
+
     @pytest.mark.unit
-    def test_parse_topic_name(self):
-        """Test topic name parsing for array prefix extraction."""
-        # Example: "/sensor_array_01/acoustic" -> "sensor_array_01"
-        # Based on _get_sensor_arrays() implementation
-        topic = "/sensor_array_01/acoustic"
-        parts = topic.strip('/').split('/')
-        assert len(parts) >= 2
-        sensor_array = parts[0]
-        assert sensor_array == "sensor_array_01"
-        
-        # Test with different formats
-        topic2 = "/array_42/seismic"
-        parts2 = topic2.strip('/').split('/')
-        assert parts2[0] == "array_42"
-        
-        # Test edge case: no leading slash
-        topic3 = "sensor_array_03/accel"
-        parts3 = topic3.strip('/').split('/')
-        assert parts3[0] == "sensor_array_03"
-    
+    def test_audio_seismic_only(self):
+        yaml_text = textwrap.dedent("""
+            arrays:
+              shake-001:
+                audio: /shake_001/aud
+                seismic: /shake_001/ehz
+        """)
+
+        specs = load_config(yaml_text)
+
+        assert "shake-001" in specs
+        spec = specs["shake-001"]
+        assert spec.audio == "/shake_001/aud"
+        assert spec.seismic == "/shake_001/ehz"
+        assert spec.accel is None
+
     @pytest.mark.unit
-    def test_group_topics_by_array(self):
-        """Test grouping topics by sensor array prefix."""
-        from collections import defaultdict
-        
-        # Simulate what _get_sensor_arrays() does
-        topics_and_types = [
-            ("/sensor_array_01/acoustic", ['ros2_interfaces/msg/RawSensorReading']),
-            ("/sensor_array_01/seismic", ['ros2_interfaces/msg/RawSensorReading']),
-            ("/sensor_array_02/acoustic", ['ros2_interfaces/msg/RawSensorReading']),
-            ("/other/topic", ['std_msgs/msg/String']),  # Should be filtered out
-        ]
-        
-        SENSOR_MSG_TYPE = 'ros2_interfaces/msg/RawSensorReading'
-        arrays = defaultdict(list)
-        
-        for topic, types in topics_and_types:
-            if SENSOR_MSG_TYPE in types:
-                parts = topic.strip('/').split('/')
-                if len(parts) >= 2:
-                    sensor_array = parts[0]
-                    arrays[sensor_array].append(topic)
-        
-        assert len(arrays) == 2
-        assert "sensor_array_01" in arrays
-        assert "sensor_array_02" in arrays
-        assert len(arrays["sensor_array_01"]) == 2
-        assert len(arrays["sensor_array_02"]) == 1
-        assert "/sensor_array_01/acoustic" in arrays["sensor_array_01"]
-        assert "/sensor_array_01/seismic" in arrays["sensor_array_01"]
-    
-    @pytest.mark.integration
-    @pytest.mark.ros2
-    def test_handle_multiple_arrays(self, mock_ros2_node):
-        """Test discovery handles multiple sensor arrays."""
-        from collections import defaultdict
-        
-        # Mock multiple sensor arrays
-        mock_ros2_node.get_topic_names_and_types.return_value = [
-            ('/array_A/acoustic', ['ros2_interfaces/msg/RawSensorReading']),
-            ('/array_A/seismic', ['ros2_interfaces/msg/RawSensorReading']),
-            ('/array_B/acoustic', ['ros2_interfaces/msg/RawSensorReading']),
-            ('/array_C/seismic', ['ros2_interfaces/msg/RawSensorReading']),
-            ('/other/topic', ['std_msgs/msg/String']),  # Should be filtered
-        ]
-        
-        SENSOR_MSG_TYPE = 'ros2_interfaces/msg/RawSensorReading'
-        arrays = defaultdict(list)
-        
-        for topic, types in mock_ros2_node.get_topic_names_and_types():
-            if SENSOR_MSG_TYPE in types:
-                parts = topic.strip('/').split('/')
-                if len(parts) >= 2:
-                    sensor_array = parts[0]
-                    arrays[sensor_array].append(topic)
-        
-        # Verify multiple arrays discovered
-        assert len(arrays) == 3
-        assert 'array_A' in arrays
-        assert 'array_B' in arrays
-        assert 'array_C' in arrays
-        assert 'other' not in arrays  # Should be filtered out
+    def test_audio_seismic_with_accel(self):
+        yaml_text = textwrap.dedent("""
+            arrays:
+              shake-001:
+                audio: /shake_001/aud
+                seismic: /shake_001/ehz
+                accel:
+                  x: /shake_001/ene
+                  y: /shake_001/enn
+                  z: /shake_001/enz
+        """)
+
+        spec = load_config(yaml_text)["shake-001"]
+
+        assert spec.accel == {
+            "x": "/shake_001/ene",
+            "y": "/shake_001/enn",
+            "z": "/shake_001/enz",
+        }
+
+    @pytest.mark.unit
+    def test_multiple_arrays(self):
+        yaml_text = textwrap.dedent("""
+            arrays:
+              shake-001:
+                audio: /shake_001/aud
+                seismic: /shake_001/ehz
+              shake-002:
+                audio: /shake_002/aud
+                seismic: /shake_002/ehz
+        """)
+
+        specs = load_config(yaml_text)
+
+        assert set(specs) == {"shake-001", "shake-002"}
+
+    @pytest.mark.unit
+    def test_missing_audio_is_invalid(self):
+        yaml_text = textwrap.dedent("""
+            arrays:
+              shake-001:
+                seismic: /shake_001/ehz
+        """)
+
+        with pytest.raises(InvalidConfigError):
+            load_config(yaml_text)
+
+    @pytest.mark.unit
+    def test_missing_seismic_is_invalid(self):
+        yaml_text = textwrap.dedent("""
+            arrays:
+              shake-001:
+                audio: /shake_001/aud
+        """)
+
+        with pytest.raises(InvalidConfigError):
+            load_config(yaml_text)
+
+    @pytest.mark.unit
+    def test_partial_accel_is_invalid(self):
+        """Accel block must have all three of x/y/z or be absent entirely."""
+        yaml_text = textwrap.dedent("""
+            arrays:
+              shake-001:
+                audio: /shake_001/aud
+                seismic: /shake_001/ehz
+                accel:
+                  x: /shake_001/ene
+                  y: /shake_001/enn
+        """)
+
+        with pytest.raises(PartialAccelError):
+            load_config(yaml_text)
+
+    @pytest.mark.unit
+    def test_empty_arrays_block(self):
+        yaml_text = "arrays: {}"
+        assert load_config(yaml_text) == {}
+
+    @pytest.mark.unit
+    def test_missing_arrays_key_is_invalid(self):
+        with pytest.raises(InvalidConfigError):
+            load_config("other: {}")
+
+    @pytest.mark.unit
+    def test_malformed_yaml_is_invalid(self):
+        with pytest.raises(InvalidConfigError):
+            load_config("arrays: {shake-001: [unbalanced")
+
+    @pytest.mark.unit
+    def test_array_id_with_underscore_rejected(self):
+        """Array IDs become k8s Deployment names which must be RFC 1123."""
+        yaml_text = textwrap.dedent("""
+            arrays:
+              shake_001:
+                audio: /shake_001/aud
+                seismic: /shake_001/ehz
+        """)
+        with pytest.raises(InvalidConfigError, match="RFC 1123"):
+            load_config(yaml_text)
+
+    @pytest.mark.unit
+    def test_array_id_starting_with_digit_rejected(self):
+        yaml_text = textwrap.dedent("""
+            arrays:
+              1shake:
+                audio: /1shake/aud
+                seismic: /1shake/ehz
+        """)
+        with pytest.raises(InvalidConfigError, match="RFC 1123"):
+            load_config(yaml_text)
+
+    @pytest.mark.unit
+    def test_array_id_uppercase_rejected(self):
+        yaml_text = textwrap.dedent("""
+            arrays:
+              Shake-001:
+                audio: /Shake-001/aud
+                seismic: /Shake-001/ehz
+        """)
+        with pytest.raises(InvalidConfigError, match="RFC 1123"):
+            load_config(yaml_text)
+
+    @pytest.mark.unit
+    def test_array_id_trailing_hyphen_rejected(self):
+        yaml_text = textwrap.dedent("""
+            arrays:
+              shake-:
+                audio: /shake/aud
+                seismic: /shake/ehz
+        """)
+        with pytest.raises(InvalidConfigError, match="RFC 1123"):
+            load_config(yaml_text)
+
+    @pytest.mark.unit
+    def test_valid_array_ids(self):
+        """Hyphen-separated lowercase IDs starting with a letter are fine."""
+        yaml_text = textwrap.dedent("""
+            arrays:
+              shake-001:
+                audio: /shake_001/aud
+                seismic: /shake_001/ehz
+              s:
+                audio: /s/aud
+                seismic: /s/ehz
+              site-a-rs1d-7:
+                audio: /a/aud
+                seismic: /a/ehz
+        """)
+        specs = load_config(yaml_text)
+        assert set(specs) == {"shake-001", "s", "site-a-rs1d-7"}
+
+    @pytest.mark.unit
+    def test_topic_paths_may_contain_underscores(self):
+        """Topic strings (values, not keys) keep underscores from the firmware."""
+        yaml_text = textwrap.dedent("""
+            arrays:
+              shake-001:
+                audio: /shake_001/aud
+                seismic: /shake_001/ehz
+        """)
+        spec = load_config(yaml_text)["shake-001"]
+        assert spec.audio == "/shake_001/aud"
+        assert spec.seismic == "/shake_001/ehz"
+
+    @pytest.mark.unit
+    def test_array_id_too_long_rejected(self):
+        long_id = "a" * 60
+        yaml_text = textwrap.dedent(f"""
+            arrays:
+              {long_id}:
+                audio: /x/aud
+                seismic: /x/ehz
+        """)
+        with pytest.raises(InvalidConfigError, match="max is"):
+            load_config(yaml_text)
 
 
-# ============================================================================
-# Test Kubernetes Orchestration
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Required-topics / completeness
+# ---------------------------------------------------------------------------
 
-class TestKubernetesOrchestration:
-    """Test Kubernetes deployment management."""
-    
+class TestRequiredTopics:
+    """``required_topics`` lists every topic an array must have to spawn."""
+
+    @pytest.mark.unit
+    def test_audio_seismic_only(self):
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        assert required_topics(spec) == {"/a/aud", "/a/ehz"}
+
+    @pytest.mark.unit
+    def test_with_accel(self):
+        spec = ArraySpec(
+            audio="/a/aud",
+            seismic="/a/ehz",
+            accel={"x": "/a/ene", "y": "/a/enn", "z": "/a/enz"},
+        )
+        assert required_topics(spec) == {
+            "/a/aud", "/a/ehz", "/a/ene", "/a/enn", "/a/enz"
+        }
+
+
+class TestIsComplete:
+    """``is_complete`` returns True iff every required topic is visible."""
+
+    @pytest.mark.unit
+    def test_complete_audio_seismic_only(self):
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        visible = {"/a/aud", "/a/ehz"}
+        assert is_complete(spec, visible) is True
+
+    @pytest.mark.unit
+    def test_missing_seismic_is_incomplete(self):
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        visible = {"/a/aud"}
+        assert is_complete(spec, visible) is False
+
+    @pytest.mark.unit
+    def test_complete_with_accel(self):
+        spec = ArraySpec(
+            audio="/a/aud",
+            seismic="/a/ehz",
+            accel={"x": "/a/ene", "y": "/a/enn", "z": "/a/enz"},
+        )
+        visible = {"/a/aud", "/a/ehz", "/a/ene", "/a/enn", "/a/enz"}
+        assert is_complete(spec, visible) is True
+
+    @pytest.mark.unit
+    def test_partial_accel_visible_is_incomplete(self):
+        """If config requires accel x/y/z, all three must be visible."""
+        spec = ArraySpec(
+            audio="/a/aud",
+            seismic="/a/ehz",
+            accel={"x": "/a/ene", "y": "/a/enn", "z": "/a/enz"},
+        )
+        visible = {"/a/aud", "/a/ehz", "/a/ene", "/a/enn"}
+        assert is_complete(spec, visible) is False
+
+    @pytest.mark.unit
+    def test_extra_visible_topics_dont_matter(self):
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        visible = {"/a/aud", "/a/ehz", "/somewhere/else"}
+        assert is_complete(spec, visible) is True
+
+
+class TestMissingTopics:
+    """``missing_topics`` returns the set of required-but-not-visible topics."""
+
+    @pytest.mark.unit
+    def test_returns_only_missing(self):
+        spec = ArraySpec(
+            audio="/a/aud",
+            seismic="/a/ehz",
+            accel={"x": "/a/ene", "y": "/a/enn", "z": "/a/enz"},
+        )
+        visible = {"/a/aud", "/a/ene"}
+        assert missing_topics(spec, visible) == {
+            "/a/ehz", "/a/enn", "/a/enz"
+        }
+
+    @pytest.mark.unit
+    def test_empty_when_complete(self):
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        assert missing_topics(spec, {"/a/aud", "/a/ehz"}) == set()
+
+
+# ---------------------------------------------------------------------------
+# Role-map injection (passed to Ingestor as JSON env)
+# ---------------------------------------------------------------------------
+
+class TestBuildRoleMap:
+    """``build_role_map`` produces the JSON-serializable dict the Ingestor expects."""
+
+    @pytest.mark.unit
+    def test_audio_seismic_only(self):
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        assert build_role_map(spec) == {
+            "acoustic": "/a/aud",
+            "seismic": "/a/ehz",
+        }
+
+    @pytest.mark.unit
+    def test_with_accel(self):
+        spec = ArraySpec(
+            audio="/a/aud",
+            seismic="/a/ehz",
+            accel={"x": "/a/ene", "y": "/a/enn", "z": "/a/enz"},
+        )
+        assert build_role_map(spec) == {
+            "acoustic": "/a/aud",
+            "seismic": "/a/ehz",
+            "accel_x": "/a/ene",
+            "accel_y": "/a/enn",
+            "accel_z": "/a/enz",
+        }
+
+    @pytest.mark.unit
+    def test_role_map_round_trips_through_json(self):
+        """Role map must serialize cleanly so it can ride in an env var."""
+        spec = ArraySpec(
+            audio="/a/aud",
+            seismic="/a/ehz",
+            accel={"x": "/a/ene", "y": "/a/enn", "z": "/a/enz"},
+        )
+        encoded = json.dumps(build_role_map(spec))
+        assert json.loads(encoded) == build_role_map(spec)
+
+
+# ---------------------------------------------------------------------------
+# Poll-state machine (decides spawn / wait / teardown each cycle)
+# ---------------------------------------------------------------------------
+
+class TestPollStateBasic:
+    """``PollState`` implements the spawn/teardown decision logic."""
+
+    @pytest.mark.unit
+    def test_spawn_when_complete_and_unknown(self):
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        decision = state.evaluate(
+            config={"shake-001": spec},
+            visible={"/a/aud", "/a/ehz"},
+            active=set(),
+        )
+        assert decision.to_spawn == {"shake-001"}
+        assert decision.to_teardown == set()
+
+    @pytest.mark.unit
+    def test_no_spawn_when_incomplete(self):
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        decision = state.evaluate(
+            config={"shake-001": spec},
+            visible={"/a/aud"},  # seismic missing
+            active=set(),
+        )
+        assert decision.to_spawn == set()
+        assert decision.to_teardown == set()
+
+    @pytest.mark.unit
+    def test_no_double_spawn_when_already_active(self):
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        decision = state.evaluate(
+            config={"shake-001": spec},
+            visible={"/a/aud", "/a/ehz"},
+            active={"shake-001"},
+        )
+        assert decision.to_spawn == set()
+        assert decision.to_teardown == set()
+
+
+class TestPollStateGrace:
+    """Grace-poll behavior for both topic-absence and config-removal teardown."""
+
+    @pytest.mark.unit
+    def test_topic_absence_grace_period(self):
+        """Active array whose topics vanish takes 3 absent polls to tear down."""
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        config = {"shake-001": spec}
+        active = {"shake-001"}
+
+        # Polls 1 and 2: topics absent, no teardown yet.
+        for _ in range(2):
+            decision = state.evaluate(config=config, visible=set(), active=active)
+            assert decision.to_teardown == set()
+
+        # Poll 3: grace exhausted, teardown.
+        decision = state.evaluate(config=config, visible=set(), active=active)
+        assert decision.to_teardown == {"shake-001"}
+
+    @pytest.mark.unit
+    def test_topic_reappearance_resets_grace(self):
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        config = {"shake-001": spec}
+        active = {"shake-001"}
+
+        # Two absent polls.
+        state.evaluate(config=config, visible=set(), active=active)
+        state.evaluate(config=config, visible=set(), active=active)
+
+        # Topics back: counter must reset.
+        state.evaluate(
+            config=config,
+            visible={"/a/aud", "/a/ehz"},
+            active=active,
+        )
+
+        # One more absent poll — should NOT teardown (grace counter reset).
+        decision = state.evaluate(config=config, visible=set(), active=active)
+        assert decision.to_teardown == set()
+
+    @pytest.mark.unit
+    def test_config_removal_grace_period(self):
+        """Removing an array from config takes 3 polls to tear down its Ingestor."""
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        active = {"shake-001"}
+
+        # First poll: array still in config — fully active.
+        state.evaluate(
+            config={"shake-001": spec},
+            visible={"/a/aud", "/a/ehz"},
+            active=active,
+        )
+
+        # Operator removes from config. Topics still on graph.
+        empty_config = {}
+        for _ in range(2):
+            decision = state.evaluate(
+                config=empty_config,
+                visible={"/a/aud", "/a/ehz"},
+                active=active,
+            )
+            assert decision.to_teardown == set()
+
+        # Third poll out of config: teardown.
+        decision = state.evaluate(
+            config=empty_config,
+            visible={"/a/aud", "/a/ehz"},
+            active=active,
+        )
+        assert decision.to_teardown == {"shake-001"}
+
+    @pytest.mark.unit
+    def test_config_re_add_resets_grace(self):
+        """Re-adding to config before grace exhausts should cancel teardown."""
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        active = {"shake-001"}
+
+        # Out of config for 2 polls.
+        for _ in range(2):
+            state.evaluate(
+                config={},
+                visible={"/a/aud", "/a/ehz"},
+                active=active,
+            )
+
+        # Re-add to config.
+        state.evaluate(
+            config={"shake-001": spec},
+            visible={"/a/aud", "/a/ehz"},
+            active=active,
+        )
+
+        # Out again for 2 more polls — should still NOT teardown.
+        for _ in range(2):
+            decision = state.evaluate(
+                config={},
+                visible={"/a/aud", "/a/ehz"},
+                active=active,
+            )
+            assert decision.to_teardown == set()
+
+
+class TestPollStateUnknownTopics:
+    """Topics on the graph that aren't in the config must never spawn anything."""
+
+    @pytest.mark.unit
+    def test_unknown_topic_ignored(self):
+        state = PollState(grace_polls=3)
+        decision = state.evaluate(
+            config={},
+            visible={"/wild/aud", "/wild/ehz"},
+            active=set(),
+        )
+        assert decision.to_spawn == set()
+        assert decision.to_teardown == set()
+
+    @pytest.mark.unit
+    def test_unknown_topic_alongside_configured_array(self):
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        decision = state.evaluate(
+            config={"shake-001": spec},
+            visible={"/a/aud", "/a/ehz", "/rogue/sensor"},
+            active=set(),
+        )
+        assert decision.to_spawn == {"shake-001"}
+
+
+class TestPollStateLogThrottle:
+    """State-change logging: only emit when the missing-topic set changes."""
+
+    @pytest.mark.unit
+    def test_logs_on_first_observation(self):
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        decision = state.evaluate(
+            config={"shake-001": spec},
+            visible={"/a/aud"},  # seismic missing
+            active=set(),
+        )
+        assert decision.log_awaiting == {"shake-001": frozenset({"/a/ehz"})}
+
+    @pytest.mark.unit
+    def test_no_log_when_missing_set_unchanged(self):
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        config = {"shake-001": spec}
+
+        first = state.evaluate(config=config, visible={"/a/aud"}, active=set())
+        assert first.log_awaiting == {"shake-001": frozenset({"/a/ehz"})}
+
+        second = state.evaluate(config=config, visible={"/a/aud"}, active=set())
+        assert second.log_awaiting == {}
+
+    @pytest.mark.unit
+    def test_log_when_missing_set_changes(self):
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(
+            audio="/a/aud",
+            seismic="/a/ehz",
+            accel={"x": "/a/ene", "y": "/a/enn", "z": "/a/enz"},
+        )
+        config = {"shake-001": spec}
+
+        # First poll: ehz + accel.x missing.
+        first = state.evaluate(
+            config=config,
+            visible={"/a/aud", "/a/enn", "/a/enz"},
+            active=set(),
+        )
+        assert first.log_awaiting == {
+            "shake-001": frozenset({"/a/ehz", "/a/ene"})
+        }
+
+        # Second poll: only ehz still missing — set changed, log again.
+        second = state.evaluate(
+            config=config,
+            visible={"/a/aud", "/a/ene", "/a/enn", "/a/enz"},
+            active=set(),
+        )
+        assert second.log_awaiting == {"shake-001": frozenset({"/a/ehz"})}
+
+    @pytest.mark.unit
+    def test_log_clears_when_array_becomes_complete(self):
+        state = PollState(grace_polls=3)
+        spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+        config = {"shake-001": spec}
+
+        state.evaluate(config=config, visible={"/a/aud"}, active=set())
+        complete = state.evaluate(
+            config=config, visible={"/a/aud", "/a/ehz"}, active=set()
+        )
+        # Spawning is a state change too — but we only assert the missing-log
+        # entry has cleared.
+        assert "shake-001" not in complete.log_awaiting
+
+
+# ---------------------------------------------------------------------------
+# Kubernetes orchestration (manifest construction)
+# ---------------------------------------------------------------------------
+
+class TestManifestConstruction:
+    """The Discovery node fills the ingestor template with role-map JSON."""
+
     @pytest.mark.integration
     @pytest.mark.k8s
-    def test_spawn_deployment(self, mock_k8s_client):
-        """Test spawning new Ingestor deployment."""
-        import yaml
-        
-        # Mock deployment template
-        template = """
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ingestor-<sensor_array_id>
-  labels:
-    app: ingestor
-    sensor-array: <sensor_array_id>
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: ingestor
-      sensor-array: <sensor_array_id>
-  template:
-    metadata:
-      labels:
-        app: ingestor
-        sensor-array: <sensor_array_id>
-    spec:
-      containers:
-      - name: ingestor
-        image: ingestor:latest
-        env:
-        - name: SENSOR_ARRAY
-          value: "<sensor_array_id>"
-        - name: SENSOR_TOPICS
-          value: "<comma,separated,topics>"
-"""
-        
-        # Simulate _spawn() method
-        sensor_array = "sensor_array_01"
-        topics = ['/sensor_array_01/acoustic', '/sensor_array_01/seismic']
-        topics_str = ','.join(topics)
-        manifest = template.replace('<sensor_array_id>', sensor_array)
-        manifest = manifest.replace('<comma,separated,topics>', topics_str)
-        body = yaml.safe_load(manifest)
-        
-        # Call mock k8s API
-        mock_k8s_client.create_namespaced_deployment(
-            namespace='default',
-            body=body
-        )
-        
-        # Verify deployment was created
+    def test_template_substitution_with_role_map(self, mock_k8s_client):
+        """``build_ingestor_manifest`` mutates the YAML dict directly so the
+        rendered Deployment carries the right name, labels, and env vars."""
+        from whitelist import ArraySpec, build_ingestor_manifest
+
+        template = textwrap.dedent("""
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: ingestor-placeholder
+              labels:
+                app: ingestor
+                sensor-array: placeholder
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: ingestor
+                  sensor-array: placeholder
+              template:
+                metadata:
+                  labels:
+                    app: ingestor
+                    sensor-array: placeholder
+                spec:
+                  containers:
+                    - name: ingestor
+                      image: ingestor:latest
+                      env:
+                        - name: SENSOR_ARRAY
+                          value: "placeholder"
+                        - name: SENSOR_ROLE_MAP
+                          value: "{}"
+        """).strip()
+
+        spec = ArraySpec(audio="/shake_001/aud", seismic="/shake_001/ehz")
+        body = build_ingestor_manifest(template, "shake-001", spec)
+
+        mock_k8s_client.create_namespaced_deployment(namespace="default", body=body)
         mock_k8s_client.create_namespaced_deployment.assert_called_once()
-        call_args = mock_k8s_client.create_namespaced_deployment.call_args
-        assert call_args[1]['namespace'] == 'default'
-        assert 'sensor_array_01' in str(call_args[1]['body'])
-    
+
+        assert body["metadata"]["name"] == "ingestor-shake-001"
+        assert body["metadata"]["labels"]["sensor-array"] == "shake-001"
+        assert body["spec"]["selector"]["matchLabels"]["sensor-array"] == "shake-001"
+        assert (
+            body["spec"]["template"]["metadata"]["labels"]["sensor-array"]
+            == "shake-001"
+        )
+        env = body["spec"]["template"]["spec"]["containers"][0]["env"]
+        env_dict = {e["name"]: e["value"] for e in env}
+        assert env_dict["SENSOR_ARRAY"] == "shake-001"
+        assert json.loads(env_dict["SENSOR_ROLE_MAP"]) == {
+            "acoustic": "/shake_001/aud",
+            "seismic": "/shake_001/ehz",
+        }
+
     @pytest.mark.integration
     @pytest.mark.k8s
-    def test_teardown_deployment(self, mock_k8s_client):
-        """Test tearing down Ingestor deployment."""
-        # Simulate _teardown() method
-        sensor_array = "sensor_array_01"
-        namespace = "default"
-        
-        # Call delete Deployment
+    def test_manifest_substitution_handles_quoted_topics(self):
+        """JSON role-map values with special characters survive YAML
+        round-trip when we mutate the dict instead of string-replacing."""
+        from whitelist import ArraySpec, build_ingestor_manifest
+
+        template = textwrap.dedent("""
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: ingestor-placeholder
+              labels:
+                app: ingestor
+                sensor-array: placeholder
+            spec:
+              selector:
+                matchLabels:
+                  app: ingestor
+                  sensor-array: placeholder
+              template:
+                metadata:
+                  labels:
+                    app: ingestor
+                    sensor-array: placeholder
+                spec:
+                  containers:
+                    - name: ingestor
+                      image: ingestor:latest
+                      env:
+                        - name: SENSOR_ARRAY
+                          value: "placeholder"
+                        - name: SENSOR_ROLE_MAP
+                          value: "{}"
+        """).strip()
+
+        spec = ArraySpec(
+            audio='/shake_001/audio "primary"',
+            seismic="/shake_001/ehz",
+        )
+        body = build_ingestor_manifest(template, "shake-001", spec)
+        env = body["spec"]["template"]["spec"]["containers"][0]["env"]
+        env_dict = {e["name"]: e["value"] for e in env}
+        assert json.loads(env_dict["SENSOR_ROLE_MAP"])["acoustic"] == (
+            '/shake_001/audio "primary"'
+        )
+
+    @pytest.mark.integration
+    @pytest.mark.k8s
+    def test_teardown_calls_delete(self, mock_k8s_client):
+        sensor_array = "shake-001"
         mock_k8s_client.delete_namespaced_deployment(
-            name=f'ingestor-{sensor_array}',
-            namespace=namespace
+            name=f"ingestor-{sensor_array}",
+            namespace="default",
         )
-        
-        # Verify delete was called
         mock_k8s_client.delete_namespaced_deployment.assert_called_once_with(
-            name='ingestor-sensor_array_01',
-            namespace='default'
+            name="ingestor-shake-001",
+            namespace="default",
         )
-    
-    @pytest.mark.unit
-    def test_absent_counter_grace_period(self):
-        """Test grace period before deployment teardown."""
-        from collections import defaultdict
-        
-        # Simulate grace period logic from _poll()
-        GRACE_POLLS = 3
-        absent_counts = defaultdict(int)
-        active_arrays = {"sensor_array_01", "sensor_array_02"}
-        visible_arrays = {"sensor_array_01": []}  # sensor_array_02 is now absent
-        
-        # First poll: sensor_array_02 goes absent
-        for sensor_array in list(active_arrays):
-            if sensor_array not in visible_arrays:
-                absent_counts[sensor_array] += 1
-        
-        assert absent_counts["sensor_array_02"] == 1
-        assert absent_counts["sensor_array_02"] < GRACE_POLLS  # Don't teardown yet
-        
-        # Second poll: still absent
-        for sensor_array in list(active_arrays):
-            if sensor_array not in visible_arrays:
-                absent_counts[sensor_array] += 1
-        assert absent_counts["sensor_array_02"] == 2
-        assert absent_counts["sensor_array_02"] < GRACE_POLLS
-        
-        # Third poll: reaches threshold
-        for sensor_array in list(active_arrays):
-            if sensor_array not in visible_arrays:
-                absent_counts[sensor_array] += 1
-        assert absent_counts["sensor_array_02"] == 3
-        assert absent_counts["sensor_array_02"] >= GRACE_POLLS  # Now should teardown
-        
-        # Test reset when array becomes visible again
-        visible_arrays["sensor_array_02"] = []
-        for sensor_array in visible_arrays:
-            if sensor_array in active_arrays:
-                absent_counts.pop(sensor_array, None)
-        assert "sensor_array_02" not in absent_counts
-    
-    @pytest.mark.integration
-    @pytest.mark.k8s
-    def test_idempotent_spawning(self, mock_k8s_client):
-        """Test spawning same array twice doesn't create duplicate."""
-        # Simulate idempotency check in _poll()
-        active_arrays = set()
-        visible_arrays = {'sensor_array_01': ['/sensor_array_01/acoustic']}
-        
-        # First spawn
-        for sensor_array, topics in visible_arrays.items():
-            if sensor_array not in active_arrays:
-                # Would call _spawn() here
-                active_arrays.add(sensor_array)
-        
-        spawn_count = len(active_arrays)
-        assert spawn_count == 1
-        
-        # Second iteration - array already active
-        for sensor_array, topics in visible_arrays.items():
-            if sensor_array not in active_arrays:
-                active_arrays.add(sensor_array)
-        
-        # Should still be 1, no duplicate spawn
-        assert len(active_arrays) == 1
-        assert 'sensor_array_01' in active_arrays
 
 
-# ============================================================================
-# Test Configuration
-# ============================================================================
-
-class TestDiscoveryConfiguration:
-    """Test Discovery node configuration."""
-    
-    @pytest.mark.unit
-    def test_poll_interval(self):
-        """Test poll interval configuration."""
-        # From discovery/main.py
-        POLL_INTERVAL = 5.0  # seconds
-        
-        # Assert default interval
-        assert POLL_INTERVAL == 5.0
-        assert isinstance(POLL_INTERVAL, float)
-        
-        # Test that interval can be overridden
-        custom_interval = 10.0
-        assert custom_interval > POLL_INTERVAL
-        
-        # Test with mock timer
-        mock_node = Mock()
-        mock_timer = Mock()
-        mock_node.create_timer.return_value = mock_timer
-        
-        # Simulate creating timer with interval
-        timer = mock_node.create_timer(POLL_INTERVAL, Mock())
-        
-        # Verify timer created
-        assert timer is mock_timer
-        mock_node.create_timer.assert_called_once()
-        assert mock_node.create_timer.call_args[0][0] == POLL_INTERVAL
-    
-    @pytest.mark.unit
-    def test_namespace_configuration(self):
-        """Test Kubernetes namespace is configurable."""
-        # From discovery/main.py: namespace = os.environ.get("NAMESPACE", "default")
-        
-        # Test default namespace
-        default_namespace = "default"
-        assert default_namespace == "default"
-        
-        # Test custom namespace
-        custom_namespace = "production"
-        assert custom_namespace != default_namespace
-        
-        # Test namespace validation (k8s naming rules)
-        valid_namespaces = ["default", "kube-system", "production", "dev-01"]
-        for ns in valid_namespaces:
-            assert isinstance(ns, str)
-            assert len(ns) > 0
-            assert ns.replace('-', '').replace('_', '').isalnum()
-    
-    @pytest.mark.unit
-    def test_deployment_template_loading(self):
-        """Test deployment template is loaded correctly."""
-        # Test YAML template structure
-        template = """apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ingestor-<sensor_array_id>
-  labels:
-    app: ingestor
-    sensor-array: <sensor_array_id>
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: ingestor
-      sensor-array: <sensor_array_id>
-  template:
-    metadata:
-      labels:
-        app: ingestor
-        sensor-array: <sensor_array_id>
-    spec:
-      containers:
-      - name: ingestor
-        image: ingestor:latest
-        env:
-        - name: SENSOR_ARRAY
-          value: <sensor_array_id>
-        - name: SENSOR_TOPICS
-          value: <comma,separated,topics>"""
-        
-        # Test template contains placeholders
-        assert '<sensor_array_id>' in template
-        assert '<comma,separated,topics>' in template
-        
-        # Test template replacement
-        sensor_array = "sensor_array_01"
-        topics = "/sensor_array_01/acoustic,/sensor_array_01/seismic"
-        
-        manifest = template.replace('<sensor_array_id>', sensor_array)
-        manifest = manifest.replace('<comma,separated,topics>', topics)
-        
-        # Verify replacements
-        assert '<sensor_array_id>' not in manifest
-        assert '<comma,separated,topics>' not in manifest
-        assert 'sensor_array_01' in manifest
-        assert topics in manifest
-        
-        # Test YAML is valid after replacement
-        import yaml
-        parsed = yaml.safe_load(manifest)
-        assert parsed['kind'] == 'Deployment'
-        assert parsed['metadata']['name'] == f'ingestor-{sensor_array}'
-
-
-# ============================================================================
-# Placeholders for Future Implementation
-# ============================================================================
+# ---------------------------------------------------------------------------
+# End-to-end poll cycle simulation
+# ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-@pytest.mark.ros2
-@pytest.mark.k8s
-def test_discovery_integration(mock_ros2_node, mock_k8s_client):
-    """Integration test: Full discovery cycle."""
-    # Arrange - simulate full poll cycle
-    active_arrays = set()
-    absent_counts = {}
-    GRACE_POLLS = 3
-    
-    # Mock ROS2 topic discovery
-    mock_ros2_node.get_topic_names_and_types.return_value = [
-        ('/sensor_array_01/acoustic', ['ros2_interfaces/msg/RawSensorReading']),
-        ('/sensor_array_01/seismic', ['ros2_interfaces/msg/RawSensorReading']),
-    ]
-    
-    # Act - simulate poll #1: discover and spawn
-    from collections import defaultdict
-    SENSOR_MSG_TYPE = 'ros2_interfaces/msg/RawSensorReading'
-    
-    arrays = defaultdict(list)
-    for topic, types in mock_ros2_node.get_topic_names_and_types():
-        if SENSOR_MSG_TYPE in types:
-            parts = topic.strip('/').split('/')
-            if len(parts) >= 2:
-                sensor_array = parts[0]
-                arrays[sensor_array].append(topic)
-    
-    # Spawn new arrays
-    for sensor_array, topics in arrays.items():
-        if sensor_array not in active_arrays:
-            # Would call k8s create_deployment here
-            active_arrays.add(sensor_array)
-    
-    # Assert
-    assert 'sensor_array_01' in active_arrays
-    assert len(arrays['sensor_array_01']) == 2
-    
-    # Act - simulate poll #2: array disappears
-    mock_ros2_node.get_topic_names_and_types.return_value = []
-    
-    arrays = defaultdict(list)
-    for topic, types in mock_ros2_node.get_topic_names_and_types():
-        if SENSOR_MSG_TYPE in types:
-            parts = topic.strip('/').split('/')
-            if len(parts) >= 2:
-                sensor_array = parts[0]
-                arrays[sensor_array].append(topic)
-    
-    # Increment absent counter
-    for sensor_array in list(active_arrays):
-        if sensor_array not in arrays:
-            absent_counts[sensor_array] = absent_counts.get(sensor_array, 0) + 1
-    
-    # Assert - not torn down yet (grace period)
-    assert absent_counts['sensor_array_01'] == 1
-    assert absent_counts['sensor_array_01'] < GRACE_POLLS
-    assert 'sensor_array_01' in active_arrays
+def test_full_poll_cycle_spawns_then_teardowns_on_topic_loss():
+    """Drive PollState through a full life cycle: incomplete → complete → loss."""
+    state = PollState(grace_polls=3)
+    spec = ArraySpec(audio="/a/aud", seismic="/a/ehz", accel=None)
+    config = {"shake-001": spec}
+    active = set()
 
+    # Poll 1: only audio visible — wait.
+    d = state.evaluate(config=config, visible={"/a/aud"}, active=active)
+    assert d.to_spawn == set()
 
-@pytest.mark.unit
-def test_discovery_error_handling():
-    """Test error handling (k8s API errors, network issues)."""
-    # Test 1: K8s API error simulation
-    mock_k8s = Mock()
-    mock_k8s.create_namespaced_deployment.side_effect = Exception("K8s API unavailable")
-    
-    # Attempt to spawn should raise exception
-    try:
-        mock_k8s.create_namespaced_deployment(namespace="default", body={})
-        raised = False
-    except Exception as e:
-        raised = True
-        assert "K8s API unavailable" in str(e)
-    
-    assert raised is True
-    
-    # Test 2: Empty topic list handling
-    topics = []
-    assert len(topics) == 0
-    # In real code, empty topics list should not trigger spawn
-    
-    # Test 3: Malformed topic name
-    malformed_topic = "invalid_topic_format"
-    parts = malformed_topic.strip('/').split('/')
-    # Should not have enough parts for sensor array extraction
-    assert len(parts) < 2
-    
-    # Test 4: Template file not found simulation
-    import os
-    template_path = "/nonexistent/template.yaml"
-    assert not os.path.exists(template_path)
-    
-    # Test 5: Invalid YAML template
-    invalid_yaml = "invalid: yaml: content:"
-    import yaml
-    try:
-        yaml.safe_load(invalid_yaml)
-        yaml_valid = True
-    except:
-        yaml_valid = False
-    
-    # This specific case might parse, but test demonstrates error handling
-    assert isinstance(yaml_valid, bool)
+    # Poll 2: seismic appears — spawn.
+    d = state.evaluate(config=config, visible={"/a/aud", "/a/ehz"}, active=active)
+    assert d.to_spawn == {"shake-001"}
+    active.add("shake-001")
+
+    # Polls 3-4: topics still present, idempotent.
+    for _ in range(2):
+        d = state.evaluate(
+            config=config, visible={"/a/aud", "/a/ehz"}, active=active
+        )
+        assert d.to_spawn == set()
+        assert d.to_teardown == set()
+
+    # Polls 5-7: topics vanish, grace counts down.
+    for i in range(3):
+        d = state.evaluate(config=config, visible=set(), active=active)
+        if i < 2:
+            assert d.to_teardown == set()
+        else:
+            assert d.to_teardown == {"shake-001"}

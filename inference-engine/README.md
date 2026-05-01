@@ -11,19 +11,21 @@ ROS2 Network (Raspberry Shake sensors)
         │
         ▼
   Discovery Node  ──── k8s API ────► Ingestor Pod (per sensor array)
-                                            │ NATS: sensor.data
+                                            │ JetStream: sensor.data
                                             ▼
                                      Infer Detect Node
                                       │            │
                               detected=false    detected=true
-                                      │            │ NATS: detection.result
+                                      │            │ JetStream: detection.result
                                       │            ▼
                                       │      Infer Classify Node
-                                      │            │ NATS: classification.result
+                                      │            │ JetStream: classification.result
                                       │            │
-                                      └──────┬─────┘
-                                             ▼
+                                      ▼            ▼
                                         Egress Node
+                                  (negatives via detection.result;
+                                   positives via classification.result;
+                                   one ROS2 publish per window)
                                              │ ROS2: /inference_result
                                              ▼
                                      InferenceResult msg
@@ -35,7 +37,18 @@ ROS2 Network (Raspberry Shake sensors)
 
 ### Discovery (`src/discovery/`)
 
-Watches the ROS2 network for active `RawSensorReading` topics. Groups topics by sensor array prefix and dynamically spawns or tears down Ingestor deployments via the k8s API.
+Reads an operator-curated **expected-sensors ConfigMap** mounted at
+`/etc/inference-engine/expected-sensors.yaml`, polls the ROS2 graph every
+5 s, and spawns an Ingestor Deployment for each configured array whose
+required topics are all visible. Tears down an Ingestor when its array is
+removed from the ConfigMap or any of its required topics goes missing for
+3 consecutive polls (~15 s). Topics not listed in the ConfigMap are ignored.
+
+The ConfigMap entry for one array names the audio and seismic topics
+explicitly; an optional `accel` block names the x/y/z accelerometer topics.
+Discovery passes those role bindings into each Ingestor via the
+`SENSOR_ROLE_MAP` env var, so role assignment is configuration, not a topic-
+naming convention.
 
 **Environment variables:**
 
@@ -43,12 +56,43 @@ Watches the ROS2 network for active `RawSensorReading` topics. Groups topics by 
 |----------|---------|-------------|
 | `NAMESPACE` | `default` | k8s namespace to manage deployments in |
 | `TEMPLATE_PATH` | `/app/ingestor-template.yaml` | Path to the Ingestor Deployment template |
+| `CONFIG_PATH` | `/etc/inference-engine/expected-sensors.yaml` | Mounted ConfigMap with the expected-pairs whitelist |
+
+**Expected-sensors ConfigMap format** (see `k8s/expected-sensors.yaml`):
+
+```yaml
+arrays:
+  shake-001:                     # array id: lowercase RFC 1123 subdomain
+    audio: /shake_001/aud        # topic strings keep firmware naming
+    seismic: /shake_001/ehz
+    accel:                       # optional; if present, x/y/z all required
+      x: /shake_001/ene
+      y: /shake_001/enn
+      z: /shake_001/enz
+  shake-002:
+    audio: /shake_002/aud
+    seismic: /shake_002/ehz
+```
+
+Array IDs (the YAML keys) become Kubernetes Deployment names
+(`ingestor-<array_id>`) and must therefore be **RFC 1123 subdomains**:
+lowercase letters, digits, hyphens; start with a letter; end alphanumeric;
+no underscores; ≤54 characters. Topic *values* can contain whatever ROS2
+allows — they reflect the firmware's published topic names.
+
+Edits to the ConfigMap propagate via kubelet sync (~60 s) and are picked up
+on the next 5 s poll without restarting Discovery.
 
 ---
 
 ### Ingestor (`src/ingestor/`)
 
-Subscribes to all ROS2 topics for a single sensor array. Buffers 1-second windows of sensor data, normalizes to `[-1, 1]` using ADC full-scale, and publishes `SensorData` protobufs to NATS.
+Subscribes to one ROS2 topic per role configured by Discovery. Each
+subscription's callback is bound at construction time to its buffer role
+(`acoustic`, `seismic`, `accel_x|y|z`), so the Ingestor no longer parses
+`msg.sensor_id` to recover the role. Buffers 1-second windows, normalizes
+to `[-1, 1]` using ADC full-scale, and publishes `SensorData` protobufs
+to NATS.
 
 **ADC normalization:**
 
@@ -63,17 +107,11 @@ Subscribes to all ROS2 topics for a single sensor array. Buffers 1-second window
 |----------|-------------|
 | `NATS_URL` | NATS server address (e.g. `nats://nats-service:4222`) |
 | `SENSOR_ARRAY` | Sensor array identifier (e.g. `shake_001`) |
-| `SENSOR_TOPICS` | Comma-separated list of ROS2 topics to subscribe to |
+| `SENSOR_ROLE_MAP` | JSON object `{role: topic}` injected by Discovery, e.g. `{"acoustic":"/shake_001/aud","seismic":"/shake_001/ehz"}` |
 
-**Channel codes:**
-
-| ROS2 code | Buffer channel |
-|-----------|---------------|
-| `aud` | acoustic |
-| `ehz` | seismic |
-| `ene` | accel_x |
-| `enn` | accel_y |
-| `enz` | accel_z |
+**Buffer roles:** `acoustic`, `seismic`, `accel_x`, `accel_y`, `accel_z`.
+`acoustic` and `seismic` are required; the three `accel_*` roles must
+appear together or not at all.
 
 ---
 
@@ -91,14 +129,18 @@ Subscribes to `detection.result` NATS subject. Runs the vehicle classification m
 
 ### Egress (`src/egress/`)
 
-Subscribes to `detection.result` and `classification.result` NATS subjects. Publishes `InferenceResult` ROS2 messages to `/inference_result`. Publishes immediately on detection (if positive) and again on classification.
+Subscribes to JetStream's `detection.result` and `classification.result`
+streams (queue group `egress`) and publishes `InferenceResult` ROS2
+messages on `/inference_result`. **One message per inference window:**
+positives flow through the classifier and arrive on `classification.result`;
+negatives surface directly from `detection.result`. The earlier double-
+publish behavior is gone.
 
 **Environment variables:**
 
 | Variable | Description |
 |----------|-------------|
 | `NATS_URL` | NATS server address |
-| `SENSOR_ARRAY` | Sensor array identifier |
 
 ---
 
@@ -137,7 +179,7 @@ poetry run python scripts/compile_protos.py
 
 ## Testing
 
-**Test Suite Status: ✅ 97/97 tests passing (100% complete)**
+**Test Suite Status: ✅ 125/125 tests passing (100% complete)**
 
 The inference engine has comprehensive test coverage across all nodes:
 
@@ -150,8 +192,8 @@ pytest tests/test_discovery.py tests/test_ingestor.py tests/test_egress.py \
        tests/test_infer_detect.py tests/test_infer_classify.py -v
 
 # Run by node
-pytest tests/test_discovery.py -v       # 13 tests (Discovery)
-pytest tests/test_ingestor.py -v        # 17 tests (Ingestor)
+pytest tests/test_discovery.py -v       # 37 tests (Discovery)
+pytest tests/test_ingestor.py -v        # 21 tests (Ingestor)
 pytest tests/test_egress.py -v          # 21 tests (Egress)
 pytest tests/test_infer_detect.py -v    # 23 tests (Vehicle Detection)
 pytest tests/test_infer_classify.py -v  # 23 tests (Vehicle Classification)
@@ -163,8 +205,8 @@ pytest -m asyncio -v      # Async tests only
 ```
 
 **Test Coverage:**
-- **Discovery Node** (13 tests): Topic discovery, K8s orchestration, configuration, error handling
-- **Ingestor Node** (17 tests): Channel mapping, ROS2 subscriptions, buffer integration, NATS publishing, ADC normalization
+- **Discovery Node** (37 tests): ConfigMap parsing, completeness checks, PollState grace logic, manifest construction
+- **Ingestor Node** (21 tests): SENSOR_ROLE_MAP parsing, role-bound callbacks, subscription wiring, ADC normalization
 - **Egress Node** (21 tests): Protobuf conversion, NATS subscriptions, ROS2 publishing, edge cases
 - **Infer Detect Node** (23 tests): Model loading (CUDA/MPS/CPU), binary detection, tensor preprocessing, NATS integration
 - **Infer Classify Node** (23 tests): Multi-class classification, Mel spectrograms, CLASS_MAP, confidence scoring
@@ -176,7 +218,10 @@ See [tests/README.md](tests/README.md) for detailed test documentation.
 
 ## Build and Deploy
 
-**Prerequisites:** Docker, kubectl configured against your cluster.
+**Prerequisites:** Docker, kubectl, helm, and a multicast-capable Linux
+Kubernetes cluster (kind on Linux, or any cluster with Calico/Cilium).
+KEDA (kedacore/keda) must be installed in the cluster — it autoscales the
+inference + egress pods on JetStream backlog depth.
 
 ```bash
 # 1. Compile protobufs
@@ -185,20 +230,121 @@ poetry run python scripts/compile_protos.py
 # 2. Build and push containers
 bash scripts/build_containers.sh
 
-# 3. Deploy NATS
-kubectl apply -f k8s/nats/
+# 3. Deploy NATS (with JetStream) and create the streams
+kubectl apply -f k8s/nats/nats-deployment.yaml
+kubectl apply -f k8s/nats/nats-service.yaml
+kubectl apply -f k8s/nats/jetstream-streams.yaml
 
-# 4. Deploy RBAC and Discovery
+# 4. Deploy expected-sensors ConfigMap, RBAC, and Discovery
+kubectl apply -f k8s/expected-sensors.yaml
 kubectl apply -f k8s/rbac/
 kubectl apply -f k8s/discovery.yaml
 
-# 5. Deploy inference and egress nodes
+# 5. Deploy inference + egress and their KEDA ScaledObjects
 kubectl apply -f k8s/infer-detect.yaml
 kubectl apply -f k8s/infer-classify.yaml
 kubectl apply -f k8s/egress.yaml
+kubectl apply -f k8s/keda/
 ```
 
-Ingestor pods are spawned automatically by the Discovery node when sensor arrays appear on the ROS2 network.
+Ingestor pods are spawned automatically by the Discovery node once an array
+listed in `expected-sensors.yaml` has all of its required topics visible
+on the ROS2 graph. infer-detect / infer-classify / egress are static
+Deployments whose replica counts are owned by KEDA — `min=1, max=3`,
+triggered by JetStream consumer pending count.
+
+### NATS JetStream streams
+
+The pipeline uses three streams, each retaining one minute of messages
+(real-time data, no replay value beyond a brief crash recovery window):
+
+| Stream                  | Subject                  | Producer       | Consumer (durable, queue) |
+|-------------------------|--------------------------|----------------|---------------------------|
+| `SENSOR_DATA`           | `sensor.data`            | Ingestor       | `infer-detect`            |
+| `DETECTION_RESULT`      | `detection.result`       | Infer Detect   | `infer-classify`, `egress-detection` |
+| `CLASSIFICATION_RESULT` | `classification.result`  | Infer Classify | `egress-classification`   |
+
+Queue groups distribute messages across replicas of the same consumer,
+so scaling infer-detect from 1 to 3 splits work three ways instead of
+delivering each window three times.
+
+---
+
+## Local smoke test (Linux kind)
+
+A scripted end-to-end verification on a single-node kind cluster, with
+KEDA + JetStream + the full inference pipeline. The fake publisher inside
+the cluster drives the ROS2 graph so no real Raspberry Shake hardware is
+required.
+
+**Prerequisites** (one-time):
+```bash
+# Linux. Docker, kubectl, kind, and helm must be on PATH.
+sudo apt install docker.io kubectl
+go install sigs.k8s.io/kind@latest          # or your distro's package
+curl -L https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+```
+
+**Run the smoke test:**
+```bash
+cd inference-engine
+scripts/local_smoke.sh
+```
+
+The script creates a kind cluster named `dark-circle` (with kindnet
+disabled and Calico installed for multicast-capable pod networking),
+installs KEDA, builds the six images, applies all manifests, and prints
+the next steps for inspecting JetStream consumers and the ROS2 output.
+
+**Tear down** the cluster:
+```bash
+scripts/local_smoke.sh --teardown
+```
+
+The fake publisher emits `/shake_001/aud` and `/shake_001/ehz` (and the
+optional accel topics) at 10 Hz with synthetic samples — enough for
+Discovery to recognize the array as complete and for the Ingestor to fill
+its buffer.
+
+### macOS+kind: DDS multicast workaround
+
+The kind node's loopback interface on macOS Docker Desktop does not
+advertise the `IFF_MULTICAST` flag. FastDDS (ROS 2 Jazzy's default RMW)
+uses multicast for participant discovery, so on macOS+kind multiple pods
+on the host network collide and DDS data stalls.
+
+If you need to run the smoke test locally on a Mac:
+
+1. Re-add `hostNetwork: true` and `dnsPolicy: ClusterFirstWithHostNet` to
+   `k8s/discovery.yaml`, `k8s/ingestor-template.yaml`, `k8s/egress.yaml`,
+   and `k8s/fake-publisher.yaml`. The manifests document this in their
+   leading comments.
+2. **Or** replace FastDDS multicast discovery with explicit unicast
+   peers via a `FASTRTPS_DEFAULT_PROFILES_FILE` XML profile mounted into
+   every pod.
+
+Neither workaround is needed on Linux clusters with a multicast-capable
+CNI (Calico, Cilium, Flannel with multicast). The CRL pipeline code is
+unchanged either way — only the deployment YAML differs.
+
+### CRL inference deployment
+
+The smoke test deploys the CRL pipeline (frontend + presence head in
+`infer-detect`, type head in `infer-classify`) using the multiscale fused
+run by default. To swap CRL runs:
+
+```bash
+# Re-export and rebuild for a different saved run
+CRL_RUN_DIR=crl-train/saved_crl/runs/morlet_per_sensor/vae/phase_v1 \
+    CRL_FORCE_EXPORT=1 \
+    scripts/build_containers.sh infer-detect infer-classify
+kubectl rollout restart deploy/infer-detect deploy/infer-classify -n default
+```
+
+The wire protocol (`DetectionResult.z_fused` vs `z_audio + z_seismic`)
+and the inference pods auto-detect mode from `meta.json` baked into the
+image. Per-sensor mode combines the two presence heads via OR; the type
+heads are averaged before argmax.
 
 ---
 

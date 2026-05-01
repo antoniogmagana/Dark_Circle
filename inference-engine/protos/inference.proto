@@ -26,6 +26,13 @@ message DetectionResult {
     SensorData sensor_data = 1;
     bool vehicle_detected = 2;
     float confidence = 3;
+    // Latent vector(s) emitted by the CRL encoder. Only one of (z_fused) or
+    // (z_audio + z_seismic) is populated, depending on the deployed model's
+    // mode. The classifier reads whichever one is present and applies its
+    // type head(s) without recomputing the encoder.
+    repeated float z_fused = 4;
+    repeated float z_audio = 5;
+    repeated float z_seismic = 6;
 }
 
 // Sent from Classifier and Detector to Egress node

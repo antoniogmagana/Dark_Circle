@@ -1,0 +1,66 @@
+# JetStream streams init Job.
+#
+# Creates the three streams the inference pipeline needs. Idempotent: if the
+# streams already exist, ``nats stream add`` returns non-zero but we let the
+# Job succeed by treating "already in use" as a no-op. max_age=60s because
+# everything downstream is real-time; we don't want stale windows replayed
+# after a long crash.
+#
+# Subjects:
+#   sensor.data            (Ingestor -> infer-detect)
+#   detection.result       (infer-detect -> infer-classify, egress)
+#   classification.result  (infer-classify -> egress)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jetstream-init
+  labels:
+    app: nats
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: nats
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: jetstream-init
+          image: natsio/nats-box:0.14.5
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              SERVER=nats://nats-service:4222
+              echo "Waiting for NATS at $SERVER ..."
+              for i in $(seq 1 60); do
+                if nats --server="$SERVER" account info >/dev/null 2>&1; then
+                  break
+                fi
+                sleep 1
+              done
+              ensure_stream() {
+                local name=$1
+                local subject=$2
+                if nats --server="$SERVER" stream info "$name" >/dev/null 2>&1; then
+                  echo "stream $name already present"
+                  return
+                fi
+                nats --server="$SERVER" stream add "$name" \
+                  --subjects "$subject" \
+                  --storage file \
+                  --retention limits \
+                  --max-age 60s \
+                  --max-msgs=-1 \
+                  --max-bytes=-1 \
+                  --max-msg-size=-1 \
+                  --discard old \
+                  --dupe-window 2s \
+                  --replicas 1 \
+                  --defaults
+              }
+              ensure_stream SENSOR_DATA "sensor.data"
+              ensure_stream DETECTION_RESULT "detection.result"
+              ensure_stream CLASSIFICATION_RESULT "classification.result"
+              echo "JetStream streams ready."

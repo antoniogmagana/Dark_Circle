@@ -1,0 +1,13 @@
+# kind cluster config for the local smoke test.
+#
+# kindnet (kind's default CNI) does not forward multicast across pods, which
+# breaks ROS2 / DDS participant discovery between Discovery and Ingestor.
+# We disable kindnet and the default kube-proxy and let local_smoke.sh
+# install Calico, which carries multicast over its overlay.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  disableDefaultCNI: true
+  kubeProxyMode: "none"
+nodes:
+  - role: control-plane

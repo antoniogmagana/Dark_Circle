@@ -1,7 +1,13 @@
 # Egress Node
-# Subscribes to NATS detection.result and classification.result,
-# bridges results back to ROS2 on /inference_result.
-# One instance per sensor array (SENSOR_ARRAY names the ROS2 node).
+# Subscribes to NATS detection.result + classification.result via JetStream
+# durable consumers (queue group "egress"), bridges results back to ROS2 on
+# /inference_result. One ROS2 message per inference window: classifier owns
+# positives, detection node's negatives surface here. Replica count is
+# managed by the matching KEDA ScaledObject in k8s/keda/.
+#
+# hostNetwork is intentionally absent. On macOS+kind users may need to
+# re-add ``hostNetwork: true`` + ``dnsPolicy: ClusterFirstWithHostNet`` for
+# DDS multicast to reach the publishers — see README §DDS.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +15,6 @@ metadata:
   labels:
     app: egress
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: egress
@@ -20,9 +25,10 @@ spec:
     spec:
       containers:
         - name: egress
-          image: your-registry/egress:latest   # update with your registry
+          image: inference-engine/egress:dev
+          imagePullPolicy: IfNotPresent
           env:
+            - name: ROS_DOMAIN_ID
+              value: "0"
             - name: NATS_URL
               value: "nats://nats-service:4222"
-            - name: SENSOR_ARRAY
-              value: "default"                  # update with your sensor array ID

@@ -15,17 +15,6 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Build context is the inference-engine root.
-# Use the CPU-only torch wheel so the image stays under a few GB.
-RUN pip3 install --break-system-packages \
-        --extra-index-url https://download.pytorch.org/whl/cpu \
-        nats-py \
-        numpy \
-        torch \
-        torchaudio
-
-# Shared proto package
-COPY inference-protos /inference-protos
-RUN pip3 install --break-system-packages /inference-protos
 
 # Build the ros2_interfaces package so RawSensorReading is importable.
 COPY ros2_interfaces /ros2_ws/src/ros2_interfaces
@@ -33,10 +22,8 @@ RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash \
     && cd /ros2_ws \
     && colcon build --packages-select ros2_interfaces"
 
-# Source for the ingestor node
-COPY src/ingestor/buffer.py .
-COPY src/ingestor/dispatch.py .
-COPY src/ingestor/main.py .
+# Source for the fake publisher
+COPY src/fake_publisher/main.py .
 
 ENV PYTHONUNBUFFERED=1
 CMD ["/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && python3 main.py"]

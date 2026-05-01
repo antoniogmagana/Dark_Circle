@@ -464,22 +464,42 @@ class TestEdgeCases:
         assert result2 is not None  # Should return payload
     
     @pytest.mark.unit
-    def test_data_far_future(self, sensor_id, base_timestamp):
-        """Test data arriving well after current window."""
+    def test_data_far_future_packages_active_window(self, sensor_id, base_timestamp):
+        """A >1s gap with samples already in the current window packages it
+        once, then restarts on the new timestamp without emitting phantom
+        zero-windows for the silent seconds in between.
+
+        Call signature matches the production caller in
+        ``ingestor.dispatch.make_role_callback``:
+        ``load_buffer(channel, timestamp, data)``.
+        """
         buffer = SensorBuffer(sensor_id)
-        
-        buffer.load_buffer('acoustic', np.zeros(100), base_timestamp)
-        
-        # Load data 2 seconds in future (should trigger packaging of first window)
-        result = buffer.load_buffer('acoustic', np.zeros(100), base_timestamp + 2.0)
-        
+
+        buffer.load_buffer('acoustic', base_timestamp, np.zeros(100))
+
+        # 2-second gap. First call packages the active window (samples are
+        # in it) and re-enters; the re-entry hits the stream-restart guard
+        # because the buffers were just reset and the new timestamp is far
+        # ahead, so start_time snaps to the new timestamp.
+        result = buffer.load_buffer('acoustic', base_timestamp + 2.0, np.zeros(100))
+
         assert result is not None
-        # After packaging and reset, start_time advances by window duration
-        # Since time_diff was 2.0 >= 1.0, it packaged window [0, 1) at start_time=0
-        # Then reset to start_time=1.0, and recursively loaded
-        # At start_time=1.0, time_diff=1.0 >= window (1.0), so it packaged again [1, 2)
-        # Then reset to start_time=2.0 and loaded the data at t=2.0 into new buffer
-        assert buffer.start_time == 2.0
+        assert buffer.start_time == base_timestamp + 2.0
+
+    @pytest.mark.unit
+    def test_data_far_future_after_silence_does_not_phantom_publish(
+        self, sensor_id, base_timestamp,
+    ):
+        """If the buffer is fresh (no samples loaded yet), a far-future
+        timestamp must not emit a payload — there is nothing to publish."""
+        buffer = SensorBuffer(sensor_id)
+        buffer.start_time = base_timestamp  # simulate prior reset, no data
+
+        result = buffer.load_buffer('acoustic', base_timestamp + 5.0, np.zeros(100))
+
+        assert result is None
+        assert buffer.start_time == base_timestamp + 5.0
+        assert 'acoustic' in buffer.active_channels
     
     @pytest.mark.unit
     def test_single_sample(self, sensor_id, base_timestamp):

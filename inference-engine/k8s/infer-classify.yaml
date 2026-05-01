@@ -1,11 +1,11 @@
 # Inference — Classification Node
-# Subscribes to NATS detection.result, runs ClassificationCNN (Mel input),
-# publishes EgressPayload to NATS classification.result.
-# Only processes windows where vehicle_detected == True.
+# Subscribes to JetStream detection.result via the ``infer-classify``
+# durable consumer (queue group), runs the type head only on positives,
+# publishes EgressPayload to classification.result. Replica count is
+# owned by k8s/keda/scaledobject-infer-classify.yaml.
 #
-# Model artifacts (best_model.pth, meta.pt, hyperparameters.json) must be
-# written to the PVC before the pod starts. Populate from:
-#   model-train/saved_models/category/ClassificationCNN/<RUN_ID>/
+# Model artifacts are baked into the image during ``docker build`` from
+# build/crl-export/, same bundle as infer-detect.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,7 +13,6 @@ metadata:
   labels:
     app: infer-classify
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: infer-classify
@@ -24,29 +23,10 @@ spec:
     spec:
       containers:
         - name: infer-classify
-          image: your-registry/infer-classify:latest   # update with your registry
+          image: inference-engine/infer-classify:dev
+          imagePullPolicy: IfNotPresent
           env:
             - name: NATS_URL
               value: "nats://nats-service:4222"
             - name: MODEL_DIR
               value: "/app/model"
-          volumeMounts:
-            - name: model
-              mountPath: /app/model
-              readOnly: true
-      volumes:
-        - name: model
-          persistentVolumeClaim:
-            claimName: infer-classify-model-pvc
----
-# PVC for classification model artifacts.
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: infer-classify-model-pvc
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 500Mi

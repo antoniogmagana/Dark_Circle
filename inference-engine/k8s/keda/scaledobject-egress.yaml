@@ -1,0 +1,31 @@
+# KEDA scales egress on the larger of its two consumer backlogs.
+# detection.result carries one message per inference window (every array,
+# every second), so it dominates under load.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: egress
+  labels:
+    app: egress
+spec:
+  scaleTargetRef:
+    name: egress
+  minReplicaCount: 1
+  maxReplicaCount: 3
+  pollingInterval: 10
+  cooldownPeriod: 60
+  triggers:
+    - type: nats-jetstream
+      metadata:
+        natsServerMonitoringEndpoint: "nats-service.default.svc.cluster.local:8222"
+        account: "$G"
+        stream: "DETECTION_RESULT"
+        consumer: "egress-detection"
+        lagThreshold: "100"
+    - type: nats-jetstream
+      metadata:
+        natsServerMonitoringEndpoint: "nats-service.default.svc.cluster.local:8222"
+        account: "$G"
+        stream: "CLASSIFICATION_RESULT"
+        consumer: "egress-classification"
+        lagThreshold: "100"
