@@ -24,6 +24,15 @@ data:
   # by ros:jazzy if the customer prefers Cyclone.
   RMW_IMPLEMENTATION: "rmw_fastrtps_cpp"
 
+  # In kind-based smoke tests every DDS pod runs hostNetwork: true so they
+  # share the same IP. FastDDS then prefers shared-memory transport — but
+  # /dev/shm is per-pod (mount namespace ≠ net namespace), so the writer's
+  # /dev/shm and the reader's /dev/shm are different files and data is
+  # silently dropped. Forcing UDPv4 disables the SHM path. Customers
+  # running on multiple physical hosts can clear this (DDS will pick UDP
+  # automatically when hosts differ) but leaving it set is safe everywhere.
+  FASTDDS_BUILTIN_TRANSPORTS: "UDPv4"
+
   # ROS2 topic on which egress publishes InferenceResult messages. The
   # customer's downstream consumers subscribe to this.
   INFERENCE_RESULT_TOPIC: "/inference_result"
@@ -49,8 +58,29 @@ data:
   fastdds.xml: |
     <?xml version="1.0" encoding="UTF-8"?>
     <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+      <!--
+        Pure-unicast FastDDS profile.
+
+        - metatrafficUnicastLocatorList + initialPeersList: participant
+          discovery (PDP/EDP) — how participants find each other and
+          exchange topic metadata.
+        - defaultUnicastLocatorList: user data traffic — without this,
+          FastDDS falls back to multicast for actual messages even though
+          discovery is unicast.
+
+        All three point at 172.18.0.2 because every DDS-speaking pod uses
+        hostNetwork on the kind control-plane. Customers replace this with
+        the real Raspberry Shake gateway IP and the k8s node hosting egress.
+      -->
       <participant profile_name="unicast_participant" is_default_profile="true">
         <rtps>
+          <defaultUnicastLocatorList>
+            <locator>
+              <udpv4>
+                <address>172.18.0.2</address>
+              </udpv4>
+            </locator>
+          </defaultUnicastLocatorList>
           <builtin>
             <discovery_config>
               <discoveryProtocol>SIMPLE</discoveryProtocol>
@@ -69,6 +99,7 @@ data:
                 </udpv4>
               </locator>
             </initialPeersList>
+            <avoid_builtin_multicast>true</avoid_builtin_multicast>
           </builtin>
         </rtps>
       </participant>
