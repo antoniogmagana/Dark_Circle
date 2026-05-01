@@ -218,40 +218,71 @@ See [tests/README.md](tests/README.md) for detailed test documentation.
 
 ## Build and Deploy
 
-**Prerequisites:** Docker, kubectl, helm, and a multicast-capable Linux
-Kubernetes cluster (kind on Linux, or any cluster with Calico/Cilium).
-KEDA (kedacore/keda) must be installed in the cluster — it autoscales the
-inference + egress pods on JetStream backlog depth.
+**Prerequisites:** Docker, kubectl, and a Kubernetes cluster.
+KEDA is *optional* (off by default); enable it only if you need to
+autoscale the inference + egress pods on JetStream backlog depth.
+
+Two deployment paths are supported:
+
+- **Helm chart** (`chart/`) — the customer-facing path. Single
+  `helm install`, parameterized via `values.yaml`. See
+  [`chart/README.md`](chart/README.md) for full documentation.
+- **Raw manifests** (`k8s/`) — used by `scripts/local_smoke.sh` for
+  development. Each manifest can be `kubectl apply`'d individually.
+
+### Helm install (recommended)
 
 ```bash
 # 1. Compile protobufs
 poetry run python scripts/compile_protos.py
 
-# 2. Build and push containers
+# 2. Build, tag, and push containers to your registry
+REGISTRY=registry.example.com/dark-circle TAG=v0.1.0 PUSH=1 \
+    scripts/build_containers.sh
+
+# 3. Configure values for your site
+cp chart/values.yaml my-site-values.yaml
+# Edit images.registry, images.tag, expectedSensors at minimum.
+
+# 4. Install
+helm install dark-circle ./chart -f my-site-values.yaml
+```
+
+Ingestor pods are spawned automatically by the Discovery node once an
+array listed in `expectedSensors` has all of its required topics visible
+on the ROS2 graph. infer-detect / infer-classify / egress run with fixed
+`replicas: 1` by default; set `keda.enabled: true` in values.yaml for
+backlog-driven autoscaling.
+
+### Raw manifest install (development)
+
+```bash
+# 1. Compile protobufs
+poetry run python scripts/compile_protos.py
+
+# 2. Build containers (loads into the dark-circle kind cluster if present)
 bash scripts/build_containers.sh
 
-# 3. Deploy NATS (with JetStream) and create the streams
+# 3. Deploy NATS + streams + consumers
 kubectl apply -f k8s/nats/nats-deployment.yaml
 kubectl apply -f k8s/nats/nats-service.yaml
 kubectl apply -f k8s/nats/jetstream-streams.yaml
 
-# 4. Deploy expected-sensors ConfigMap, RBAC, and Discovery
+# 4. Deploy ConfigMaps, RBAC, Discovery
+kubectl apply -f k8s/inference-engine-config.yaml
+kubectl apply -f k8s/sensor-config.yaml
 kubectl apply -f k8s/expected-sensors.yaml
 kubectl apply -f k8s/rbac/
 kubectl apply -f k8s/discovery.yaml
 
-# 5. Deploy inference + egress and their KEDA ScaledObjects
+# 5. Deploy inference + egress
 kubectl apply -f k8s/infer-detect.yaml
 kubectl apply -f k8s/infer-classify.yaml
 kubectl apply -f k8s/egress.yaml
+
+# 6. Optional: KEDA autoscaling (requires KEDA pre-installed)
 kubectl apply -f k8s/keda/
 ```
-
-Ingestor pods are spawned automatically by the Discovery node once an array
-listed in `expected-sensors.yaml` has all of its required topics visible
-on the ROS2 graph. infer-detect / infer-classify / egress are static
-Deployments whose replica counts are owned by KEDA — `min=1, max=3`,
-triggered by JetStream consumer pending count.
 
 ### NATS JetStream streams
 

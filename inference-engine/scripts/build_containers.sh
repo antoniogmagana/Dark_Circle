@@ -1,19 +1,36 @@
 #!/usr/bin/env bash
-# Build local container images and load them into a kind cluster.
+# Build container images and (optionally) load them into a kind cluster
+# or push them to a registry.
 #
 # Build context is the inference-engine root for every image so that
 # Dockerfiles can COPY src/<node>/, k8s/, ros2_interfaces/, and
 # inference-protos/ without escaping the context.
 #
 # Usage:
-#   scripts/build_containers.sh                  # discovery, ingestor, fake-publisher
-#   scripts/build_containers.sh discovery        # subset
+#   # Build all images, default registry+tag (inference-engine/*:dev),
+#   # auto-load into the dark-circle kind cluster if it exists.
+#   scripts/build_containers.sh
+#
+#   # Subset
+#   scripts/build_containers.sh discovery egress
+#
+#   # Build for a specific kind cluster
 #   KIND_CLUSTER=mycluster scripts/build_containers.sh
 #
-# Skips `kind load` if `kind` is not on PATH or no cluster exists, so the
-# script is also useful for plain docker builds against a remote registry
-# (set REGISTRY=foo to tag images as foo/<name>:dev instead of the default
-# inference-engine/<name>:dev — push is up to you).
+#   # Build, tag, and push to a remote registry (Helm-chart workflow)
+#   REGISTRY=registry.example.com/dark-circle TAG=v0.1.0 PUSH=1 \
+#       scripts/build_containers.sh
+#
+#   # Build only, skip both kind load and push (CI / customer hand-off)
+#   REGISTRY=registry.example.com/dark-circle TAG=v0.1.0 \
+#       scripts/build_containers.sh
+#
+# Behavior:
+#   - kind load: auto-runs when ``kind`` is on PATH AND the cluster
+#     ``$KIND_CLUSTER`` (default ``dark-circle``) exists. Skipped silently
+#     otherwise — useful for build-only and customer-registry workflows.
+#   - docker push: only runs when ``PUSH=1`` is set. Caller is responsible
+#     for ``docker login`` against the target registry beforehand.
 set -eo pipefail
 
 REGISTRY="${REGISTRY:-inference-engine}"
@@ -115,4 +132,12 @@ if command -v kind >/dev/null 2>&1; then
     fi
 else
     echo "kind not on PATH; skipping kind load" >&2
+fi
+
+if [ "${PUSH:-}" = "1" ]; then
+    for name in $TARGETS; do
+        image="${REGISTRY}/${name}:${TAG}"
+        echo "=== pushing $image ==="
+        docker push "$image"
+    done
 fi

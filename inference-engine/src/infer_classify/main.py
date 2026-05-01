@@ -138,14 +138,17 @@ async def main_async():
     nc = await nats.connect(os.environ["NATS_URL"])
     node = InferClassifyNode(nc, heads, meta, device)
     js = nc.jetstream()
-    await js.subscribe(
-        "detection.result",
-        queue="infer-classify",
-        durable="infer-classify",
+    # Bind to the pre-created ``infer-classify`` durable consumer
+    # (jetstream-init Job sets it up with deliver_group="infer-classify").
+    info = await js.consumer_info("DETECTION_RESULT", "infer-classify")
+    await js.subscribe_bind(
+        stream="DETECTION_RESULT",
+        consumer="infer-classify",
+        config=info.config,
         cb=node.on_detection_result,
         manual_ack=False,
     )
-    print("[infer_classify] subscribed to detection.result (JetStream)", flush=True)
+    print("[infer_classify] bound to DETECTION_RESULT/infer-classify (JetStream)", flush=True)
 
     try:
         while True:

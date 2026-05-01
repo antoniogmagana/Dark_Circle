@@ -150,18 +150,20 @@ async def main_async():
 
     nc = await nats.connect(os.environ["NATS_URL"])
     js = nc.jetstream()
-    # Queue group + durable consumer means multiple replicas (under KEDA)
-    # split work, and a restarted pod resumes from its last delivered seq
-    # instead of replaying the whole stream.
+    # Bind to the pre-created ``infer-detect`` durable consumer
+    # (jetstream-init Job sets it up with deliver_group="infer-detect").
+    # Binding rather than auto-creating sidesteps nats-py's client-side
+    # ``queue != durable`` validation and KEDA scale-out config drift.
     node = InferDetectNode(nc, encoders, meta, device)
-    await js.subscribe(
-        "sensor.data",
-        queue="infer-detect",
-        durable="infer-detect",
+    info = await js.consumer_info("SENSOR_DATA", "infer-detect")
+    await js.subscribe_bind(
+        stream="SENSOR_DATA",
+        consumer="infer-detect",
+        config=info.config,
         cb=node.on_sensor_data,
         manual_ack=False,
     )
-    print("[infer_detect] subscribed to sensor.data (JetStream)", flush=True)
+    print("[infer_detect] bound to SENSOR_DATA/infer-detect (JetStream)", flush=True)
 
     try:
         while True:

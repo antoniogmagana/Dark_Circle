@@ -73,10 +73,11 @@ def main():
     node = EgressNode(output_topic)
 
     # Two durable push consumers, pre-created by jetstream-init with
-    # deliver_group="egress" so multiple egress replicas (KEDA) share work
-    # instead of each receiving every message. We bind rather than auto-
-    # create because nats-py's js.subscribe(queue=, durable=) shortcut
-    # forces queue == durable, which we can't satisfy with two streams.
+    # deliver_group="egress" so additional egress replicas share work via
+    # the queue group instead of each receiving every message. Binding
+    # rather than auto-creating sidesteps nats-py's client-side check
+    # that rejects ``queue=X, durable=Y`` when X != Y, which we can't
+    # satisfy here because we need one queue group across two streams.
     async def bind(stream: str, consumer: str, cb):
         info = await js.consumer_info(stream, consumer)
         return await js.subscribe_bind(

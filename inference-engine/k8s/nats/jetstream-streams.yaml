@@ -64,20 +64,24 @@ spec:
               ensure_stream DETECTION_RESULT "detection.result"
               ensure_stream CLASSIFICATION_RESULT "classification.result"
 
-              # Egress binds to (does not create) these consumers; nats-py
-              # rejects js.subscribe(queue=, durable=) when queue != durable,
-              # so we pre-create them here with deliver_group="egress".
-              ensure_egress_consumer() {
+              # Pipeline pods bind to (do not auto-create) these consumers.
+              # nats-py's js.subscribe auto-create path has a client-side
+              # check that rejects ``queue=X, durable=Y`` when X != Y, plus
+              # subtle config-drift behavior on KEDA scale-out. Pre-creating
+              # the consumers here with explicit config keeps every replica
+              # binding to the same well-defined consumer.
+              ensure_consumer() {
                 local stream=$1
                 local consumer=$2
                 local target=$3
+                local group=$4
                 if nats --server="$SERVER" consumer info "$stream" "$consumer" >/dev/null 2>&1; then
                   echo "consumer $stream/$consumer already present"
                   return
                 fi
                 nats --server="$SERVER" consumer add "$stream" "$consumer" \
                   --target="$target" \
-                  --deliver-group=egress \
+                  --deliver-group="$group" \
                   --deliver=all \
                   --replay=instant \
                   --filter='' \
@@ -89,6 +93,8 @@ spec:
                   --backoff=none \
                   --defaults
               }
-              ensure_egress_consumer DETECTION_RESULT egress-detection egress.detection.deliver
-              ensure_egress_consumer CLASSIFICATION_RESULT egress-classification egress.classification.deliver
-              echo "JetStream streams ready."
+              ensure_consumer SENSOR_DATA          infer-detect          infer.detect.deliver         infer-detect
+              ensure_consumer DETECTION_RESULT     infer-classify        infer.classify.deliver       infer-classify
+              ensure_consumer DETECTION_RESULT     egress-detection      egress.detection.deliver     egress
+              ensure_consumer CLASSIFICATION_RESULT egress-classification egress.classification.deliver egress
+              echo "JetStream streams and consumers ready."
