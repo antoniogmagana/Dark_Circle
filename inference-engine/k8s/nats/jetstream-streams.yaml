@@ -63,4 +63,32 @@ spec:
               ensure_stream SENSOR_DATA "sensor.data"
               ensure_stream DETECTION_RESULT "detection.result"
               ensure_stream CLASSIFICATION_RESULT "classification.result"
+
+              # Egress binds to (does not create) these consumers; nats-py
+              # rejects js.subscribe(queue=, durable=) when queue != durable,
+              # so we pre-create them here with deliver_group="egress".
+              ensure_egress_consumer() {
+                local stream=$1
+                local consumer=$2
+                local target=$3
+                if nats --server="$SERVER" consumer info "$stream" "$consumer" >/dev/null 2>&1; then
+                  echo "consumer $stream/$consumer already present"
+                  return
+                fi
+                nats --server="$SERVER" consumer add "$stream" "$consumer" \
+                  --target="$target" \
+                  --deliver-group=egress \
+                  --deliver=all \
+                  --replay=instant \
+                  --filter='' \
+                  --ack=explicit \
+                  --max-deliver=-1 \
+                  --wait=30s \
+                  --max-pending=0 \
+                  --no-headers-only \
+                  --backoff=none \
+                  --defaults
+              }
+              ensure_egress_consumer DETECTION_RESULT egress-detection egress.detection.deliver
+              ensure_egress_consumer CLASSIFICATION_RESULT egress-classification egress.classification.deliver
               echo "JetStream streams ready."

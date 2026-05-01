@@ -19,9 +19,6 @@ from inference_protos import inference_pb2
 from rclpy.node import Node
 from ros2_interfaces.msg import InferenceResult
 
-QUEUE_GROUP = "egress"
-
-
 class EgressNode(Node):
     def __init__(self):
         super().__init__("egressor")
@@ -69,26 +66,24 @@ def main():
 
     rclpy.init()
     node = EgressNode()
-    # Two durable consumers, one per stream. The queue group keeps multiple
-    # egress replicas (under KEDA) from publishing duplicate ROS2 messages.
-    loop.run_until_complete(
-        js.subscribe(
-            "detection.result",
-            queue=QUEUE_GROUP,
-            durable="egress-detection",
-            cb=node.on_detection,
+
+    # Two durable push consumers, pre-created by jetstream-init with
+    # deliver_group="egress" so multiple egress replicas (KEDA) share work
+    # instead of each receiving every message. We bind rather than auto-
+    # create because nats-py's js.subscribe(queue=, durable=) shortcut
+    # forces queue == durable, which we can't satisfy with two streams.
+    async def bind(stream: str, consumer: str, cb):
+        info = await js.consumer_info(stream, consumer)
+        return await js.subscribe_bind(
+            stream=stream,
+            consumer=consumer,
+            config=info.config,
+            cb=cb,
             manual_ack=False,
         )
-    )
-    loop.run_until_complete(
-        js.subscribe(
-            "classification.result",
-            queue=QUEUE_GROUP,
-            durable="egress-classification",
-            cb=node.on_classification,
-            manual_ack=False,
-        )
-    )
+
+    loop.run_until_complete(bind("DETECTION_RESULT", "egress-detection", node.on_detection))
+    loop.run_until_complete(bind("CLASSIFICATION_RESULT", "egress-classification", node.on_classification))
 
     thread = threading.Thread(target=loop.run_forever, daemon=True)
     thread.start()
