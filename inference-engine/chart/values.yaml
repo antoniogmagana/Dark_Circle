@@ -1,0 +1,248 @@
+# =============================================================================
+# inference-engine Helm chart values
+#
+# Every editable knob is documented inline. The chart README mirrors this
+# file as a reference table. Defaults are tuned for the Dark Circle smoke
+# test environment (kind cluster, hostNetwork, single fake-publisher) and
+# should be reviewed before a production install.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Container images
+#
+# The chart does NOT publish images on the customer's behalf. Build locally
+# from the source tree (scripts/build_containers.sh), tag for your registry,
+# push, then set ``images.registry`` and ``images.tag`` here.
+# -----------------------------------------------------------------------------
+images:
+  # Registry prefix applied to all six images: discovery, ingestor,
+  # infer-detect, infer-classify, egress, fake-publisher (the last is for
+  # smoke testing only and can be skipped in production builds).
+  # REQUIRED: replace with your registry hostname before installing.
+  registry: REPLACE_ME
+  # Image tag pushed alongside ``registry`` above. Use a versioned tag in
+  # production; ``latest`` is for development only.
+  tag: "latest"
+  # IfNotPresent is correct for pinned tags. Set to "Always" if you push
+  # new images under the same tag during development.
+  pullPolicy: IfNotPresent
+  # Optional list of imagePullSecrets to attach to every Deployment. Leave
+  # empty for public registries; populate when pulling from a private one.
+  # Example: [{name: my-registry-credentials}]
+  pullSecrets: []
+
+# -----------------------------------------------------------------------------
+# ROS2 / DDS configuration
+#
+# Customer-facing knobs. Most ROS2 networks need at least ``domainId`` and
+# ``outputTopic`` set; ``fastddsProfile`` is only relevant when multicast
+# is blocked on the customer's network.
+# -----------------------------------------------------------------------------
+ros2:
+  # ROS_DOMAIN_ID partitions DDS networks. Use a unique value per
+  # customer site to avoid crosstalk with other ROS2 systems on the same
+  # physical network. Default 0 matches ROS2's default.
+  domainId: 0
+
+  # RMW implementation. ``rmw_fastrtps_cpp`` (FastDDS) is ROS2 Jazzy's
+  # default and what this pipeline is tested with. Use
+  # ``rmw_cyclonedds_cpp`` if your environment standardizes on Cyclone
+  # (requires the cyclone DDS package in the container images).
+  rmwImplementation: rmw_fastrtps_cpp
+
+  # Output ROS2 topic on which egress publishes ``InferenceResult``
+  # messages. The customer's downstream consumers subscribe here. Keep
+  # the leading slash.
+  outputTopic: /inference_result
+
+  # Force-disables FastDDS shared-memory transport. Required when running
+  # multiple ROS2 pods on the same Kubernetes node with hostNetwork: true
+  # (their /dev/shm filesystems are NOT shared, so SHM messages get
+  # silently dropped). Safe to leave on in multi-host production
+  # deployments — DDS will use UDP automatically when participants are on
+  # different IPs. Set to empty string to let FastDDS pick its default.
+  fastddsBuiltinTransports: UDPv4
+
+  # Optional FastDDS XML profile. Populate when the customer's network
+  # blocks UDP multicast (most enterprise networks). The pipeline will
+  # set FASTRTPS_DEFAULT_PROFILES_FILE to point at a mounted ConfigMap
+  # containing this XML. Leave empty to use FastDDS's built-in defaults.
+  # See https://fast-dds.docs.eprosima.com/en/latest/fastdds/xml_configuration/xml_configuration.html
+  fastddsProfile: ""
+
+  # hostNetwork: true puts ROS2-speaking pods (discovery, ingestor,
+  # fake-publisher, egress) on the Kubernetes node's host network. This
+  # is required for kind-based smoke tests (see fastddsBuiltinTransports
+  # comment) and for production clusters whose CNI doesn't carry
+  # multicast (Calico-VXLAN, Flannel default). Set to false on
+  # multicast-capable CNIs (Calico IP-in-IP, Cilium, Flannel-with-mcast)
+  # to get pod-network isolation.
+  hostNetwork: true
+
+# -----------------------------------------------------------------------------
+# Sensor inventory
+#
+# The sensor whitelist is mounted at /etc/inference-engine/expected-sensors.yaml
+# and consumed by the Discovery node. Each top-level key (the array ID)
+# becomes a Kubernetes Deployment name (``ingestor-<array-id>``), so it
+# must be a valid RFC 1123 subdomain: lowercase alphanumeric + hyphens,
+# start with a letter, end alphanumeric, no underscores, ≤54 chars.
+#
+# Topic *values* are firmware-defined ROS2 topic strings; underscores OK.
+# The ``accel`` block is optional but if present must define x, y, AND z.
+# -----------------------------------------------------------------------------
+expectedSensors:
+  shake-001:
+    audio: /shake_001/aud
+    seismic: /shake_001/ehz
+    accel:
+      x: /shake_001/ene
+      y: /shake_001/enn
+      z: /shake_001/enz
+
+# -----------------------------------------------------------------------------
+# Sensor signal parameters
+#
+# Physical characteristics of the sensor hardware. The Ingestor uses these
+# to normalize ADC samples to [-1, 1] and to size its 1-second buffers.
+# Defaults match the Raspberry Shake RS4D + 16-bit USB microphone setup
+# the pipeline was developed against.
+# -----------------------------------------------------------------------------
+sensorConfig:
+  # Acoustic ADC bit depth (signed). 16 = standard USB / I2S microphones.
+  audioBitDepth: 16
+  # Seismic ADC bit depth. 24 = Raspberry Shake geophone.
+  seismicBitDepth: 24
+  # Accelerometer ADC bit depth. 24 = Raspberry Shake RS4D.
+  accelBitDepth: 24
+  # Acoustic sample rate in Hz. 16000 matches the CRL training data.
+  audioSampleRate: 16000
+  # Seismic sample rate in Hz. 100 matches Raspberry Shake EHZ channel.
+  seismicSampleRate: 100
+  # Accelerometer sample rate in Hz (per axis). 100 matches RS4D.
+  accelSampleRate: 100
+  # Target rate for upsampling in legacy CNN mode. Ignored when
+  # nativeRates: true (default), which ships each channel at its
+  # native rate to match the CRL pipeline's expectations.
+  targetRate: 16000
+  # When true, the Ingestor publishes each channel at its native sample
+  # rate (CRL pipeline). When false, all channels are resampled to
+  # ``targetRate`` (legacy WaveformClassificationCNN pipeline). Most
+  # customers should leave this true.
+  nativeRates: true
+
+# -----------------------------------------------------------------------------
+# Inference deployments — replica counts and scheduling
+# -----------------------------------------------------------------------------
+inference:
+  inferDetect:
+    # Number of detection-node replicas. With KEDA disabled (default)
+    # this is fixed; with keda.enabled: true KEDA scales between
+    # ``minReplicas`` and ``maxReplicas``.
+    replicas: 1
+    minReplicas: 1
+    maxReplicas: 3
+    # Resource limits per replica. Detection runs CPU-bound TorchScript;
+    # tune up if your sensor count is high.
+    resources:
+      requests: {cpu: "500m", memory: "512Mi"}
+      limits:   {cpu: "2",    memory: "2Gi"}
+
+  inferClassify:
+    replicas: 1
+    minReplicas: 1
+    maxReplicas: 3
+    resources:
+      requests: {cpu: "500m", memory: "512Mi"}
+      limits:   {cpu: "2",    memory: "2Gi"}
+
+  egress:
+    replicas: 1
+    minReplicas: 1
+    maxReplicas: 3
+    resources:
+      requests: {cpu: "100m", memory: "128Mi"}
+      limits:   {cpu: "500m", memory: "512Mi"}
+
+# -----------------------------------------------------------------------------
+# Discovery (sensor-array controller)
+#
+# Singleton — one Discovery pod watches the ROS2 graph and spawns/tears
+# down Ingestor Deployments per ``expectedSensors`` entry.
+# -----------------------------------------------------------------------------
+discovery:
+  resources:
+    requests: {cpu: "50m",  memory: "64Mi"}
+    limits:   {cpu: "200m", memory: "256Mi"}
+
+# -----------------------------------------------------------------------------
+# Ingestor template
+#
+# Discovery spawns one Ingestor Deployment per sensor array using the
+# template baked into its image. Resource requests below apply to every
+# spawned Ingestor.
+# -----------------------------------------------------------------------------
+ingestor:
+  resources:
+    requests: {cpu: "200m", memory: "256Mi"}
+    limits:   {cpu: "1",    memory: "1Gi"}
+
+# -----------------------------------------------------------------------------
+# NATS / JetStream
+#
+# Cluster-internal message bus. ``enabled: true`` deploys a NATS pod with
+# JetStream and creates the streams + egress consumers the pipeline needs.
+# Set ``enabled: false`` if you have an existing NATS cluster you'd
+# rather use; in that case set ``url`` to your cluster's address.
+# -----------------------------------------------------------------------------
+nats:
+  enabled: true
+  # Connection URL used by all pipeline pods. Leave at the default when
+  # ``enabled: true`` so internal components reach the bundled NATS via
+  # its Kubernetes Service. Override only when pointing at an external
+  # NATS cluster (and disable the bundled deployment to avoid duplicates).
+  url: nats://nats-service:4222
+  # NATS server image. Pinned to 2.10 because newer versions have
+  # changed JetStream consumer-creation semantics in subtle ways the
+  # pipeline hasn't been tested against.
+  image: nats:2.10
+  # JetStream storage. emptyDir is fine for the smoke test and
+  # short-lived data (max-age 60s on every stream). For production,
+  # switch to a PersistentVolumeClaim so a pod restart doesn't drop
+  # in-flight detection results.
+  storage:
+    type: emptyDir   # ``emptyDir`` or ``pvc``
+    pvcSize: 1Gi     # only used when type: pvc
+    pvcStorageClass: ""  # leave empty to use cluster default
+
+# -----------------------------------------------------------------------------
+# KEDA autoscaling
+#
+# OFF by default. Each inference replica handles all sensors via NATS
+# JetStream queue groups, so a small site (handful of sensor arrays) runs
+# fine on the configured ``replicas`` above. Enable KEDA when you have
+# many sensor arrays AND see backlog growing in JetStream.
+#
+# Requires KEDA installed cluster-wide (https://keda.sh/). The chart does
+# NOT install KEDA itself — it only emits ScaledObject resources when
+# enabled.
+# -----------------------------------------------------------------------------
+keda:
+  enabled: false
+  # JetStream consumer pending-message threshold per replica. KEDA scales
+  # up when pending exceeds this number per existing replica.
+  lagThreshold: 50
+  pollingInterval: 10
+  cooldownPeriod: 60
+
+# -----------------------------------------------------------------------------
+# Fake publisher (smoke test only)
+#
+# Synthesizes RawSensorReading messages on the configured topics so the
+# pipeline can be exercised end-to-end without real hardware. Disable in
+# any environment with real sensors.
+# -----------------------------------------------------------------------------
+fakePublisher:
+  enabled: false
+  topics: "/shake_001/aud,/shake_001/ehz,/shake_001/ene,/shake_001/enn,/shake_001/enz"
+  rateHz: 10

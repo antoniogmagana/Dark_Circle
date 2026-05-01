@@ -1,0 +1,39 @@
+{{- if .Values.fakePublisher.enabled }}
+# Synthetic ROS2 publisher for smoke testing only. Disable
+# (fakePublisher.enabled: false) in any environment with real sensors.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-publisher
+  labels:
+    app: fake-publisher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fake-publisher
+  template:
+    metadata:
+      labels:
+        app: fake-publisher
+    spec:
+      {{- include "inference-engine.imagePullSecrets" . | nindent 6 }}
+      {{- include "inference-engine.hostNetwork" . | nindent 6 }}
+      containers:
+        - name: fake-publisher
+          image: {{ include "inference-engine.image" (dict "name" "fake-publisher" "Values" .Values) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: inference-engine-config
+          env:
+            - name: FAKE_TOPICS
+              value: {{ .Values.fakePublisher.topics | quote }}
+            - name: FAKE_RATE_HZ
+              value: "{{ .Values.fakePublisher.rateHz }}"
+            {{- include "inference-engine.fastddsEnv" . | nindent 12 }}
+          volumeMounts:
+            {{- include "inference-engine.fastddsMount" . | nindent 12 }}
+      volumes:
+        {{- include "inference-engine.fastddsVolume" . | nindent 8 }}
+{{- end }}

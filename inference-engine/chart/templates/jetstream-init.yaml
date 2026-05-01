@@ -1,0 +1,95 @@
+{{- if .Values.nats.enabled }}
+# One-shot Job that creates JetStream streams and the durable consumers
+# the pipeline binds to. Runs idempotently: if streams/consumers already
+# exist, the script is a no-op. Pre-creating the consumers here matters
+# because nats-py's auto-create code path has a client-side validation
+# that rejects ``js.subscribe(queue=X, durable=Y)`` when X != Y; binding
+# to a pre-created consumer sidesteps that.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jetstream-init
+  labels:
+    app: nats
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: nats
+    spec:
+      restartPolicy: OnFailure
+      {{- include "inference-engine.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: jetstream-init
+          image: natsio/nats-box:0.14.5
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              SERVER={{ .Values.nats.url }}
+              echo "Waiting for NATS at $SERVER ..."
+              for i in $(seq 1 60); do
+                if nats --server="$SERVER" account info >/dev/null 2>&1; then
+                  break
+                fi
+                sleep 1
+              done
+
+              ensure_stream() {
+                local name=$1
+                local subject=$2
+                if nats --server="$SERVER" stream info "$name" >/dev/null 2>&1; then
+                  echo "stream $name already present"
+                  return
+                fi
+                nats --server="$SERVER" stream add "$name" \
+                  --subjects "$subject" \
+                  --storage file \
+                  --retention limits \
+                  --max-age 60s \
+                  --max-msgs=-1 \
+                  --max-bytes=-1 \
+                  --max-msg-size=-1 \
+                  --discard old \
+                  --dupe-window 2s \
+                  --replicas 1 \
+                  --defaults
+              }
+
+              ensure_consumer() {
+                local stream=$1
+                local consumer=$2
+                local target=$3
+                local group=$4
+                if nats --server="$SERVER" consumer info "$stream" "$consumer" >/dev/null 2>&1; then
+                  echo "consumer $stream/$consumer already present"
+                  return
+                fi
+                nats --server="$SERVER" consumer add "$stream" "$consumer" \
+                  --target="$target" \
+                  --deliver-group="$group" \
+                  --deliver=all \
+                  --replay=instant \
+                  --filter='' \
+                  --ack=explicit \
+                  --max-deliver=-1 \
+                  --wait=30s \
+                  --max-pending=0 \
+                  --no-headers-only \
+                  --backoff=none \
+                  --defaults
+              }
+
+              ensure_stream SENSOR_DATA "sensor.data"
+              ensure_stream DETECTION_RESULT "detection.result"
+              ensure_stream CLASSIFICATION_RESULT "classification.result"
+
+              ensure_consumer SENSOR_DATA          infer-detect          infer.detect.deliver         infer-detect
+              ensure_consumer DETECTION_RESULT     infer-classify        infer.classify.deliver       infer-classify
+              ensure_consumer DETECTION_RESULT     egress-detection      egress.detection.deliver     egress
+              ensure_consumer CLASSIFICATION_RESULT egress-classification egress.classification.deliver egress
+
+              echo "JetStream streams and consumers ready."
+{{- end }}

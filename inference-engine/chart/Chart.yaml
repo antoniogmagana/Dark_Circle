@@ -1,0 +1,19 @@
+apiVersion: v2
+name: inference-engine
+description: |
+  Containerized vehicle detection + classification inference pipeline for
+  acoustic and seismic sensors. Subscribes to ROS2 sensor topics, runs
+  CRL-trained models, and publishes inference results back to a ROS2
+  output topic for downstream consumers.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - ros2
+  - inference
+  - acoustic
+  - seismic
+  - kubernetes
+home: https://github.com/antoniogmagana/Dark_Circle
+maintainers:
+  - name: Dark Circle

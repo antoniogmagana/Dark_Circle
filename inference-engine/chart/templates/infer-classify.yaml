@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infer-classify
+  labels:
+    app: infer-classify
+spec:
+  {{- if not .Values.keda.enabled }}
+  replicas: {{ .Values.inference.inferClassify.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: infer-classify
+  template:
+    metadata:
+      labels:
+        app: infer-classify
+    spec:
+      {{- include "inference-engine.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: infer-classify
+          image: {{ include "inference-engine.image" (dict "name" "infer-classify" "Values" .Values) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: inference-engine-config
+          env:
+            - name: MODEL_DIR
+              value: /app/model
+          resources:
+            {{- toYaml .Values.inference.inferClassify.resources | nindent 12 }}
+{{- if .Values.keda.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: infer-classify
+  labels:
+    app: infer-classify
+spec:
+  scaleTargetRef:
+    name: infer-classify
+  minReplicaCount: {{ .Values.inference.inferClassify.minReplicas }}
+  maxReplicaCount: {{ .Values.inference.inferClassify.maxReplicas }}
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  triggers:
+    - type: nats-jetstream
+      metadata:
+        natsServerMonitoringEndpoint: "nats-service.{{ .Release.Namespace }}.svc.cluster.local:8222"
+        account: "$G"
+        stream: "DETECTION_RESULT"
+        consumer: "infer-classify"
+        lagThreshold: "{{ .Values.keda.lagThreshold }}"
+{{- end }}

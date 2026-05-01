@@ -1,0 +1,27 @@
+# RBAC for the Discovery node, which creates / deletes Ingestor Deployments
+# in the same namespace based on the configured sensor whitelist.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: discovery-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: discovery-role
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: discovery-role-binding
+subjects:
+  - kind: ServiceAccount
+    name: discovery-sa
+roleRef:
+  kind: Role
+  name: discovery-role
+  apiGroup: rbac.authorization.k8s.io

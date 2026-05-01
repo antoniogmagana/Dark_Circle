@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sensor-config
+data:
+  audio_bit_depth: "{{ .Values.sensorConfig.audioBitDepth }}"
+  seismic_bit_depth: "{{ .Values.sensorConfig.seismicBitDepth }}"
+  accel_bit_depth: "{{ .Values.sensorConfig.accelBitDepth }}"
+  audio_sample_rate: "{{ .Values.sensorConfig.audioSampleRate }}"
+  seismic_sample_rate: "{{ .Values.sensorConfig.seismicSampleRate }}"
+  accel_sample_rate: "{{ .Values.sensorConfig.accelSampleRate }}"
+  target_rate: "{{ .Values.sensorConfig.targetRate }}"

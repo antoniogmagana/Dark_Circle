@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infer-detect
+  labels:
+    app: infer-detect
+spec:
+  {{- if not .Values.keda.enabled }}
+  replicas: {{ .Values.inference.inferDetect.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: infer-detect
+  template:
+    metadata:
+      labels:
+        app: infer-detect
+    spec:
+      {{- include "inference-engine.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: infer-detect
+          image: {{ include "inference-engine.image" (dict "name" "infer-detect" "Values" .Values) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: inference-engine-config
+          env:
+            - name: MODEL_DIR
+              value: /app/model
+          resources:
+            {{- toYaml .Values.inference.inferDetect.resources | nindent 12 }}
+{{- if .Values.keda.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: infer-detect
+  labels:
+    app: infer-detect
+spec:
+  scaleTargetRef:
+    name: infer-detect
+  minReplicaCount: {{ .Values.inference.inferDetect.minReplicas }}
+  maxReplicaCount: {{ .Values.inference.inferDetect.maxReplicas }}
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  triggers:
+    - type: nats-jetstream
+      metadata:
+        natsServerMonitoringEndpoint: "nats-service.{{ .Release.Namespace }}.svc.cluster.local:8222"
+        account: "$G"
+        stream: "SENSOR_DATA"
+        consumer: "infer-detect"
+        lagThreshold: "{{ .Values.keda.lagThreshold }}"
+{{- end }}

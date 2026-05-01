@@ -1,0 +1,72 @@
+{{- if .Values.nats.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nats
+  labels:
+    app: nats
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+    spec:
+      {{- include "inference-engine.imagePullSecrets" . | nindent 6 }}
+      containers:
+        - name: nats
+          image: {{ .Values.nats.image }}
+          args:
+            - "-js"
+            - "-sd"
+            - "/tmp/nats"
+            - "-m"
+            - "8222"
+          ports:
+            - containerPort: 4222
+            - containerPort: 8222
+          volumeMounts:
+            - name: jetstream-store
+              mountPath: /tmp/nats
+      volumes:
+        - name: jetstream-store
+          {{- if eq .Values.nats.storage.type "pvc" }}
+          persistentVolumeClaim:
+            claimName: nats-jetstream
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- if eq .Values.nats.storage.type "pvc" }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nats-jetstream
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.nats.storage.pvcSize }}
+  {{- if .Values.nats.storage.pvcStorageClass }}
+  storageClassName: {{ .Values.nats.storage.pvcStorageClass | quote }}
+  {{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-service
+spec:
+  selector:
+    app: nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: 4222
+    - name: monitor
+      port: 8222
+      targetPort: 8222
+{{- end }}

@@ -1,0 +1,24 @@
+# Unified, customer-facing runtime configuration. Values are pulled from
+# the chart's values.yaml — edit there, not here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inference-engine-config
+data:
+  ROS_DOMAIN_ID: "{{ .Values.ros2.domainId }}"
+  RMW_IMPLEMENTATION: {{ .Values.ros2.rmwImplementation | quote }}
+  INFERENCE_RESULT_TOPIC: {{ .Values.ros2.outputTopic | quote }}
+  NATS_URL: {{ .Values.nats.url | quote }}
+  {{- if .Values.ros2.fastddsBuiltinTransports }}
+  FASTDDS_BUILTIN_TRANSPORTS: {{ .Values.ros2.fastddsBuiltinTransports | quote }}
+  {{- end }}
+{{- if .Values.ros2.fastddsProfile }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastdds-profiles
+data:
+  fastdds.xml: |
+{{ .Values.ros2.fastddsProfile | indent 4 }}
+{{- end }}

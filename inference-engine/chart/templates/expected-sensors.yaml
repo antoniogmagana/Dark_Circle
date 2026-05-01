@@ -1,0 +1,20 @@
+# Sensor whitelist consumed by the Discovery node. Edit ``expectedSensors``
+# in values.yaml; the chart renders this ConfigMap from those entries.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: expected-sensors
+data:
+  expected-sensors.yaml: |
+    arrays:
+{{- range $arrayId, $spec := .Values.expectedSensors }}
+      {{ $arrayId }}:
+        audio: {{ $spec.audio }}
+        seismic: {{ $spec.seismic }}
+{{- if $spec.accel }}
+        accel:
+          x: {{ $spec.accel.x }}
+          y: {{ $spec.accel.y }}
+          z: {{ $spec.accel.z }}
+{{- end }}
+{{- end }}
