@@ -10,6 +10,10 @@ against ground truth and measure end-to-end latency.
 Supported file formats: parquet (.parquet), CSV (.csv), WAV (.wav).
 Format is inferred from the file extension.
 
+Recordings are streamed one window at a time. An initial metadata pass
+determines total sample count and (when available) sample rate, but the
+file body is never fully read into memory.
+
 Required columns (.parquet / .csv; defaults shown — override via
 ``--column-map``):
     amplitude     raw ADC sample (int or float)
@@ -46,9 +50,11 @@ data" or run ``scripts/install_replay.sh`` for a guided setup.
 import argparse
 import csv as _csv
 import statistics
+import struct
 import sys
 import threading
 import time
+import wave
 from pathlib import Path
 
 import rclpy
@@ -70,7 +76,7 @@ DEFAULT_COLUMNS = {
 
 
 # -----------------------------------------------------------------------------
-# Loaders
+# Column-map helpers
 # -----------------------------------------------------------------------------
 
 
@@ -99,6 +105,337 @@ def parse_column_map(raw: str | None) -> dict[str, str]:
     return mapping
 
 
+def _parse_bool(raw: str) -> bool:
+    s = raw.strip().lower()
+    if s in ("1", "true", "t", "yes", "y", "present", "p"):
+        return True
+    if s in ("0", "false", "f", "no", "n", "absent", "a", ""):
+        return False
+    raise ValueError(f"cannot parse bool from {raw!r}")
+
+
+# -----------------------------------------------------------------------------
+# Streaming readers
+#
+# Each reader exposes:
+#   .total_samples : int         (cheap metadata-only count)
+#   .sample_rate   : float|None  (None when the format can't tell us)
+#   .has_present   : bool
+#   .seek(idx)                   (advance to absolute sample index `idx`)
+#   .read(n) -> (amp_list, pres_list_or_None)
+#                                (returns up to `n` samples; short read at EOF)
+#   .close()
+#
+# All readers are designed for sequential forward reads after an
+# initial seek. There is no random-access requirement once playback
+# has started.
+# -----------------------------------------------------------------------------
+
+
+class ParquetReader:
+    """Streams a parquet file via `iter_batches`. Pulls one row group at
+    a time off disk; converts batches to Python lists lazily."""
+
+    def __init__(self, path: Path, columns: dict[str, str]):
+        import pyarrow.parquet as pq
+
+        self._path = path
+        self._pq = pq
+        self._pf = pq.ParquetFile(path)
+        self._amp_col = columns["amplitude"]
+        self._ts_col = columns["time_stamp"]
+        self._pres_col = columns["present"]
+
+        schema_names = set(self._pf.schema.names)
+        if self._amp_col not in schema_names:
+            raise ValueError(
+                f"{path}: missing required column '{self._amp_col}'; "
+                f"schema has {sorted(schema_names)}"
+            )
+        self._needed = [self._amp_col]
+        self._has_ts = self._ts_col in schema_names
+        if self._has_ts:
+            self._needed.append(self._ts_col)
+        self.has_present = self._pres_col in schema_names
+        if self.has_present:
+            self._needed.append(self._pres_col)
+
+        self.total_samples = self._pf.metadata.num_rows
+        self.sample_rate = self._infer_rate_from_head() if self._has_ts else None
+
+        self._batch_iter = None
+        self._buf_amp: list = []
+        self._buf_pres: list | None = [] if self.has_present else None
+        self._cursor_in_buf = 0
+        self._abs_pos = 0
+        self._open_iter()
+
+    def _infer_rate_from_head(self) -> float | None:
+        # Pull just the first batch to estimate sample rate. A few
+        # thousand rows is plenty; we don't need the whole file.
+        head = next(
+            self._pf.iter_batches(batch_size=2048, columns=[self._ts_col]), None
+        )
+        if head is None:
+            return None
+        ts = head.column(self._ts_col).to_pylist()
+        return _infer_rate(ts)
+
+    def _open_iter(self):
+        # batch_size of 64k rows is comfortable for both audio (16kHz =
+        # ~4s of data per batch) and seismic (100Hz = ~10min per batch);
+        # in either case we never hold more than one batch + the unused
+        # tail of the previous batch in memory.
+        self._batch_iter = self._pf.iter_batches(
+            batch_size=65536, columns=self._needed
+        )
+        self._buf_amp = []
+        self._buf_pres = [] if self.has_present else None
+        self._cursor_in_buf = 0
+
+    def _refill(self) -> bool:
+        try:
+            batch = next(self._batch_iter)
+        except StopIteration:
+            return False
+        self._buf_amp = batch.column(self._amp_col).to_pylist()
+        if self.has_present:
+            self._buf_pres = batch.column(self._pres_col).to_pylist()
+        self._cursor_in_buf = 0
+        return True
+
+    def seek(self, idx: int) -> None:
+        if idx < 0 or idx > self.total_samples:
+            raise ValueError(f"seek out of range: {idx}/{self.total_samples}")
+        # Re-open the iterator and skip whole batches until we land in
+        # the batch containing `idx`. Skipping a batch only inspects
+        # `batch.num_rows` (cheap metadata); we only pay `to_pylist`
+        # cost on the partial final batch we're going to start reading
+        # from. Without this short-circuit, --start-second 300 at
+        # 16kHz would run to_pylist on ~4.8M discarded samples.
+        self._open_iter()
+        remaining = idx
+        while remaining > 0:
+            try:
+                batch = next(self._batch_iter)
+            except StopIteration:
+                raise ValueError(
+                    f"seek({idx}) past end of file ({self.total_samples} rows)"
+                )
+            if batch.num_rows <= remaining:
+                remaining -= batch.num_rows
+                continue
+            # Land inside this batch — materialize and position cursor.
+            self._buf_amp = batch.column(self._amp_col).to_pylist()
+            if self.has_present:
+                self._buf_pres = batch.column(self._pres_col).to_pylist()
+            self._cursor_in_buf = remaining
+            remaining = 0
+        self._abs_pos = idx
+
+    def read(self, n: int) -> tuple[list, list | None]:
+        amps: list = []
+        pres: list | None = [] if self.has_present else None
+        while len(amps) < n:
+            if self._cursor_in_buf >= len(self._buf_amp):
+                if not self._refill():
+                    break
+            avail = len(self._buf_amp) - self._cursor_in_buf
+            take = min(n - len(amps), avail)
+            end = self._cursor_in_buf + take
+            amps.extend(self._buf_amp[self._cursor_in_buf : end])
+            if self.has_present:
+                pres.extend(self._buf_pres[self._cursor_in_buf : end])
+            self._cursor_in_buf = end
+        self._abs_pos += len(amps)
+        return amps, pres
+
+    def close(self):
+        self._batch_iter = None
+        self._pf = None
+
+
+class CsvReader:
+    """Streams a CSV file row-by-row. The metadata pass counts rows
+    (cheap line-iteration; no float parsing) and infers sample rate
+    from the first ~1000 timestamps."""
+
+    def __init__(self, path: Path, columns: dict[str, str], no_header: bool):
+        self._path = path
+        self._columns = columns
+        self._no_header = no_header
+
+        self._amp_idx, self._ts_idx, self._pres_idx, has_pres_in_header = (
+            self._resolve_indices()
+        )
+        self.has_present = has_pres_in_header
+        self.total_samples = self._count_rows()
+        self.sample_rate = self._infer_rate_from_head() if self._ts_idx is not None else None
+
+        self._fh = None
+        self._reader = None
+        self._abs_pos = 0
+        self._open_reader()
+
+    def _resolve_indices(self) -> tuple[int, int | None, int | None, bool]:
+        if self._no_header:
+            # Headerless: amplitude=col0, time_stamp=col1, present=col2.
+            return 0, 1, 2, True
+        with self._path.open(newline="") as f:
+            reader = _csv.reader(f)
+            header = next(reader, None)
+        if header is None:
+            raise ValueError(f"{self._path}: empty CSV")
+        try:
+            amp_idx = header.index(self._columns["amplitude"])
+        except ValueError:
+            raise ValueError(
+                f"{self._path}: missing required column '{self._columns['amplitude']}'; "
+                f"header was {header}"
+            ) from None
+        ts_idx = (
+            header.index(self._columns["time_stamp"])
+            if self._columns["time_stamp"] in header
+            else None
+        )
+        pres_idx = (
+            header.index(self._columns["present"])
+            if self._columns["present"] in header
+            else None
+        )
+        return amp_idx, ts_idx, pres_idx, pres_idx is not None
+
+    def _count_rows(self) -> int:
+        # Line-iterate; far cheaper than csv.reader because it avoids
+        # field-splitting and quote-handling. Off-by-one for the header
+        # is corrected when we subtract. Note: blank lines are counted
+        # here but skipped by read()/seek(), so total_samples is an
+        # upper bound when the input has empty rows.
+        with self._path.open("rb") as f:
+            n = sum(1 for _ in f)
+        return n - (0 if self._no_header else 1)
+
+    def _infer_rate_from_head(self) -> float | None:
+        timestamps: list[float] = []
+        with self._path.open(newline="") as f:
+            reader = _csv.reader(f)
+            if not self._no_header:
+                next(reader, None)
+            for row in reader:
+                if not row or self._ts_idx >= len(row):
+                    continue
+                try:
+                    timestamps.append(float(row[self._ts_idx]))
+                except ValueError:
+                    continue
+                if len(timestamps) >= 1024:
+                    break
+        return _infer_rate(timestamps) if timestamps else None
+
+    def _open_reader(self):
+        if self._fh is not None:
+            self._fh.close()
+        self._fh = self._path.open(newline="")
+        self._reader = _csv.reader(self._fh)
+        if not self._no_header:
+            next(self._reader, None)
+
+    def seek(self, idx: int) -> None:
+        if idx < 0 or idx > self.total_samples:
+            raise ValueError(f"seek out of range: {idx}/{self.total_samples}")
+        self._open_reader()
+        remaining = idx
+        for row in self._reader:
+            if not row:
+                continue
+            remaining -= 1
+            if remaining <= 0:
+                break
+        self._abs_pos = idx
+
+    def read(self, n: int) -> tuple[list, list | None]:
+        amps: list = []
+        pres: list | None = [] if self.has_present else None
+        for row in self._reader:
+            if not row:
+                continue
+            amps.append(float(row[self._amp_idx]))
+            if (
+                self.has_present
+                and self._pres_idx is not None
+                and self._pres_idx < len(row)
+            ):
+                pres.append(_parse_bool(row[self._pres_idx]))
+            if len(amps) >= n:
+                break
+        self._abs_pos += len(amps)
+        return amps, pres
+
+    def close(self):
+        if self._fh is not None:
+            self._fh.close()
+            self._fh = None
+        self._reader = None
+
+
+class WavReader:
+    """Streams a WAV file via `wave.readframes`. Mono PCM only."""
+
+    def __init__(self, path: Path):
+        self._path = path
+        self._wf = wave.open(str(path), "rb")
+        n_channels = self._wf.getnchannels()
+        if n_channels != 1:
+            self._wf.close()
+            raise ValueError(
+                f"{path}: expected mono WAV, got {n_channels} channels. "
+                f"Mix down or split channels before replay."
+            )
+        self._sample_width = self._wf.getsampwidth()
+        if self._sample_width not in (1, 2, 3, 4):
+            self._wf.close()
+            raise ValueError(
+                f"{path}: unsupported PCM sample width {self._sample_width} bytes "
+                f"({self._sample_width * 8} bits). Supported: 8, 16, 24, 32-bit PCM."
+            )
+        self.sample_rate = float(self._wf.getframerate())
+        self.total_samples = self._wf.getnframes()
+        self.has_present = False
+        self._abs_pos = 0
+
+    def seek(self, idx: int) -> None:
+        if idx < 0 or idx > self.total_samples:
+            raise ValueError(f"seek out of range: {idx}/{self.total_samples}")
+        self._wf.setpos(idx)
+        self._abs_pos = idx
+
+    def read(self, n: int) -> tuple[list, list | None]:
+        raw = self._wf.readframes(n)
+        sw = self._sample_width
+        if sw == 1:
+            amps = [int(s) - 128 for s in struct.unpack(f"<{len(raw)}B", raw)]
+        elif sw == 2:
+            amps = list(struct.unpack(f"<{len(raw) // 2}h", raw))
+        elif sw == 4:
+            amps = list(struct.unpack(f"<{len(raw) // 4}i", raw))
+        else:  # sw == 3, 24-bit
+            amps = []
+            for i in range(0, len(raw), 3):
+                b0, b1, b2 = raw[i], raw[i + 1], raw[i + 2]
+                v = b0 | (b1 << 8) | (b2 << 16)
+                if v & 0x800000:
+                    v -= 0x1000000
+                amps.append(v)
+        amps = [float(a) for a in amps]
+        self._abs_pos += len(amps)
+        return amps, None
+
+    def close(self):
+        if self._wf is not None:
+            self._wf.close()
+            self._wf = None
+
+
 def _infer_rate(timestamps) -> float | None:
     """Median 1/dt across the first ~1000 rows, or None if can't infer."""
     n = min(1000, len(timestamps) - 1)
@@ -111,156 +448,14 @@ def _infer_rate(timestamps) -> float | None:
     return 1.0 / sorted(deltas)[len(deltas) // 2]
 
 
-def load_parquet(path: Path, columns: dict[str, str]) -> tuple[list, list, float | None]:
-    """Return (amplitudes, presence-per-row-or-None, inferred_sample_rate)."""
-    import pyarrow.parquet as pq
-
-    needed = [columns["amplitude"]]
-    schema_names = set(pq.ParquetFile(path).schema.names)
-    if columns["time_stamp"] in schema_names:
-        needed.append(columns["time_stamp"])
-    if columns["present"] in schema_names:
-        needed.append(columns["present"])
-
-    table = pq.read_table(path, columns=needed)
-    amp = table.column(columns["amplitude"]).to_pylist()
-    pres = (
-        table.column(columns["present"]).to_pylist()
-        if columns["present"] in needed
-        else None
-    )
-    rate = (
-        _infer_rate(table.column(columns["time_stamp"]).to_numpy())
-        if columns["time_stamp"] in needed
-        else None
-    )
-    return amp, pres, rate
-
-
-def load_csv(path: Path, columns: dict[str, str], no_header: bool) -> tuple[list, list, float | None]:
-    """Stream-friendly CSV reader. Avoids pandas to keep the customer's
-    install footprint to ``rclpy + pyarrow``."""
-    if no_header:
-        # Headerless: amplitude is column 0, time_stamp column 1,
-        # present column 2 (if present). Customer is responsible for ordering.
-        amp_idx, ts_idx, pres_idx = 0, 1, 2
-    else:
-        amp_idx = ts_idx = pres_idx = None
-
-    amplitudes: list = []
-    timestamps: list = []
-    presence: list = []
-    has_pres = False
-
-    with path.open(newline="") as f:
-        reader = _csv.reader(f)
-        if not no_header:
-            header = next(reader, None)
-            if header is None:
-                raise ValueError(f"{path}: empty CSV")
-            try:
-                amp_idx = header.index(columns["amplitude"])
-            except ValueError:
-                raise ValueError(
-                    f"{path}: missing required column '{columns['amplitude']}'; "
-                    f"header was {header}"
-                ) from None
-            ts_idx = header.index(columns["time_stamp"]) if columns["time_stamp"] in header else None
-            pres_idx = header.index(columns["present"]) if columns["present"] in header else None
-            has_pres = pres_idx is not None
-        else:
-            has_pres = True  # headerless assumes all three are present
-
-        for row in reader:
-            if not row:
-                continue
-            amplitudes.append(float(row[amp_idx]))
-            if ts_idx is not None and ts_idx < len(row):
-                timestamps.append(float(row[ts_idx]))
-            if has_pres and pres_idx is not None and pres_idx < len(row):
-                presence.append(_parse_bool(row[pres_idx]))
-
-    rate = _infer_rate(timestamps) if timestamps else None
-    return amplitudes, (presence if has_pres else None), rate
-
-
-def _parse_bool(raw: str) -> bool:
-    s = raw.strip().lower()
-    if s in ("1", "true", "t", "yes", "y", "present", "p"):
-        return True
-    if s in ("0", "false", "f", "no", "n", "absent", "a", ""):
-        return False
-    raise ValueError(f"cannot parse bool from {raw!r}")
-
-
-def load_wav(path: Path) -> tuple[list, list | None, float | None]:
-    """Load a WAV file (PCM only). Returns (amplitudes, None, sample_rate).
-
-    WAV files carry no ground-truth `present` column, so per-window
-    precision/recall scoring is skipped. The sample rate comes from the
-    WAV header; no `time_stamp`-style inference needed.
-
-    Sample magnitudes are preserved as raw signed int values (cast to
-    float for the same-typed list the parquet path returns) — this
-    matches the rest of the pipeline's contract that `amplitude` is
-    raw ADC counts, not normalized.
-    """
-    import struct
-    import wave
-
-    with wave.open(str(path), "rb") as wf:
-        n_channels = wf.getnchannels()
-        sample_width = wf.getsampwidth()  # bytes per sample
-        sample_rate = wf.getframerate()
-        n_frames = wf.getnframes()
-        raw = wf.readframes(n_frames)
-
-    if n_channels != 1:
-        raise ValueError(
-            f"{path}: expected mono WAV, got {n_channels} channels. "
-            f"Mix down or split channels before replay."
-        )
-    # struct format codes for the supported PCM widths. WAV uses
-    # little-endian and signed for >=16-bit; 8-bit PCM is unsigned by
-    # spec.
-    if sample_width == 1:
-        fmt = f"<{n_frames}B"
-        # 8-bit PCM is unsigned 0..255 with center at 128. Re-center
-        # to a signed range so downstream DC-removal sees zero-mean.
-        amps = [int(s) - 128 for s in struct.unpack(fmt, raw)]
-    elif sample_width == 2:
-        amps = list(struct.unpack(f"<{n_frames}h", raw))
-    elif sample_width == 4:
-        amps = list(struct.unpack(f"<{n_frames}i", raw))
-    elif sample_width == 3:
-        # 24-bit PCM: not supported by struct directly. Read three
-        # bytes at a time, sign-extend to int32.
-        amps = []
-        for i in range(0, len(raw), 3):
-            b0, b1, b2 = raw[i], raw[i + 1], raw[i + 2]
-            v = b0 | (b1 << 8) | (b2 << 16)
-            if v & 0x800000:
-                v -= 0x1000000
-            amps.append(v)
-    else:
-        raise ValueError(
-            f"{path}: unsupported PCM sample width {sample_width} bytes "
-            f"({sample_width * 8} bits). Supported: 8, 16, 24, 32-bit PCM."
-        )
-    # Return floats so dtype matches the parquet/csv loaders.
-    return [float(a) for a in amps], None, float(sample_rate)
-
-
-def load_recording(
-    path: Path, columns: dict[str, str], no_header: bool
-) -> tuple[list, list | None, float | None]:
+def open_recording(path: Path, columns: dict[str, str], no_header: bool):
     suffix = path.suffix.lower()
     if suffix == ".parquet":
-        return load_parquet(path, columns)
+        return ParquetReader(path, columns)
     if suffix == ".csv":
-        return load_csv(path, columns, no_header)
+        return CsvReader(path, columns, no_header)
     if suffix == ".wav":
-        return load_wav(path)
+        return WavReader(path)
     raise ValueError(
         f"unsupported file format {suffix!r} for {path}; "
         f"supported: .parquet, .csv, .wav"
@@ -279,15 +474,13 @@ def majority_presence(window_presence: list[bool]) -> bool:
 
 
 class ReplayNode(Node):
-    def __init__(self, args, audio_amp, audio_pres, seis_amp, seis_pres):
+    def __init__(self, args, audio_reader, seis_reader):
         super().__init__("replay_publisher")
         self.args = args
 
-        self.audio_amp = audio_amp
-        self.audio_pres = audio_pres  # may be None
-        self.seis_amp = seis_amp
-        self.seis_pres = seis_pres    # may be None
-        self.has_gt = audio_pres is not None or seis_pres is not None
+        self.audio_reader = audio_reader
+        self.seis_reader = seis_reader
+        self.has_gt = audio_reader.has_present or seis_reader.has_present
 
         self.audio_pub = self.create_publisher(RawSensorReading, args.audio_topic, 10)
         self.seismic_pub = self.create_publisher(RawSensorReading, args.seismic_topic, 10)
@@ -295,12 +488,22 @@ class ReplayNode(Node):
         self.audio_per_tick = max(1, int(args.audio_rate / TICK_HZ))
         self.seismic_per_tick = max(1, int(args.seismic_rate / TICK_HZ))
 
-        # Offset into each stream where playback begins. Validated and
+        # Seek both readers to the configured start. Validated and
         # tick-aligned by main() before reaching this constructor.
         self.start_audio_idx = int(args.start_second * args.audio_rate)
         self.start_seismic_idx = int(args.start_second * args.seismic_rate)
-        self.audio_idx = self.start_audio_idx
-        self.seismic_idx = self.start_seismic_idx
+        self.audio_reader.seek(self.start_audio_idx)
+        self.seis_reader.seek(self.start_seismic_idx)
+
+        # Per-window presence accumulators. The Ingestor's window is
+        # WINDOW_SEC long (= TICK_HZ ticks). We collect presence flags
+        # tick-by-tick and apply majority vote at window-first-tick to
+        # match the previous behavior, except now we read the slice
+        # incrementally as it streams in instead of indexing into
+        # pre-loaded arrays.
+        self._win_audio_pres: list[bool] = []
+        self._win_seis_pres: list[bool] = []
+
         self.tick_count = 0
         self.start_wall = time.time()
 
@@ -354,8 +557,12 @@ class ReplayNode(Node):
         # Remaining duration from the configured start point — not the
         # absolute file length. --duration caps replay length *from*
         # --start-second, so this method has to do the same.
-        audio_remaining = (len(self.audio_amp) - self.start_audio_idx) / self.args.audio_rate
-        seis_remaining = (len(self.seis_amp) - self.start_seismic_idx) / self.args.seismic_rate
+        audio_remaining = (
+            self.audio_reader.total_samples - self.start_audio_idx
+        ) / self.args.audio_rate
+        seis_remaining = (
+            self.seis_reader.total_samples - self.start_seismic_idx
+        ) / self.args.seismic_rate
         return min(audio_remaining, seis_remaining)
 
     def _tick(self):
@@ -367,84 +574,38 @@ class ReplayNode(Node):
             rclpy.shutdown()
             return
 
-        a_end = self.audio_idx + self.audio_per_tick
-        s_end = self.seismic_idx + self.seismic_per_tick
-        if a_end > len(self.audio_amp) or s_end > len(self.seis_amp):
+        a_chunk, a_pres = self.audio_reader.read(self.audio_per_tick)
+        s_chunk, s_pres = self.seis_reader.read(self.seismic_per_tick)
+        if len(a_chunk) < self.audio_per_tick or len(s_chunk) < self.seismic_per_tick:
             self.get_logger().info("recording exhausted; spinning down")
             self.summarize()
             self.timer.cancel()
             rclpy.shutdown()
             return
 
-        a_chunk = self.audio_amp[self.audio_idx : a_end]
-        s_chunk = self.seis_amp[self.seismic_idx : s_end]
+        # Accumulate presence for the current window. The pre-streaming
+        # version computed GT at window-FIRST-tick by indexing into a
+        # pre-loaded array, which is impossible without the full file
+        # in memory. Now we collect presence flags as they stream in
+        # and apply the majority vote at window-LAST-tick — covers the
+        # exact same ticks (0..TICK_HZ-1) of the same window, just
+        # finalized ~1s later within that window.
+        if a_pres is not None:
+            self._win_audio_pres.extend(a_pres)
+        if s_pres is not None:
+            self._win_seis_pres.extend(s_pres)
 
-        # When this is the FIRST tick of a new window, capture the
-        # publish wall-clock — this is what the Ingestor will record as
-        # SensorData.time_stamp for the window, and what egress will
-        # echo back as InferenceResult.timestamp. Matching off this
-        # actual value (vs. a synthetic ``start_wall + N*WINDOW_SEC``
-        # estimate) avoids fractional-second drift between the replay
-        # node's start_time and the Ingestor's first-message wall-clock.
         is_window_first_tick = (self.tick_count % TICK_HZ) == 0
         is_window_last_tick = (self.tick_count % TICK_HZ) == TICK_HZ - 1
+
         if is_window_first_tick:
-            window_idx = self.tick_count // TICK_HZ
-            gt = None
-            if self.has_gt:
-                # GT-presence arrays are absolute file positions, so we
-                # offset by start_*_idx to read the slice that
-                # corresponds to the window currently playing — not
-                # window 0 of the file when --start-second > 0.
-                window_first_audio = (
-                    self.start_audio_idx + window_idx * self.audio_per_tick * TICK_HZ
-                )
-                window_first_seis = (
-                    self.start_seismic_idx + window_idx * self.seismic_per_tick * TICK_HZ
-                )
-                a_pres = (
-                    self.audio_pres[
-                        window_first_audio : window_first_audio + int(self.args.audio_rate)
-                    ]
-                    if self.audio_pres
-                    else []
-                )
-                s_pres = (
-                    self.seis_pres[
-                        window_first_seis : window_first_seis + int(self.args.seismic_rate)
-                    ]
-                    if self.seis_pres
-                    else []
-                )
-                gt = majority_presence(a_pres) or majority_presence(s_pres)
             with self.lock:
                 self.window_state[round(now, 3)] = {
                     "publish_wall": now,
                     "last_tick_wall": None,  # filled at window-last-tick
-                    "gt_present": gt,
+                    "gt_present": None,      # filled at window-last-tick
                     "matched": False,
                 }
-        elif is_window_last_tick:
-            # The window's last tick — the moment the Ingestor has all
-            # the samples it needs to emit. Latency from here to result
-            # arrival is the true end-to-end pipeline latency.
-            window_idx = self.tick_count // TICK_HZ
-            window_first_wall = self.start_wall + window_idx * WINDOW_SEC
-            with self.lock:
-                # Find the most recent unmatched entry whose publish_wall
-                # is ~window_idx * WINDOW_SEC from start. The exact key
-                # is the round(now,3) of the first tick — recompute by
-                # finding the closest entry to window_first_wall.
-                best_k, best_dt = None, float("inf")
-                for k, v in self.window_state.items():
-                    if v["last_tick_wall"] is not None:
-                        continue
-                    dt = abs(v["publish_wall"] - window_first_wall)
-                    if dt < best_dt:
-                        best_k, best_dt = k, dt
-                if best_k is not None:
-                    self.window_state[best_k]["last_tick_wall"] = now
-
         msg = RawSensorReading()
         msg.sensor_id = self.args.sensor_id
         msg.start_time = now
@@ -457,8 +618,34 @@ class ReplayNode(Node):
         smsg.amplitude_readings = [int(x) for x in s_chunk]
         self.seismic_pub.publish(smsg)
 
-        self.audio_idx = a_end
-        self.seismic_idx = s_end
+        if is_window_last_tick:
+            # The window's last tick — Ingestor has all the samples it
+            # needs to emit. Latency from here to result arrival is the
+            # true end-to-end pipeline latency.
+            window_idx = self.tick_count // TICK_HZ
+            window_first_wall = self.start_wall + window_idx * WINDOW_SEC
+            gt = None
+            if self.has_gt:
+                gt = (
+                    majority_presence(self._win_audio_pres)
+                    or majority_presence(self._win_seis_pres)
+                )
+            self._win_audio_pres = []
+            self._win_seis_pres = []
+            with self.lock:
+                # Find the most recent unfinalized window-state entry
+                # whose publish_wall is closest to window_first_wall.
+                best_k, best_dt = None, float("inf")
+                for k, v in self.window_state.items():
+                    if v["last_tick_wall"] is not None:
+                        continue
+                    dt = abs(v["publish_wall"] - window_first_wall)
+                    if dt < best_dt:
+                        best_k, best_dt = k, dt
+                if best_k is not None:
+                    self.window_state[best_k]["last_tick_wall"] = now
+                    self.window_state[best_k]["gt_present"] = gt
+
         self.tick_count += 1
 
     def _on_inference(self, msg: InferenceResult):
@@ -664,23 +851,33 @@ def main():
     args = parse_args()
     columns = parse_column_map(args.column_map)
 
-    print(f"[replay] loading {args.audio.name}", flush=True)
-    audio_amp, audio_pres, audio_rate_actual = load_recording(args.audio, columns, args.no_header)
-    print(f"[replay] loading {args.seismic.name}", flush=True)
-    seis_amp, seis_pres, seis_rate_actual = load_recording(args.seismic, columns, args.no_header)
+    # Open streaming readers. Each reader's __init__ does a cheap
+    # metadata pass (parquet: ParquetFile.metadata.num_rows; CSV:
+    # line-count; WAV: getnframes()) and stops there — the file body is
+    # not loaded into memory.
+    print(f"[replay] opening {args.audio.name}", flush=True)
+    audio_reader = open_recording(args.audio, columns, args.no_header)
+    print(f"[replay] opening {args.seismic.name}", flush=True)
+    seis_reader = open_recording(args.seismic, columns, args.no_header)
 
-    if audio_rate_actual is not None and abs(audio_rate_actual - args.audio_rate) > 1:
-        print(f"WARN: audio inferred rate {audio_rate_actual:.1f} Hz != "
+    if (
+        audio_reader.sample_rate is not None
+        and abs(audio_reader.sample_rate - args.audio_rate) > 1
+    ):
+        print(f"WARN: audio inferred rate {audio_reader.sample_rate:.1f} Hz != "
               f"declared {args.audio_rate} Hz; using declared", file=sys.stderr)
-    if seis_rate_actual is not None and abs(seis_rate_actual - args.seismic_rate) > 1:
-        print(f"WARN: seismic inferred rate {seis_rate_actual:.1f} Hz != "
+    if (
+        seis_reader.sample_rate is not None
+        and abs(seis_reader.sample_rate - args.seismic_rate) > 1
+    ):
+        print(f"WARN: seismic inferred rate {seis_reader.sample_rate:.1f} Hz != "
               f"declared {args.seismic_rate} Hz; using declared", file=sys.stderr)
 
-    # Validate --start-second against both files' actual lengths. We
-    # check here (post-load, pre-publish) so the script errors out
+    # Validate --start-second against both files' lengths via the
+    # metadata-only sample counts. Done before any seek so we error out
     # before doing any cluster work.
-    audio_secs = len(audio_amp) / args.audio_rate
-    seis_secs = len(seis_amp) / args.seismic_rate
+    audio_secs = audio_reader.total_samples / args.audio_rate
+    seis_secs = seis_reader.total_samples / args.seismic_rate
     shortest_secs = min(audio_secs, seis_secs)
     if args.start_second < 0:
         print(
@@ -718,7 +915,7 @@ def main():
         )
 
     rclpy.init()
-    node = ReplayNode(args, audio_amp, audio_pres, seis_amp, seis_pres)
+    node = ReplayNode(args, audio_reader, seis_reader)
     executor = MultiThreadedExecutor(num_threads=2)
     executor.add_node(node)
     try:
@@ -729,6 +926,8 @@ def main():
         executor.shutdown()
         if rclpy.ok():
             rclpy.shutdown()
+        audio_reader.close()
+        seis_reader.close()
 
 
 if __name__ == "__main__":
