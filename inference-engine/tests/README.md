@@ -89,7 +89,6 @@ inference-engine/
     ├── __init__.py
     ├── conftest.py             # Shared fixtures
     ├── pytest.ini              # Pytest configuration
-    ├── test_requirements.txt   # Test dependencies
     ├── test_buffer.py          # ✅ Complete (33 tests)
     ├── test_discovery.py       # ✅ Complete (13 tests)
     ├── test_ingestor.py        # ✅ Complete (17 tests)

@@ -282,22 +282,41 @@ The inference engine has comprehensive test coverage across all nodes.
 buffer assertions work without manual env setup; tests opt into legacy
 behavior by `monkeypatch`-ing `ingestor.buffer._ADC_SCALE_NORMALIZE`.
 
+**Setup (one time):**
+
+Test dependencies live in the `test` group in `pyproject.toml`. Install
+them with poetry; pytest is invoked through `poetry run` so it picks up
+the venv automatically.
+
+```bash
+cd inference-engine
+poetry install --with test
+poetry run pip install ./inference-protos    # protobuf bindings used by tests
+```
+
+If you see `pytest: command not found` after `poetry install --with
+test`, you're invoking pytest from outside the poetry venv. Either run
+`poetry shell` first or prefix every command with `poetry run` (as
+shown below). The system suggestion to `sudo apt install
+python3-pytest` would install pytest globally and bypass poetry's
+pinned dev deps — don't follow it.
+
 ```bash
 # Run the full suite
-pytest tests/ -v
+poetry run pytest tests/ -v
 
 # Run by node
-pytest tests/test_discovery.py -v       # Discovery
-pytest tests/test_ingestor.py -v        # Ingestor (dispatch / role map)
-pytest tests/test_buffer.py -v          # SensorBuffer (window math, both ADC modes)
-pytest tests/test_egress.py -v          # Egress (protobuf, NATS, ROS2)
-pytest tests/test_infer_detect.py -v    # Vehicle Detection
-pytest tests/test_infer_classify.py -v  # Vehicle Classification
+poetry run pytest tests/test_discovery.py -v       # Discovery
+poetry run pytest tests/test_ingestor.py -v        # Ingestor (dispatch / role map)
+poetry run pytest tests/test_buffer.py -v          # SensorBuffer (window math, both ADC modes)
+poetry run pytest tests/test_egress.py -v          # Egress (protobuf, NATS, ROS2)
+poetry run pytest tests/test_infer_detect.py -v    # Vehicle Detection
+poetry run pytest tests/test_infer_classify.py -v  # Vehicle Classification
 
 # Run by category
-pytest -m unit -v         # Unit tests only
-pytest -m integration -v  # Integration tests only
-pytest -m asyncio -v      # Async tests only
+poetry run pytest -m unit -v         # Unit tests only
+poetry run pytest -m integration -v  # Integration tests only
+poetry run pytest -m asyncio -v      # Async tests only
 ```
 
 **Test coverage:**

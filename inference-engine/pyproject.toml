@@ -10,6 +10,13 @@ dependencies = [
 ]
 
 
+# This repo is a deployment workspace — each node ships from src/<node>/
+# into its own Docker image, there is no top-level `inference_engine`
+# Python package to install. We use poetry purely for env management
+# (poetry install / poetry run pytest), so disable package mode.
+[tool.poetry]
+package-mode = false
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
@@ -18,4 +25,25 @@ build-backend = "poetry.core.masonry.api"
 dev = [
     "grpcio-tools (>=1.78.0,<2.0.0)",
     "setuptools (>=82.0.1,<83.0.0)"
+]
+test = [
+    # Core testing framework
+    "pytest (>=7.4.0)",
+    "pytest-asyncio (>=0.21.0)",
+    "pytest-cov (>=4.1.0)",
+    "pytest-mock (>=3.12.0)",
+    "pytest-xdist (>=3.5.0)",
+    "pytest-html (>=4.1.0)",
+    "pytest-metadata (>=3.0.0)",
+    "pytest-timeout (>=2.2.0)",
+    "pytest-randomly (>=3.15.0)",
+    # Testing utilities
+    "hypothesis (>=6.151.0)",
+    "faker (>=20.0.0)",
+    # Mocks for external systems
+    "responses (>=0.24.0)",
+    "aioresponses (>=0.7.6)",
+    # Runtime deps the tests import directly
+    "numpy (>=2.4.0)",
+    "protobuf (>=4.0.0,<7.0.0)",
 ]
