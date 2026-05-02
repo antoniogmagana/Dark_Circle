@@ -4,21 +4,21 @@ Containerized inference pipeline for vehicle detection and classification using 
 
 ---
 
-## Validation status (last verified 2026-05-01)
+## Validation status (last verified 2026-05-02)
 
 What's been exercised end-to-end:
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Discovery → Ingestor spawn | ✅ Verified | One Ingestor per `expectedSensors` entry, per 5s poll. Discovery self-heals if its child Deployments are deleted out-of-band. |
-| Ingestor → NATS JetStream | ✅ Verified | 1-second windows published as `SensorData` protobufs. |
+| Ingestor → NATS JetStream | ✅ Verified | 1-second windows published as `SensorData` protobufs. Default emits raw ADC counts (mean-subtracted) to match the CRL training contract; legacy `[-1, 1]` normalization gated behind `ADC_SCALE_NORMALIZE=1`. |
 | infer-detect / infer-classify | ✅ Verified | `subscribe_bind` against pre-created consumers; `TORCH_NUM_THREADS=2` pins the intra-op pool to the cgroup CPU limit (otherwise 1900ms/window thrashing). |
-| Egress → ROS2 `/inference_result` | ✅ Verified | One publish per window: positives carry full `InferenceResult`, negatives carry detection-only fields. |
+| Egress → ROS2 `/inference_result` | ✅ Verified | One publish per window: positives carry full `InferenceResult`, negatives carry detection-only fields. Stamped with `publish_time` + `latency_seconds` (capture-timestamp → publish, includes 1.0s window-fill floor). |
 | Helm chart install | ✅ Verified | Single `helm install` brings up the pipeline. NATS bundled, KEDA optional. |
-| Replay tool (parquet + CSV) | ✅ Verified | `scripts/replay_publisher.py` simulates a real ROS2 sensor source for testing on pre-recorded data; reports per-window precision/recall + end-to-end latency. |
+| Replay tool (parquet + CSV) | ✅ Verified | `scripts/replay_publisher.py` simulates a real ROS2 sensor source for testing on pre-recorded data; reports per-window precision/recall and side-by-side client + cluster end-to-end latency. |
 | End-to-end on synthetic data | ✅ Verified | `fake-publisher` driving the full pipeline produces `InferenceResult` ROS2 messages. |
 | End-to-end on real recording | ✅ Pipeline verified | On `data_files/parsed/test/focal_audio_pickup2_rs3.parquet` + paired seismic: 60/60 windows traversed the full pipeline cleanly. Pipeline latency was within budget. |
-| Model accuracy | ⚠️ Out of scope here | The CRL run baked into images at `crl-train/saved_crl/runs/multiscale/vae/v1` is from an older 3-branch frontend architecture. Predictions on real test recordings hover at threshold (~0.5 detection conf, classifier near-uniform across classes). Re-export from a current 4-branch checkpoint is required before model results are meaningful. This is a model-side task, not a cluster bug. |
+| Model accuracy | 🔄 Re-test needed | Earlier near-random predictions traced to an ingestor-side ADC scale mismatch with the CRL training contract (training uses raw ADC counts, ingestor was dividing by `2^(bits-1)`). Fixed at `src/ingestor/buffer.py` (default off; `ADC_SCALE_NORMALIZE=1` restores legacy). Live re-evaluation pending after rebuilding images on the server. |
 
 ### Required environment knobs (kind smoke test)
 
@@ -60,6 +60,9 @@ debugging:
 - [`scripts/build_containers.sh`](scripts/build_containers.sh) — image
   build, supports `REGISTRY=… TAG=… PUSH=1` for the customer-registry
   workflow.
+- [`scripts/tail_egress.sh`](scripts/tail_egress.sh) — one-line-per-message
+  live viewer of `/inference_result`. Runs against the egress pod, no
+  local ROS2 install needed.
 
 ---
 
@@ -149,24 +152,34 @@ on the next 5 s poll without restarting Discovery.
 Subscribes to one ROS2 topic per role configured by Discovery. Each
 subscription's callback is bound at construction time to its buffer role
 (`acoustic`, `seismic`, `accel_x|y|z`), so the Ingestor no longer parses
-`msg.sensor_id` to recover the role. Buffers 1-second windows, normalizes
-to `[-1, 1]` using ADC full-scale, and publishes `SensorData` protobufs
-to NATS.
+`msg.sensor_id` to recover the role. Buffers 1-second windows, applies
+per-window mean subtraction (DC removal), and publishes `SensorData`
+protobufs to NATS.
 
-**ADC normalization:**
+**Default scaling (matches the CRL training contract):** raw ADC integer
+counts are cast to float32 and only DC-corrected — bit-depth scale is
+preserved. This matches what `crl-train` saw at training time (parquet
+`amplitude` column stored raw counts; only `remove_dc` was applied).
 
-| Channel | Bit depth | Scale |
-|---------|-----------|-------|
+**Legacy `[-1, 1]` mode** is available for the older
+`WaveformClassificationCNN` model by setting `ADC_SCALE_NORMALIZE=1`,
+which divides by `2^(bits-1)` before mean subtraction:
+
+| Channel | Bit depth | Scale (legacy mode only) |
+|---------|-----------|--------------------------|
 | acoustic | 16-bit | `2^15` |
 | seismic / accel | 24-bit | `2^23` |
 
 **Environment variables:**
 
-| Variable | Description |
-|----------|-------------|
-| `NATS_URL` | NATS server address (e.g. `nats://nats-service:4222`) |
-| `SENSOR_ARRAY` | Sensor array identifier (e.g. `shake_001`) |
-| `SENSOR_ROLE_MAP` | JSON object `{role: topic}` injected by Discovery, e.g. `{"acoustic":"/shake_001/aud","seismic":"/shake_001/ehz"}` |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NATS_URL` | — | NATS server address (e.g. `nats://nats-service:4222`) |
+| `SENSOR_ARRAY` | — | Sensor array identifier (e.g. `shake_001`) |
+| `SENSOR_ROLE_MAP` | — | JSON object `{role: topic}` injected by Discovery, e.g. `{"acoustic":"/shake_001/aud","seismic":"/shake_001/ehz"}` |
+| `NATIVE_RATES` | `0` | When `1`, ship each channel at its native rate (CRL expects audio=16k, seismic=100). When `0`, upsample everything to `TARGET_RATE` for the legacy CNN path. |
+| `ADC_SCALE_NORMALIZE` | `0` | When `1`, divide each channel by `2^(bits-1)` before mean subtraction (legacy `[-1, 1]` contract). When `0`, preserve raw counts. |
+| `AUDIO_BIT_DEPTH` / `SEISMIC_BIT_DEPTH` / `ACCEL_BIT_DEPTH` | `16` / `24` / `24` | Used only when `ADC_SCALE_NORMALIZE=1`. Adjust if hardware bit depth differs. |
 
 **Buffer roles:** `acoustic`, `seismic`, `accel_x`, `accel_y`, `accel_z`.
 `acoustic` and `seismic` are required; the three `accel_*` roles must
@@ -194,6 +207,20 @@ messages on `/inference_result`. **One message per inference window:**
 positives flow through the classifier and arrive on `classification.result`;
 negatives surface directly from `detection.result`. The earlier double-
 publish behavior is gone.
+
+Each `InferenceResult` carries two latency-instrumentation fields,
+populated for both positives and negatives:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `publish_time` | `float64` (Unix epoch s) | Wall-clock moment egress published this result. Same clock source as the upstream `RawSensorReading.start_time`. |
+| `latency_seconds` | `float64` | `publish_time` − the window's original capture timestamp. **Includes the 1.0 s window-fill duration as a floor** — a value of `~1.05` means ~50 ms of pipeline compute, not "broken." |
+
+These flow through to ROS2 subscribers — `replay_publisher.py` reports
+them in its summary block, and `scripts/tail_egress.sh` prints them per
+message. NTP sync between the sensor pod and egress pod is required for
+the latency to be meaningful (already an assumption baked into the
+existing pipeline).
 
 **Environment variables:**
 
@@ -238,24 +265,24 @@ poetry run python scripts/compile_protos.py
 
 ## Testing
 
-**Test Suite Status: ✅ 125/125 tests passing (100% complete)**
+**Test suite status (2026-05-02): ✅ 167 passed, 3 skipped (rclpy-only), 0 failed.**
 
-The inference engine has comprehensive test coverage across all nodes:
+The inference engine has comprehensive test coverage across all nodes.
+`tests/conftest.py` sets `NATIVE_RATES=1` by default so per-channel
+buffer assertions work without manual env setup; tests opt into legacy
+behavior by `monkeypatch`-ing `ingestor.buffer._ADC_SCALE_NORMALIZE`.
 
 ```bash
-# Run all tests (excluding CUDA-dependent test_buffer.py)
-pytest tests/ --ignore=tests/test_buffer.py -v
-
-# Run integration and inference tests
-pytest tests/test_discovery.py tests/test_ingestor.py tests/test_egress.py \
-       tests/test_infer_detect.py tests/test_infer_classify.py -v
+# Run the full suite
+pytest tests/ -v
 
 # Run by node
-pytest tests/test_discovery.py -v       # 37 tests (Discovery)
-pytest tests/test_ingestor.py -v        # 21 tests (Ingestor)
-pytest tests/test_egress.py -v          # 21 tests (Egress)
-pytest tests/test_infer_detect.py -v    # 23 tests (Vehicle Detection)
-pytest tests/test_infer_classify.py -v  # 23 tests (Vehicle Classification)
+pytest tests/test_discovery.py -v       # Discovery
+pytest tests/test_ingestor.py -v        # Ingestor (dispatch / role map)
+pytest tests/test_buffer.py -v          # SensorBuffer (window math, both ADC modes)
+pytest tests/test_egress.py -v          # Egress (protobuf, NATS, ROS2)
+pytest tests/test_infer_detect.py -v    # Vehicle Detection
+pytest tests/test_infer_classify.py -v  # Vehicle Classification
 
 # Run by category
 pytest -m unit -v         # Unit tests only
@@ -263,15 +290,17 @@ pytest -m integration -v  # Integration tests only
 pytest -m asyncio -v      # Async tests only
 ```
 
-**Test Coverage:**
-- **Discovery Node** (37 tests): ConfigMap parsing, completeness checks, PollState grace logic, manifest construction
-- **Ingestor Node** (21 tests): SENSOR_ROLE_MAP parsing, role-bound callbacks, subscription wiring, ADC normalization
-- **Egress Node** (21 tests): Protobuf conversion, NATS subscriptions, ROS2 publishing, edge cases
-- **Infer Detect Node** (23 tests): Model loading (CUDA/MPS/CPU), binary detection, tensor preprocessing, NATS integration
-- **Infer Classify Node** (23 tests): Multi-class classification, Mel spectrograms, CLASS_MAP, confidence scoring
-- **SensorBuffer** (33 tests): Comprehensive buffering logic in `test_buffer.py` (requires CUDA)
+**Test coverage:**
+- **Discovery Node**: ConfigMap parsing, completeness checks, PollState grace logic, manifest construction
+- **Ingestor Node**: `SENSOR_ROLE_MAP` parsing, role-bound callbacks, subscription wiring
+- **SensorBuffer**: window math, holding-pen logic, packaging contract — both default (raw counts) and legacy (`ADC_SCALE_NORMALIZE=1`) modes
+- **Egress Node**: protobuf conversion, NATS subscriptions, ROS2 publishing (including new `publish_time` / `latency_seconds` fields), edge cases
+- **Infer Detect Node**: model loading (CUDA/MPS/CPU), binary detection, tensor preprocessing, NATS integration
+- **Infer Classify Node**: multi-class classification, type-head wiring, CLASS_MAP, confidence scoring
 
-See [tests/README.md](tests/README.md) for detailed test documentation.
+The 3 skipped tests in `test_egress.py` require a working `rclpy`
+import; they run in CI when ROS2 is on the path. See
+[tests/README.md](tests/README.md) for detailed test documentation.
 
 ---
 
