@@ -43,7 +43,13 @@ test = [
     # Mocks for external systems
     "responses (>=0.24.0)",
     "aioresponses (>=0.7.6)",
-    # Runtime deps the tests import directly
+    # Runtime deps the tests import directly. Production Dockerfiles
+    # install the CPU-only wheel from the PyTorch index (see
+    # src/ingestor/Dockerfile:18-24); tests pull whatever PyPI serves,
+    # which is fine because torch is only imported, never run on real
+    # GPU work in tests.
     "numpy (>=2.4.0)",
     "protobuf (>=4.0.0,<7.0.0)",
+    "torch (>=2.0)",
+    "torchaudio (>=2.0)",
 ]
