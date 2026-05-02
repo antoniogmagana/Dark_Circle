@@ -512,6 +512,27 @@ def _rebuild_morlet_frontends_from_meta(model: CRLModel, derived: dict, sensors:
         )
 
 
+def _infer_d_type_from_checkpoint(state: dict) -> int | None:
+    """Read the trained ``D_TYPE`` from a saved CRL checkpoint.
+
+    The aux_type head is a ``Linear(D_TYPE, 4)`` fed by ``z_type``, the
+    type slice produced by ``CausalLatentSpace.split``. Reading the
+    weight's input dim recovers the ``D_TYPE`` that was in effect when
+    the run was trained — which has drifted in main-line code (e.g.
+    6 ↔ 12 across configs). The downstream type-head also has this
+    same input dim by construction (``MLPTypeHead()`` defaults to
+    ``CausalLatentSpace.D_TYPE``), so a single override realigns the
+    z-slice and the head shapes simultaneously.
+    """
+    for k in ("aux_type_heads.fused.weight",) + tuple(
+        f"aux_type_heads.{s}.weight" for s in ("audio", "seismic")
+    ):
+        w = state.get(k)
+        if w is not None:
+            return int(w.shape[1])
+    return None
+
+
 def load_trained_model(save_dir: Path, ckpt_name: str) -> tuple[CRLModel, dict]:
     """Load a trained CRLModel from a saved-run directory."""
     meta_path = save_dir / "meta.json"
@@ -530,6 +551,37 @@ def load_trained_model(save_dir: Path, ckpt_name: str) -> tuple[CRLModel, dict]:
         raise FileNotFoundError(f"{ckpt_name} not found in {save_dir}")
 
     state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+
+    # Realign CausalLatentSpace.D_TYPE with the trained checkpoint before
+    # building the model. Heads belong to the run, not the live code.
+    from crl_vehicle.models.heads import LinearTypeHead, MLPTypeHead
+    from crl_vehicle.models.latent import CausalLatentSpace
+
+    trained_d_type = _infer_d_type_from_checkpoint(state)
+    if trained_d_type is not None and trained_d_type != CausalLatentSpace.D_TYPE:
+        print(
+            f"  Overriding CausalLatentSpace.D_TYPE: "
+            f"live={CausalLatentSpace.D_TYPE} -> trained={trained_d_type}"
+        )
+        CausalLatentSpace.D_TYPE = trained_d_type
+        CausalLatentSpace.D_CAUSAL = (
+            CausalLatentSpace.D_PRES
+            + CausalLatentSpace.D_TYPE
+            + CausalLatentSpace.D_PROX
+            + CausalLatentSpace.D_ENV
+        )
+        # The type-head classes captured the old D_TYPE in their default
+        # args at module-import time. Rebind those defaults so that
+        # ``MLPTypeHead()`` / ``LinearTypeHead()`` (called with no args
+        # by trainer._build_type_head) construct heads with the trained
+        # input dim. aux_type_heads are built inline as
+        # ``nn.Linear(CausalLatentSpace.D_TYPE, 4)``, so the class-attr
+        # patch above already covers them.
+        for cls in (LinearTypeHead, MLPTypeHead):
+            sig_defaults = list(cls.__init__.__defaults__ or ())
+            if sig_defaults:
+                sig_defaults[0] = trained_d_type
+                cls.__init__.__defaults__ = tuple(sig_defaults)
 
     frontend_type = cfg_dict.get("frontend_type", "multiscale")
 
