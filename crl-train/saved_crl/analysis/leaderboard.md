@@ -2,6 +2,7 @@
 
 | Run | Frontend | Phase | Stage2 | Ep | pres_f1 | type_f1 | ELBO | min-ds F1 | worst | MCC |
 |---|---|---|---|---|---|---|---|---|---|---|
+| 2026-04-29_13-26-17 | multiscale | False | False | 100 | 0.8742 | 0.6589 | 0.1926 | 0.4018 | focal | 0.5188 |
 | v3_lowfreq | multiscale | False | False | 100 | 0.875 | 0.6565 | 0.2028 | 0.4364 | focal | 0.5088 |
 | v3_lowfreq | multiscale | False | False | 100 | 0.8612 | 0.6499 | 0.1072 | 0.4294 | focal | 0.4212 |
 | 2026-04-28_23-12-59 | multiscale | False | False | 100 | 0.8777 | 0.6351 | 0.214 | 0.3359 | focal | 0.0 |

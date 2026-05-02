@@ -1,4 +1,5 @@
 name,frontend_type,morlet_use_phase,prior_type,training_mode,stage2,epochs_completed,best_pres_f1,best_type_f1,best_val_ref_elbo,min_dataset_type_f1,worst_dataset,calibrated_type_f1,balanced_accuracy,mcc,shippable,diverged
+2026-04-29_13-26-17,multiscale,False,standard,vae,False,100,0.8742,0.6589,0.1926,0.4018,focal,0.5791,0.7672,0.5188,False,False
 v3_lowfreq,multiscale,False,standard,vae,False,100,0.875,0.6565,0.2028,0.4364,focal,0.5986,0.7594,0.5088,False,False
 v3_lowfreq,multiscale,False,standard,disentangled,False,100,0.8612,0.6499,0.1072,0.4294,focal,0.5735,0.7347,0.4212,False,False
 2026-04-28_23-12-59,multiscale,False,standard,vae,False,100,0.8777,0.6351,0.214,0.3359,focal,0.4667,0.5,0.0,False,False
