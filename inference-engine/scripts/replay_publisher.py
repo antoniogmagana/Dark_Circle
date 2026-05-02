@@ -316,6 +316,7 @@ class ReplayNode(Node):
         # estimate) avoids fractional-second drift between the replay
         # node's start_time and the Ingestor's first-message wall-clock.
         is_window_first_tick = (self.tick_count % TICK_HZ) == 0
+        is_window_last_tick = (self.tick_count % TICK_HZ) == TICK_HZ - 1
         if is_window_first_tick:
             window_idx = self.tick_count // TICK_HZ
             gt = None
@@ -340,9 +341,30 @@ class ReplayNode(Node):
             with self.lock:
                 self.window_state[round(now, 3)] = {
                     "publish_wall": now,
+                    "last_tick_wall": None,  # filled at window-last-tick
                     "gt_present": gt,
                     "matched": False,
                 }
+        elif is_window_last_tick:
+            # The window's last tick — the moment the Ingestor has all
+            # the samples it needs to emit. Latency from here to result
+            # arrival is the true end-to-end pipeline latency.
+            window_idx = self.tick_count // TICK_HZ
+            window_first_wall = self.start_wall + window_idx * WINDOW_SEC
+            with self.lock:
+                # Find the most recent unmatched entry whose publish_wall
+                # is ~window_idx * WINDOW_SEC from start. The exact key
+                # is the round(now,3) of the first tick — recompute by
+                # finding the closest entry to window_first_wall.
+                best_k, best_dt = None, float("inf")
+                for k, v in self.window_state.items():
+                    if v["last_tick_wall"] is not None:
+                        continue
+                    dt = abs(v["publish_wall"] - window_first_wall)
+                    if dt < best_dt:
+                        best_k, best_dt = k, dt
+                if best_k is not None:
+                    self.window_state[best_k]["last_tick_wall"] = now
 
         msg = RawSensorReading()
         msg.sensor_id = self.args.sensor_id
@@ -387,7 +409,18 @@ class ReplayNode(Node):
             if entry is None or entry["matched"]:
                 return
             entry["matched"] = True
-            latency = recv_wall - entry["publish_wall"] - WINDOW_SEC
+            # End-to-end pipeline latency: time from when the last
+            # sample of the window was published (Ingestor's earliest
+            # possible window-emit moment) to when the result arrived
+            # back at the replay subscriber. If the last-tick-wall
+            # wasn't recorded (e.g. last window of a truncated replay),
+            # fall back to publish_wall + WINDOW_SEC as the reference.
+            ref_wall = (
+                entry["last_tick_wall"]
+                if entry["last_tick_wall"] is not None
+                else entry["publish_wall"] + WINDOW_SEC
+            )
+            latency = recv_wall - ref_wall
             self.results.append(
                 {
                     "publish_wall": entry["publish_wall"],

@@ -4,6 +4,65 @@ Containerized inference pipeline for vehicle detection and classification using 
 
 ---
 
+## Validation status (last verified 2026-05-01)
+
+What's been exercised end-to-end:
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Discovery → Ingestor spawn | ✅ Verified | One Ingestor per `expectedSensors` entry, per 5s poll. Discovery self-heals if its child Deployments are deleted out-of-band. |
+| Ingestor → NATS JetStream | ✅ Verified | 1-second windows published as `SensorData` protobufs. |
+| infer-detect / infer-classify | ✅ Verified | `subscribe_bind` against pre-created consumers; `TORCH_NUM_THREADS=2` pins the intra-op pool to the cgroup CPU limit (otherwise 1900ms/window thrashing). |
+| Egress → ROS2 `/inference_result` | ✅ Verified | One publish per window: positives carry full `InferenceResult`, negatives carry detection-only fields. |
+| Helm chart install | ✅ Verified | Single `helm install` brings up the pipeline. NATS bundled, KEDA optional. |
+| Replay tool (parquet + CSV) | ✅ Verified | `scripts/replay_publisher.py` simulates a real ROS2 sensor source for testing on pre-recorded data; reports per-window precision/recall + end-to-end latency. |
+| End-to-end on synthetic data | ✅ Verified | `fake-publisher` driving the full pipeline produces `InferenceResult` ROS2 messages. |
+| End-to-end on real recording | ✅ Pipeline verified | On `data_files/parsed/test/focal_audio_pickup2_rs3.parquet` + paired seismic: 60/60 windows traversed the full pipeline cleanly. Pipeline latency was within budget. |
+| Model accuracy | ⚠️ Out of scope here | The CRL run baked into images at `crl-train/saved_crl/runs/multiscale/vae/v1` is from an older 3-branch frontend architecture. Predictions on real test recordings hover at threshold (~0.5 detection conf, classifier near-uniform across classes). Re-export from a current 4-branch checkpoint is required before model results are meaningful. This is a model-side task, not a cluster bug. |
+
+### Required environment knobs (kind smoke test)
+
+These are set automatically by the chart's defaults but worth knowing for
+debugging:
+
+- `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` — required when ROS2 pods share
+  `hostNetwork: true` on a single node. Without this, FastDDS prefers
+  shared-memory transport, but `/dev/shm` is per-pod (mount namespace ≠
+  net namespace), and data is silently dropped between participants.
+  Multi-host customer deployments don't need this — DDS picks UDP
+  automatically when participants are on different IPs — but the value
+  is safe everywhere.
+- `TORCH_NUM_THREADS=2` — matches `inference.inferDetect.resources.limits.cpu`.
+  PyTorch's intra-op thread pool defaults to host core count, which
+  thrashes against the cgroup CPU limit. Customers who scale up CPU
+  should also bump `inference.inferDetect.torchThreads` in `values.yaml`.
+
+### Known limitations
+
+1. **Single-namespace.** Discovery's RBAC scopes it to its own namespace.
+2. **JetStream `emptyDir` by default.** `nats.storage.type: pvc` for
+   production; otherwise a NATS pod restart drops in-flight detection
+   results.
+3. **Replay tool runs on workstation or as a one-off pod.** The
+   `replay_in_kind.sh` wrapper runs it inside the kind control-plane
+   container so its DDS participant lives on the same hostNetwork as
+   the cluster pods. For multi-host setups the customer runs the
+   script from any ROS2-enabled host on their network.
+
+### Where to look next
+
+- [`chart/README.md`](chart/README.md) — Helm chart values reference,
+  install steps, replay tool docs.
+- [`scripts/replay_publisher.py`](scripts/replay_publisher.py) — replay
+  tool source. `--help` for full CLI.
+- [`scripts/install_replay.sh`](scripts/install_replay.sh) — guided
+  Ubuntu / Debian setup for the replay tool's ROS2 prerequisites.
+- [`scripts/build_containers.sh`](scripts/build_containers.sh) — image
+  build, supports `REGISTRY=… TAG=… PUSH=1` for the customer-registry
+  workflow.
+
+---
+
 ## Architecture
 
 ```
@@ -337,38 +396,49 @@ optional accel topics) at 10 Hz with synthetic samples — enough for
 Discovery to recognize the array as complete and for the Ingestor to fill
 its buffer.
 
-### macOS+kind: DDS multicast workaround
+### kind cluster DDS configuration
 
-The kind node's loopback interface on macOS Docker Desktop does not
-advertise the `IFF_MULTICAST` flag. FastDDS (ROS 2 Jazzy's default RMW)
-uses multicast for participant discovery, so on macOS+kind multiple pods
-on the host network collide and DDS data stalls.
+Several DDS settings are required when all ROS2 pods share the kind
+control-plane's hostNetwork. They're set automatically by the chart and
+the raw manifests, but worth understanding:
 
-If you need to run the smoke test locally on a Mac:
+1. **`hostNetwork: true`** on Discovery / Ingestor / Egress / fake-publisher.
+   Calico-VXLAN doesn't carry multicast, so without hostNetwork these
+   pods can't discover each other's ROS2 graph.
+2. **`FASTDDS_BUILTIN_TRANSPORTS=UDPv4`** in the
+   `inference-engine-config` ConfigMap. With multiple participants on
+   the same IP, FastDDS prefers shared-memory transport — but
+   `/dev/shm` is per-pod (mount namespace ≠ net namespace), so
+   publishes go into one pod's `/dev/shm` and reads come from
+   another's, producing silent data loss. Forcing UDPv4 sidesteps it.
 
-1. Re-add `hostNetwork: true` and `dnsPolicy: ClusterFirstWithHostNet` to
-   `k8s/discovery.yaml`, `k8s/ingestor-template.yaml`, `k8s/egress.yaml`,
-   and `k8s/fake-publisher.yaml`. The manifests document this in their
-   leading comments.
-2. **Or** replace FastDDS multicast discovery with explicit unicast
-   peers via a `FASTRTPS_DEFAULT_PROFILES_FILE` XML profile mounted into
-   every pod.
-
-Neither workaround is needed on Linux clusters with a multicast-capable
-CNI (Calico, Cilium, Flannel with multicast). The CRL pipeline code is
-unchanged either way — only the deployment YAML differs.
+Real multi-host customer deployments need neither workaround — DDS
+picks UDP automatically when participants are on different IPs, and
+multicast is the customer's network admin's problem (or use the
+`ros2.fastddsProfile` knob in `values.yaml` for explicit unicast peers).
 
 ### CRL inference deployment
 
-The smoke test deploys the CRL pipeline (frontend + presence head in
-`infer-detect`, type head in `infer-classify`) using the multiscale fused
-run by default. To swap CRL runs:
+The pipeline deploys the CRL frontend + presence head in `infer-detect`
+and the type head in `infer-classify`. The CRL TorchScript bundle is
+baked into the inference images at build time from a saved CRL run
+directory. The default run dir in `scripts/build_containers.sh` is
+`crl-train/saved_crl/runs/multiscale/vae/v1` — **as of 2026-05-01 this
+is a stale 3-branch-frontend checkpoint that does not load against
+crl-train's current 4-branch architecture and produces near-random
+predictions on real test recordings.** Pick a current keeper run when
+preparing customer images:
 
 ```bash
-# Re-export and rebuild for a different saved run
-CRL_RUN_DIR=crl-train/saved_crl/runs/morlet_per_sensor/vae/phase_v1 \
+# Re-export and rebuild for a specific saved run
+CRL_RUN_DIR=crl-train/saved_crl/runs/<RUN>/<VARIANT>/<PHASE> \
     CRL_FORCE_EXPORT=1 \
     scripts/build_containers.sh infer-detect infer-classify
+
+# Roll the inference pods (Helm install)
+kubectl rollout restart deploy/infer-detect deploy/infer-classify
+
+# Or for raw-manifest install
 kubectl rollout restart deploy/infer-detect deploy/infer-classify -n default
 ```
 
