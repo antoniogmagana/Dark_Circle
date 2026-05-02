@@ -18,7 +18,7 @@ What's been exercised end-to-end:
 | Replay tool (parquet + CSV) | ✅ Verified | `scripts/replay_publisher.py` simulates a real ROS2 sensor source for testing on pre-recorded data; reports per-window precision/recall and side-by-side client + cluster end-to-end latency. |
 | End-to-end on synthetic data | ✅ Verified | `fake-publisher` driving the full pipeline produces `InferenceResult` ROS2 messages. |
 | End-to-end on real recording | ✅ Pipeline verified | On `data_files/parsed/test/focal_audio_pickup2_rs3.parquet` + paired seismic: 60/60 windows traversed the full pipeline cleanly. Pipeline latency was within budget. |
-| Model accuracy | 🔄 Re-test needed | Earlier near-random predictions traced to an ingestor-side ADC scale mismatch with the CRL training contract (training uses raw ADC counts, ingestor was dividing by `2^(bits-1)`). Fixed at `src/ingestor/buffer.py` (default off; `ADC_SCALE_NORMALIZE=1` restores legacy). Live re-evaluation pending after rebuilding images on the server. |
+| Model accuracy | 🔄 Re-test needed | Earlier near-random predictions traced to an ingestor-side ADC scale mismatch with the CRL training contract (training uses raw ADC counts, ingestor was dividing by `2^(bits-1)`). Fixed at `src/ingestor/buffer.py` (default off; `ADC_SCALE_NORMALIZE=1` restores legacy). The default `CRL_RUN_DIR` in `scripts/build_containers.sh` now points at the leaderboard winner — `multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type` (pres_f1 0.875, type_f1 0.657, cross-location min_type_f1 0.436; capstone target is 0.70). Live re-evaluation pending after rebuilding images on the server. |
 
 ### Required environment knobs (kind smoke test)
 
@@ -451,16 +451,23 @@ multicast is the customer's network admin's problem (or use the
 The pipeline deploys the CRL frontend + presence head in `infer-detect`
 and the type head in `infer-classify`. The CRL TorchScript bundle is
 baked into the inference images at build time from a saved CRL run
-directory. The default run dir in `scripts/build_containers.sh` is
-`crl-train/saved_crl/runs/multiscale/vae/v1` — **as of 2026-05-01 this
-is a stale 3-branch-frontend checkpoint that does not load against
-crl-train's current 4-branch architecture and produces near-random
-predictions on real test recordings.** Pick a current keeper run when
-preparing customer images:
+directory. The default run dir in `scripts/build_containers.sh` points
+at the current leaderboard winner on the **ship metric** —
+`min_type_f1`, the worst-case vehicle-type macro-F1 across hold-out
+locations (see `crl-train/saved_crl/analysis/cross_location.md`):
+
+| Run path | pres_f1 | type_f1 | min_type_f1 |
+|----------|--------:|--------:|------------:|
+| `crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type` | 0.875 | 0.657 | **0.436** |
+
+The export script reads `meta.json` + `downstream_best.pth` from the
+probe subdirectory (`downstream/<probe>/`), so `CRL_RUN_DIR` must point
+at the probe folder, not the run root.
+
+Override the default to ship a different run:
 
 ```bash
-# Re-export and rebuild for a specific saved run
-CRL_RUN_DIR=crl-train/saved_crl/runs/<RUN>/<VARIANT>/<PHASE> \
+CRL_RUN_DIR=crl-train/saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \
     CRL_FORCE_EXPORT=1 \
     scripts/build_containers.sh infer-detect infer-classify
 
@@ -470,6 +477,12 @@ kubectl rollout restart deploy/infer-detect deploy/infer-classify
 # Or for raw-manifest install
 kubectl rollout restart deploy/infer-detect deploy/infer-classify -n default
 ```
+
+The capstone target is `type_f1 ≥ 0.70`; the current leader hits 0.657
+on the held-out test split and 0.436 cross-location, so model
+performance still has headroom to close. The pipeline-side data
+contract was a separate bug (see ingestor section) and has been
+resolved.
 
 The wire protocol (`DetectionResult.z_fused` vs `z_audio + z_seismic`)
 and the inference pods auto-detect mode from `meta.json` baked into the

@@ -45,7 +45,14 @@ cd "$ROOT"
 # Where the CRL run lives, relative to the repo root. Override by setting
 # CRL_RUN_DIR before invoking the script. The export script writes
 # encoder_*.ts, type_head_*.ts, and meta.json into build/crl-export/.
-CRL_RUN_DIR="${CRL_RUN_DIR:-crl-train/saved_crl/runs/multiscale/vae/v1}"
+#
+# Default points at the current leaderboard winner on the ship metric
+# `min_type_f1` (worst-case cross-location type macro-F1) per
+# crl-train/saved_crl/analysis/cross_location.md:
+#   multiscale/vae/v3_lowfreq, probe mlp_ztype__crl_best_aux_type
+#   pres_f1=0.875, type_f1=0.6565, min_type_f1=0.4364
+# The probe subdir is what carries meta.json + downstream_best.pth.
+CRL_RUN_DIR="${CRL_RUN_DIR:-crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type}"
 CRL_TRAIN_PYTHON="${CRL_TRAIN_PYTHON:-$REPO_ROOT/crl-train/.venv/bin/python}"
 
 # Stage the CRL TorchScript export into build/crl-export/ so the
