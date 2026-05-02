@@ -247,6 +247,16 @@ existing pipeline).
 | `RawSensorReading` | `ros2_interfaces` | Ingestor (subscriber) |
 | `InferenceResult` | `ros2_interfaces` | Egress (publisher) |
 
+**If you change a `.msg` file**, every host that runs the replay tool
+or otherwise links against `ros2_interfaces` outside the cluster must
+rebuild its colcon workspace, since the package emits compiled C++
+type-support libraries that are platform-specific. The cluster pods
+get a fresh build automatically when you re-run
+`scripts/build_containers.sh`. For replay hosts, re-run
+`scripts/install_replay.sh` (or just the colcon step inside
+`~/ros2_replay_ws`). Without this, subscribers will silently fail to
+deserialize the new fields.
+
 ---
 
 ## Shared Protobuf Package
@@ -306,9 +316,35 @@ import; they run in CI when ROS2 is on the path. See
 
 ## Build and Deploy
 
-**Prerequisites:** Docker, kubectl, and a Kubernetes cluster.
-KEDA is *optional* (off by default); enable it only if you need to
-autoscale the inference + egress pods on JetStream backlog depth.
+### Prerequisites (from a fresh clone)
+
+On the build host (a Linux box with Docker; Ubuntu 24.04 is the
+canonical target):
+
+1. **Tooling on PATH**: `docker`, `kubectl`, `helm`. KEDA is *optional*
+   (off by default) — install it only if you want autoscaling on
+   JetStream backlog depth.
+2. **Sibling clone of `crl-train`** next to `inference-engine` in the
+   same parent directory. The container build re-exports a CRL
+   TorchScript bundle at build time and needs `crl-train`'s code +
+   Python deps to do it. Override the location with
+   `CRL_TRAIN_PYTHON=/path/to/python` if your layout differs (see
+   `scripts/build_containers.sh:56`).
+3. **Python deps installed in `crl-train`**:
+   ```bash
+   cd crl-train && poetry install
+   ```
+   The build script runs `crl-train/.venv/bin/python export_for_inference.py`
+   under the hood.
+4. **A saved CRL run** at the path named by `CRL_RUN_DIR` (default at
+   `scripts/build_containers.sh:55` — see [CRL inference deployment](#crl-inference-deployment)).
+   Saved runs are training artifacts, typically not in git; the customer
+   ships the run directory alongside the source repos.
+5. **`kubectl` context** pointing at the destination cluster.
+
+`compile_protos.py` is **not** required for a fresh clone — the
+generated `inference_pb2.py` is committed and is pure Python (arch
+independent). Re-run it only if you've edited `protos/inference.proto`.
 
 Two deployment paths are supported:
 
@@ -321,20 +357,25 @@ Two deployment paths are supported:
 ### Helm install (recommended)
 
 ```bash
-# 1. Compile protobufs
-poetry run python scripts/compile_protos.py
-
-# 2. Build, tag, and push containers to your registry
+# 1. Build, tag, and push containers to your registry
 REGISTRY=registry.example.com/dark-circle TAG=v0.1.0 PUSH=1 \
     scripts/build_containers.sh
 
-# 3. Configure values for your site
+# 2. Configure values for your site
 cp chart/values.yaml my-site-values.yaml
 # Edit images.registry, images.tag, expectedSensors at minimum.
+# expectedSensors schema is the same as the Discovery ConfigMap shown
+# in the "Discovery" section above.
 
-# 4. Install
+# 3. Install
 helm install dark-circle ./chart -f my-site-values.yaml
 ```
+
+For multi-host deployments where ROS2 participants live on different
+machines, also configure `ros2.fastddsProfile` in `values.yaml` to
+declare explicit unicast peers. Single-host kind setups don't need
+this — see [kind cluster DDS configuration](#kind-cluster-dds-configuration)
+for the reasoning.
 
 Ingestor pods are spawned automatically by the Discovery node once an
 array listed in `expectedSensors` has all of its required topics visible
@@ -342,33 +383,57 @@ on the ROS2 graph. infer-detect / infer-classify / egress run with fixed
 `replicas: 1` by default; set `keda.enabled: true` in values.yaml for
 backlog-driven autoscaling.
 
+### Verifying the install
+
+```bash
+# 1. Discovery should see the cluster and start polling.
+kubectl logs -n default -l app=discovery -f
+# Within ~10s of your sensors publishing, expect: "Spawned ingestor for <array-id>"
+
+# 2. Confirm the per-array Ingestor pods came up.
+kubectl get pods -n default
+
+# 3. Tail inference results in real time. Prints one compact line per
+#    InferenceResult — sensor id, capture timestamp, presence/class, and
+#    the cluster-stamped latency_seconds.
+scripts/tail_egress.sh
+
+# 4. (Optional) Verify NATS JetStream consumers are draining.
+kubectl exec -n default deploy/nats -- \
+    nats --server=localhost:4222 consumer info SENSOR_DATA infer-detect
+```
+
+A healthy `latency_seconds` value sits just above 1.0 — the 1.0 s
+window-fill duration is a floor, not a bug. Values much higher than
+that indicate queue depth or compute pressure (see the egress
+section). The full `ros2 topic echo` output is also available via
+`kubectl exec deploy/egress -- /bin/bash -c '... ros2 topic echo
+/inference_result'` if you want raw YAML.
+
 ### Raw manifest install (development)
 
 ```bash
-# 1. Compile protobufs
-poetry run python scripts/compile_protos.py
-
-# 2. Build containers (loads into the dark-circle kind cluster if present)
+# 1. Build containers (loads into the dark-circle kind cluster if present)
 bash scripts/build_containers.sh
 
-# 3. Deploy NATS + streams + consumers
+# 2. Deploy NATS + streams + consumers
 kubectl apply -f k8s/nats/nats-deployment.yaml
 kubectl apply -f k8s/nats/nats-service.yaml
 kubectl apply -f k8s/nats/jetstream-streams.yaml
 
-# 4. Deploy ConfigMaps, RBAC, Discovery
+# 3. Deploy ConfigMaps, RBAC, Discovery
 kubectl apply -f k8s/inference-engine-config.yaml
 kubectl apply -f k8s/sensor-config.yaml
 kubectl apply -f k8s/expected-sensors.yaml
 kubectl apply -f k8s/rbac/
 kubectl apply -f k8s/discovery.yaml
 
-# 5. Deploy inference + egress
+# 4. Deploy inference + egress
 kubectl apply -f k8s/infer-detect.yaml
 kubectl apply -f k8s/infer-classify.yaml
 kubectl apply -f k8s/egress.yaml
 
-# 6. Optional: KEDA autoscaling (requires KEDA pre-installed)
+# 5. Optional: KEDA autoscaling (requires KEDA pre-installed)
 kubectl apply -f k8s/keda/
 ```
 
