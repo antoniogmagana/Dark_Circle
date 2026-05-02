@@ -51,6 +51,24 @@ else
     # annotation limit that client-side `kubectl apply` enforces on
     # newer kubectl versions, so the apply has to happen server-side.
     kubectl apply --server-side -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/tigera-operator.yaml
+
+    # The Installation CR depends on the installations.operator.tigera.io
+    # CRD just applied above. The kube-apiserver registers new CRDs
+    # asynchronously: `kubectl wait --for=established` returns as soon
+    # as the CRD object hits the Established condition, but the
+    # apiserver's REST-mapping discovery cache may still not list the
+    # kind for several seconds after that. The CR apply hits "no
+    # matches for kind Installation" if it loses the race. Poll until
+    # `kubectl api-resources` actually lists Installation, not just
+    # until the CRD object is happy.
+    echo "  waiting for Installation kind to register with apiserver..."
+    for i in $(seq 1 60); do
+        if kubectl api-resources --api-group=operator.tigera.io 2>/dev/null \
+                | grep -q '^installations\b'; then
+            break
+        fi
+        sleep 2
+    done
     cat <<EOF | kubectl apply -f -
 apiVersion: operator.tigera.io/v1
 kind: Installation
