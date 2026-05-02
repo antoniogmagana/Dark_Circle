@@ -8,6 +8,10 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:
   disableDefaultCNI: true
+  # Match the IPPool in local_smoke.sh's Calico Installation CR. kind's
+  # default is 10.244.0.0/16; tigera-operator refuses to install if the
+  # CR's pool doesn't fall within kubeadm's configured podSubnet.
+  podSubnet: "192.168.0.0/16"
   # kubeProxyMode: "none"
 nodes:
   - role: control-plane
