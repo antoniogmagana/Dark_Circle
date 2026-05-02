@@ -95,13 +95,15 @@ expectedSensors:
   shake-001:
     audio: /shake_001/aud
     seismic: /shake_001/ehz
-    accel:
-      # Keys MUST be quoted: YAML 1.1 (which Helm uses) interprets bare
-      # ``y``/``n`` as booleans, which would silently turn into the wrong
-      # map key and break Discovery's topic resolution.
-      "x": /shake_001/ene
-      "y": /shake_001/enn
-      "z": /shake_001/enz
+    # accel is optional. Uncomment all four lines (block + x/y/z) to
+    # require accelerometer topics for this array. Keys MUST be quoted:
+    # YAML 1.1 (which Helm uses) interprets bare ``y``/``n`` as
+    # booleans, which would silently turn into the wrong map key and
+    # break Discovery's topic resolution.
+    # accel:
+    #   "x": /shake_001/ene
+    #   "y": /shake_001/enn
+    #   "z": /shake_001/enz
 
 # -----------------------------------------------------------------------------
 # Sensor signal parameters

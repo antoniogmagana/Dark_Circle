@@ -20,14 +20,18 @@ metadata:
   namespace: default
 data:
   expected-sensors.yaml: |
+    # Default declares only audio + seismic, the minimum the CRL model
+    # uses. fake-publisher, replay_publisher, and most real Raspberry
+    # Shake captures all publish at least these two. Add accel below
+    # (x/y/z all required) or extra arrays as needed for your site.
     arrays:
       shake-001:
         audio: /shake_001/aud
         seismic: /shake_001/ehz
-        accel:
-          x: /shake_001/ene
-          y: /shake_001/enn
-          z: /shake_001/enz
-      shake-002:
-        audio: /shake_002/aud
-        seismic: /shake_002/ehz
+        # accel:
+        #   x: /shake_001/ene
+        #   y: /shake_001/enn
+        #   z: /shake_001/enz
+      # shake-002:
+      #   audio: /shake_002/aud
+      #   seismic: /shake_002/ehz
