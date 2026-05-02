@@ -12,6 +12,7 @@ One ROS2 message per inference window:
 import asyncio
 import os
 import threading
+import time
 
 import nats
 import rclpy
@@ -28,13 +29,22 @@ class EgressNode(Node):
         self.publisher = self.create_publisher(InferenceResult, output_topic, 10)
 
     def _publish(self, payload):
+        capture_time = payload.time_stamp.seconds + payload.time_stamp.nanos * 1e-9
+        publish_time = time.time()
+        latency = publish_time - capture_time
+
+        payload.publish_time = publish_time
+        payload.latency_seconds = latency
+
         msg = InferenceResult()
         msg.sensor_id = payload.sensor_id
-        msg.timestamp = payload.time_stamp.seconds + payload.time_stamp.nanos * 1e-9
+        msg.timestamp = capture_time
         msg.vehicle_detected = payload.vehicle_detected
         msg.detection_confidence = payload.detection_confidence
         msg.vehicle_class = payload.vehicle_class
         msg.classification_confidence = payload.classification_confidence
+        msg.publish_time = publish_time
+        msg.latency_seconds = latency
         self.publisher.publish(msg)
 
     async def on_detection(self, msg):

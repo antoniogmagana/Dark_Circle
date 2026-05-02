@@ -92,7 +92,7 @@ class TestBasicLoading:
         buffer = SensorBuffer(sensor_id)
         data = np.array([100, 200, 300])
 
-        result = buffer.load_buffer("acoustic", data, base_timestamp)
+        result = buffer.load_buffer("acoustic", base_timestamp, data)
 
         assert buffer.start_time == base_timestamp
         assert result is None
@@ -106,7 +106,7 @@ class TestBasicLoading:
 
         # Try to load data 0.1s before window start
         early_data = np.array([100, 200, 300])
-        result = buffer.load_buffer("acoustic", early_data, base_timestamp - 0.1)
+        result = buffer.load_buffer("acoustic", base_timestamp - 0.1, early_data)
 
         assert result is None
         assert "acoustic" not in buffer.active_channels
@@ -116,10 +116,10 @@ class TestBasicLoading:
         """Test channels are registered when loaded."""
         buffer = SensorBuffer(sensor_id)
 
-        buffer.load_buffer("acoustic", np.array([1, 2, 3]), base_timestamp)
+        buffer.load_buffer("acoustic", base_timestamp, np.array([1, 2, 3]))
         assert "acoustic" in buffer.active_channels
 
-        buffer.load_buffer("seismic", np.array([4, 5]), base_timestamp + 0.1)
+        buffer.load_buffer("seismic", base_timestamp + 0.1, np.array([4, 5]))
         assert "seismic" in buffer.active_channels
 
         assert len(buffer.active_channels) == 2
@@ -131,14 +131,14 @@ class TestBasicLoading:
 
         # Load 100 samples at t=0 (should go to index 0)
         data1 = np.full(100, 42.0)
-        buffer.load_buffer("acoustic", data1, base_timestamp)
+        buffer.load_buffer("acoustic", base_timestamp, data1)
 
         assert np.all(buffer.buffers["acoustic"][0:100] == 42.0)
         assert np.all(buffer.buffers["acoustic"][100:200] == 0.0)
 
         # Load 100 samples at t=0.1 (should go to index 1600)
         data2 = np.full(100, 99.0)
-        buffer.load_buffer("acoustic", data2, base_timestamp + 0.1)
+        buffer.load_buffer("acoustic", base_timestamp + 0.1, data2)
 
         assert np.all(buffer.buffers["acoustic"][1600:1700] == 99.0)
 
@@ -158,13 +158,13 @@ class TestWindowBoundaries:
 
         # Fill most of first window
         data1 = np.full(15900, 100.0)
-        result1 = buffer.load_buffer("acoustic", data1, base_timestamp)
+        result1 = buffer.load_buffer("acoustic", base_timestamp, data1)
         assert result1 is None
 
         # Add data that crosses boundary (150 samples total)
         # 100 samples fit in first window, 50 go to holding pen
         data2 = np.full(150, 200.0)
-        result2 = buffer.load_buffer("acoustic", data2, base_timestamp + 0.99375)
+        result2 = buffer.load_buffer("acoustic", base_timestamp + 0.99375, data2)
 
         # Should return packaged window
         assert result2 is not None
@@ -176,12 +176,12 @@ class TestWindowBoundaries:
         buffer = SensorBuffer(sensor_id)
 
         # Initialize window
-        buffer.load_buffer("acoustic", np.array([1, 2, 3]), base_timestamp)
+        buffer.load_buffer("acoustic", base_timestamp, np.array([1, 2, 3]))
 
         # Load seismic data that crosses boundary
         # At t=0.995, index=99 (only 1 sample fits in 100-sample buffer)
         data = np.full(10, 50.0)
-        result = buffer.load_buffer("seismic", data, base_timestamp + 0.995)
+        result = buffer.load_buffer("seismic", base_timestamp + 0.995, data)
 
         assert result is None  # Non-acoustic doesn't trigger packaging
         assert "seismic" in buffer.active_channels
@@ -196,14 +196,14 @@ class TestWindowBoundaries:
         buffer = SensorBuffer(sensor_id)
 
         # Load acoustic to initialize
-        buffer.load_buffer("acoustic", np.full(15900, 1.0), base_timestamp)
+        buffer.load_buffer("acoustic", base_timestamp, np.full(15900, 1.0))
 
         # Load seismic that crosses boundary
-        buffer.load_buffer("seismic", np.full(10, 99.0), base_timestamp + 0.995)
+        buffer.load_buffer("seismic", base_timestamp + 0.995, np.full(10, 99.0))
 
         # Trigger window package with acoustic
         acoustic_boundary = np.full(200, 2.0)
-        buffer.load_buffer("acoustic", acoustic_boundary, base_timestamp + 0.99)
+        buffer.load_buffer("acoustic", base_timestamp + 0.99, acoustic_boundary)
 
         # After reset, holding pen should be transferred
         assert len(buffer.holding_pen["seismic"]) == 0
@@ -216,11 +216,11 @@ class TestWindowBoundaries:
         buffer = SensorBuffer(sensor_id)
 
         # Fill to near capacity
-        buffer.load_buffer("acoustic", np.full(15950, 10.0), base_timestamp)
+        buffer.load_buffer("acoustic", base_timestamp, np.full(15950, 10.0))
 
         # Add 100 samples: 50 fit in window, 50 go to holding pen
         data = np.full(100, 20.0)
-        payload = buffer.load_buffer("acoustic", data, base_timestamp + 0.996875)
+        payload = buffer.load_buffer("acoustic", base_timestamp + 0.996875, data)
 
         # Should package and return
         assert payload is not None
@@ -243,9 +243,9 @@ class TestMultiChannel:
         """Test loading multiple channels in same window."""
         buffer = SensorBuffer(sensor_id)
 
-        buffer.load_buffer("acoustic", np.full(1000, 1.0), base_timestamp)
-        buffer.load_buffer("seismic", np.full(10, 2.0), base_timestamp + 0.1)
-        buffer.load_buffer("accel_x", np.full(5, 3.0), base_timestamp + 0.2)
+        buffer.load_buffer("acoustic", base_timestamp, np.full(1000, 1.0))
+        buffer.load_buffer("seismic", base_timestamp + 0.1, np.full(10, 2.0))
+        buffer.load_buffer("accel_x", base_timestamp + 0.2, np.full(5, 3.0))
 
         assert len(buffer.active_channels) == 3
         assert buffer.buffers["acoustic"][0] == 1.0
@@ -258,12 +258,12 @@ class TestMultiChannel:
         buffer = SensorBuffer(sensor_id)
 
         # At t=0: acoustic index 0, seismic index 0
-        buffer.load_buffer("acoustic", np.array([100.0]), base_timestamp)
-        buffer.load_buffer("seismic", np.array([200.0]), base_timestamp)
+        buffer.load_buffer("acoustic", base_timestamp, np.array([100.0]))
+        buffer.load_buffer("seismic", base_timestamp, np.array([200.0]))
 
         # At t=0.5: acoustic index 8000, seismic index 50
-        buffer.load_buffer("acoustic", np.array([101.0]), base_timestamp + 0.5)
-        buffer.load_buffer("seismic", np.array([201.0]), base_timestamp + 0.5)
+        buffer.load_buffer("acoustic", base_timestamp + 0.5, np.array([101.0]))
+        buffer.load_buffer("seismic", base_timestamp + 0.5, np.array([201.0]))
 
         assert buffer.buffers["acoustic"][0] == 100.0
         assert buffer.buffers["acoustic"][8000] == 101.0
@@ -275,9 +275,9 @@ class TestMultiChannel:
         """Test all three accelerometer axes can be loaded."""
         buffer = SensorBuffer(sensor_id)
 
-        buffer.load_buffer("accel_x", np.full(10, 1.0), base_timestamp)
-        buffer.load_buffer("accel_y", np.full(10, 2.0), base_timestamp)
-        buffer.load_buffer("accel_z", np.full(10, 3.0), base_timestamp)
+        buffer.load_buffer("accel_x", base_timestamp, np.full(10, 1.0))
+        buffer.load_buffer("accel_y", base_timestamp, np.full(10, 2.0))
+        buffer.load_buffer("accel_z", base_timestamp, np.full(10, 3.0))
 
         assert "accel_x" in buffer.active_channels
         assert "accel_y" in buffer.active_channels
@@ -293,70 +293,148 @@ class TestMultiChannel:
 # ============================================================================
 
 
-class TestADCNormalization:
-    """Test ADC scale normalization in package."""
+class TestPackageOutput:
+    """Test the per-window output contract emitted by ``_package_window``.
+
+    Two modes are exercised:
+      * Default (``ADC_SCALE_NORMALIZE`` unset / 0) — raw ADC counts preserved,
+        only per-window mean subtraction. This is the CRL training contract.
+      * Legacy (``ADC_SCALE_NORMALIZE=1``) — divide by ``2^(bits-1)`` before
+        mean subtraction. This is the pre-CRL ``WaveformClassificationCNN``
+        contract; kept for back-compat behind the env flag.
+
+    Tests drive ``_package_window`` directly by populating ``buffer.buffers``
+    and ``buffer.active_channels`` so the assertion is on the package math,
+    not on the streaming loader's window-boundary bookkeeping.
+    """
+
+    def _ramp(self, n, lo, hi):
+        """Return n integer samples evenly spaced in [lo, hi]."""
+        return np.linspace(lo, hi, n).astype(np.float64)
 
     @pytest.mark.unit
-    def test_acoustic_normalization(self, sensor_id, base_timestamp, skip_if_no_protos):
-        """Test acoustic data is normalized by 2^15."""
+    def test_acoustic_default_preserves_raw_counts(
+        self, sensor_id, base_timestamp, skip_if_no_protos, monkeypatch
+    ):
+        """Default path: only per-window mean subtraction; raw scale preserved."""
+        monkeypatch.setattr("ingestor.buffer._ADC_SCALE_NORMALIZE", False)
         buffer = SensorBuffer(sensor_id)
+        buffer.start_time = base_timestamp
 
-        # Load raw ADC values
-        raw_data = np.array([32767, -32768, 16384])  # Max, min, half
-        buffer.load_buffer("acoustic", raw_data, base_timestamp)
+        raw = self._ramp(buffer.limits["acoustic"], -32768, 32767)
+        buffer.buffers["acoustic"] = raw.copy()
+        buffer.active_channels.add("acoustic")
 
-        # Fill rest of window - this will trigger packaging when crossing boundary
-        filler = np.zeros(15997)
-        payload = buffer.load_buffer("acoustic", filler, base_timestamp + 0.0001875)
+        payload = buffer._package_window()
+        out = np.array(payload.acoustic_data.data)
 
-        # Check normalization in payload
-        assert payload is not None, "Expected payload when crossing window boundary"
-        normalized = payload.acoustic_data.data
-        assert abs(normalized[0] - 32767 / 32768) < 1e-6  # ~0.999969
-        assert abs(normalized[1] - (-32768 / 32768)) < 1e-6  # -1.0
-        assert abs(normalized[2] - 16384 / 32768) < 1e-6  # 0.5
+        # Mean subtraction only; std stays in raw-count range (~thousands).
+        assert abs(out.mean()) < 1e-6
+        np.testing.assert_allclose(out, raw - raw.mean(), atol=1e-3)
+        assert out.std() > 1000  # raw-count scale, not [-1, 1]
 
     @pytest.mark.unit
-    def test_seismic_normalization(self, sensor_id, base_timestamp, skip_if_no_protos):
-        """Test seismic data is normalized by 2^23."""
+    def test_acoustic_legacy_normalizes_to_unit_range(
+        self, sensor_id, base_timestamp, skip_if_no_protos, monkeypatch
+    ):
+        """ADC_SCALE_NORMALIZE=1: divide by 2^15, then mean-subtract."""
+        monkeypatch.setattr("ingestor.buffer._ADC_SCALE_NORMALIZE", True)
         buffer = SensorBuffer(sensor_id)
+        buffer.start_time = base_timestamp
 
-        # Load raw ADC values (24-bit range)
-        raw_data = np.array([8388607, -8388608, 4194304])  # Max, min, half
-        buffer.load_buffer("seismic", raw_data, base_timestamp)
-        buffer.load_buffer("seismic", np.zeros(97), base_timestamp + 0.03)
+        raw = self._ramp(buffer.limits["acoustic"], -32768, 32767)
+        buffer.buffers["acoustic"] = raw.copy()
+        buffer.active_channels.add("acoustic")
 
-        # Trigger packaging with acoustic - crossing boundary returns payload
-        buffer.load_buffer("acoustic", np.zeros(15900), base_timestamp)
-        payload = buffer.load_buffer("acoustic", np.zeros(200), base_timestamp + 0.99375)
+        payload = buffer._package_window()
+        out = np.array(payload.acoustic_data.data)
 
-        # Check normalization
-        assert payload is not None
-        normalized = payload.seismic_data.data
-        assert abs(normalized[0] - 8388607 / 8388608) < 1e-6
-        assert abs(normalized[1] - (-8388608 / 8388608)) < 1e-6
+        scaled = raw / (2**15)
+        np.testing.assert_allclose(out, scaled - scaled.mean(), atol=1e-7)
+        assert abs(out.max()) < 1.01 and abs(out.min()) < 1.01
 
     @pytest.mark.unit
-    def test_accel_normalization(self, sensor_id, base_timestamp, skip_if_no_protos):
-        """Test accelerometer data is normalized by 2^23."""
+    def test_seismic_default_preserves_raw_counts(
+        self, sensor_id, base_timestamp, skip_if_no_protos, monkeypatch
+    ):
+        monkeypatch.setattr("ingestor.buffer._ADC_SCALE_NORMALIZE", False)
         buffer = SensorBuffer(sensor_id)
+        buffer.start_time = base_timestamp
 
-        # Load raw ADC values
-        buffer.load_buffer("accel_x", np.full(100, 8388607), base_timestamp)
-        buffer.load_buffer("accel_y", np.full(100, -8388608), base_timestamp)
-        buffer.load_buffer("accel_z", np.full(100, 0), base_timestamp)
+        raw = self._ramp(buffer.limits["seismic"], -8388608, 8388607)
+        buffer.buffers["seismic"] = raw.copy()
+        buffer.active_channels.add("seismic")
 
-        # Trigger packaging - crossing boundary returns payload
-        buffer.load_buffer("acoustic", np.zeros(15900), base_timestamp)
-        payload = buffer.load_buffer("acoustic", np.zeros(200), base_timestamp + 0.99375)
+        payload = buffer._package_window()
+        out = np.array(payload.seismic_data.data)
 
-        # accel_data is [3, 100] matrix
-        assert payload is not None
-        accel_matrix = np.array(payload.accel_data.data).reshape((3, 100))
+        assert abs(out.mean()) < 1e-3
+        np.testing.assert_allclose(out, raw - raw.mean(), atol=1e-2)
+        assert out.std() > 1e5  # raw 24-bit scale
 
-        assert abs(accel_matrix[0, 0] - 8388607 / 8388608) < 1e-6  # X axis
-        assert abs(accel_matrix[1, 0] - (-8388608 / 8388608)) < 1e-6  # Y axis
-        assert abs(accel_matrix[2, 0] - 0.0) < 1e-6  # Z axis
+    @pytest.mark.unit
+    def test_seismic_legacy_normalizes_to_unit_range(
+        self, sensor_id, base_timestamp, skip_if_no_protos, monkeypatch
+    ):
+        monkeypatch.setattr("ingestor.buffer._ADC_SCALE_NORMALIZE", True)
+        buffer = SensorBuffer(sensor_id)
+        buffer.start_time = base_timestamp
+
+        raw = self._ramp(buffer.limits["seismic"], -8388608, 8388607)
+        buffer.buffers["seismic"] = raw.copy()
+        buffer.active_channels.add("seismic")
+
+        payload = buffer._package_window()
+        out = np.array(payload.seismic_data.data)
+
+        scaled = raw / (2**23)
+        np.testing.assert_allclose(out, scaled - scaled.mean(), atol=1e-7)
+        assert abs(out.max()) < 1.01 and abs(out.min()) < 1.01
+
+    @pytest.mark.unit
+    def test_accel_default_preserves_raw_counts(
+        self, sensor_id, base_timestamp, skip_if_no_protos, monkeypatch
+    ):
+        monkeypatch.setattr("ingestor.buffer._ADC_SCALE_NORMALIZE", False)
+        buffer = SensorBuffer(sensor_id)
+        buffer.start_time = base_timestamp
+
+        n = buffer.limits["accel_x"]
+        buffer.buffers["accel_x"] = np.full(n, 8388607.0)
+        buffer.buffers["accel_y"] = np.full(n, -8388608.0)
+        buffer.buffers["accel_z"] = np.zeros(n)
+        for ax in ("accel_x", "accel_y", "accel_z"):
+            buffer.active_channels.add(ax)
+
+        payload = buffer._package_window()
+        accel = np.array(payload.accel_data.data).reshape((3, n))
+        # Per-axis constant input → mean-subtracted output is all zeros.
+        np.testing.assert_allclose(accel, 0.0, atol=1e-3)
+
+    @pytest.mark.unit
+    def test_accel_legacy_normalizes_to_unit_range(
+        self, sensor_id, base_timestamp, skip_if_no_protos, monkeypatch
+    ):
+        monkeypatch.setattr("ingestor.buffer._ADC_SCALE_NORMALIZE", True)
+        buffer = SensorBuffer(sensor_id)
+        buffer.start_time = base_timestamp
+
+        n = buffer.limits["accel_x"]
+        ramp = self._ramp(n, -8388608, 8388607)
+        buffer.buffers["accel_x"] = ramp.copy()
+        buffer.buffers["accel_y"] = ramp.copy()
+        buffer.buffers["accel_z"] = ramp.copy()
+        for ax in ("accel_x", "accel_y", "accel_z"):
+            buffer.active_channels.add(ax)
+
+        payload = buffer._package_window()
+        accel = np.array(payload.accel_data.data).reshape((3, n))
+        scaled = ramp / (2**23)
+        expected = scaled - scaled.mean()
+        np.testing.assert_allclose(accel[0], expected, atol=1e-7)
+        np.testing.assert_allclose(accel[1], expected, atol=1e-7)
+        np.testing.assert_allclose(accel[2], expected, atol=1e-7)
+        assert abs(accel.max()) < 1.01
 
 
 # ============================================================================
@@ -372,8 +450,8 @@ class TestProtobufPackaging:
         """Test sensor ID is correctly set in package."""
         buffer = SensorBuffer(sensor_id)
 
-        buffer.load_buffer("acoustic", np.zeros(15900), base_timestamp)
-        payload = buffer.load_buffer("acoustic", np.zeros(200), base_timestamp + 0.99375)
+        buffer.load_buffer("acoustic", base_timestamp, np.zeros(15900))
+        payload = buffer.load_buffer("acoustic", base_timestamp + 0.99375, np.zeros(200))
 
         assert payload is not None
         assert payload.sensor_id == sensor_id
@@ -383,8 +461,8 @@ class TestProtobufPackaging:
         """Test timestamp is correctly set in package."""
         buffer = SensorBuffer(sensor_id)
 
-        buffer.load_buffer("acoustic", np.zeros(15900), base_timestamp)
-        payload = buffer.load_buffer("acoustic", np.zeros(200), base_timestamp + 0.99375)
+        buffer.load_buffer("acoustic", base_timestamp, np.zeros(15900))
+        payload = buffer.load_buffer("acoustic", base_timestamp + 0.99375, np.zeros(200))
 
         # Timestamp should match window start
         assert payload is not None
@@ -396,11 +474,11 @@ class TestProtobufPackaging:
         """Test channels list matches active channels."""
         buffer = SensorBuffer(sensor_id)
 
-        buffer.load_buffer("acoustic", np.zeros(15900), base_timestamp)
-        buffer.load_buffer("seismic", np.zeros(100), base_timestamp)
-        buffer.load_buffer("accel_x", np.zeros(100), base_timestamp)
+        buffer.load_buffer("acoustic", base_timestamp, np.zeros(15900))
+        buffer.load_buffer("seismic", base_timestamp, np.zeros(100))
+        buffer.load_buffer("accel_x", base_timestamp, np.zeros(100))
 
-        payload = buffer.load_buffer("acoustic", np.zeros(200), base_timestamp + 0.99375)
+        payload = buffer.load_buffer("acoustic", base_timestamp + 0.99375, np.zeros(200))
 
         assert payload is not None
         assert "acoustic" in payload.channels
@@ -412,13 +490,13 @@ class TestProtobufPackaging:
         """Test tensor shapes in package."""
         buffer = SensorBuffer(sensor_id)
 
-        buffer.load_buffer("acoustic", np.zeros(15900), base_timestamp)
-        buffer.load_buffer("seismic", np.zeros(100), base_timestamp)
-        buffer.load_buffer("accel_x", np.zeros(100), base_timestamp)
-        buffer.load_buffer("accel_y", np.zeros(100), base_timestamp)
-        buffer.load_buffer("accel_z", np.zeros(100), base_timestamp)
+        buffer.load_buffer("acoustic", base_timestamp, np.zeros(15900))
+        buffer.load_buffer("seismic", base_timestamp, np.zeros(100))
+        buffer.load_buffer("accel_x", base_timestamp, np.zeros(100))
+        buffer.load_buffer("accel_y", base_timestamp, np.zeros(100))
+        buffer.load_buffer("accel_z", base_timestamp, np.zeros(100))
 
-        payload = buffer.load_buffer("acoustic", np.zeros(200), base_timestamp + 0.99375)
+        payload = buffer.load_buffer("acoustic", base_timestamp + 0.99375, np.zeros(200))
 
         # Acoustic: [16000]
         assert payload is not None
@@ -436,8 +514,8 @@ class TestProtobufPackaging:
         buffer = SensorBuffer(sensor_id)
 
         # Only load acoustic - crossing boundary returns payload
-        buffer.load_buffer("acoustic", np.zeros(15900), base_timestamp)
-        payload = buffer.load_buffer("acoustic", np.zeros(200), base_timestamp + 0.99375)
+        buffer.load_buffer("acoustic", base_timestamp, np.zeros(15900))
+        payload = buffer.load_buffer("acoustic", base_timestamp + 0.99375, np.zeros(200))
 
         assert payload is not None
         assert "acoustic" in payload.channels
@@ -461,13 +539,13 @@ class TestEdgeCases:
         # Load data that ends exactly at boundary (15999 samples)
         # At 16kHz, this fills indices 0-15998, leaving one sample unfilled
         data = np.zeros(15999)
-        result = buffer.load_buffer("acoustic", data, base_timestamp)
+        result = buffer.load_buffer("acoustic", base_timestamp, data)
 
         # Should not trigger packaging (not crossing boundary)
         assert result is None
 
         # Loading one more sample should cross boundary and trigger packaging
-        result2 = buffer.load_buffer("acoustic", np.array([1.0]), base_timestamp + 0.9999375)
+        result2 = buffer.load_buffer("acoustic", base_timestamp + 0.9999375, np.array([1.0]))
         assert result2 is not None  # Should return payload
 
     @pytest.mark.unit
@@ -515,7 +593,7 @@ class TestEdgeCases:
         """Test loading single samples."""
         buffer = SensorBuffer(sensor_id)
 
-        result = buffer.load_buffer("acoustic", np.array([42.0]), base_timestamp)
+        result = buffer.load_buffer("acoustic", base_timestamp, np.array([42.0]))
 
         assert result is None
         assert buffer.buffers["acoustic"][0] == 42.0
@@ -525,7 +603,7 @@ class TestEdgeCases:
         """Test loading empty array doesn't crash."""
         buffer = SensorBuffer(sensor_id)
 
-        result = buffer.load_buffer("acoustic", np.array([]), base_timestamp)
+        result = buffer.load_buffer("acoustic", base_timestamp, np.array([]))
 
         # Should handle gracefully
         assert result is None
@@ -535,13 +613,13 @@ class TestEdgeCases:
         """Test reset clears active channels."""
         buffer = SensorBuffer(sensor_id)
 
-        buffer.load_buffer("acoustic", np.zeros(15900), base_timestamp)
-        buffer.load_buffer("seismic", np.zeros(90), base_timestamp)
+        buffer.load_buffer("acoustic", base_timestamp, np.zeros(15900))
+        buffer.load_buffer("seismic", base_timestamp, np.zeros(90))
 
         assert len(buffer.active_channels) == 2
 
         # Trigger reset
-        buffer.load_buffer("acoustic", np.zeros(200), base_timestamp + 0.99)
+        buffer.load_buffer("acoustic", base_timestamp + 0.99, np.zeros(200))
 
         # Channels should be cleared (except those restored from holding pen)
         # In this case, no holding pen data, so should be empty or just acoustic
@@ -555,18 +633,18 @@ class TestEdgeCases:
         payloads = []
 
         # Window 1 - fill and trigger packaging
-        buffer.load_buffer("acoustic", np.full(15900, 1.0), base_timestamp)
-        p1 = buffer.load_buffer("acoustic", np.full(200, 1.0), base_timestamp + 0.99375)
+        buffer.load_buffer("acoustic", base_timestamp, np.full(15900, 1.0))
+        p1 = buffer.load_buffer("acoustic", base_timestamp + 0.99375, np.full(200, 1.0))
         payloads.append(p1)
 
         # Window 2 - fill and trigger packaging
-        buffer.load_buffer("acoustic", np.full(15900, 2.0), base_timestamp + 1.0)
-        p2 = buffer.load_buffer("acoustic", np.full(200, 2.0), base_timestamp + 1.99375)
+        buffer.load_buffer("acoustic", base_timestamp + 1.0, np.full(15900, 2.0))
+        p2 = buffer.load_buffer("acoustic", base_timestamp + 1.99375, np.full(200, 2.0))
         payloads.append(p2)
 
         # Window 3 - fill and trigger packaging
-        buffer.load_buffer("acoustic", np.full(15900, 3.0), base_timestamp + 2.0)
-        p3 = buffer.load_buffer("acoustic", np.full(200, 3.0), base_timestamp + 2.99375)
+        buffer.load_buffer("acoustic", base_timestamp + 2.0, np.full(15900, 3.0))
+        p3 = buffer.load_buffer("acoustic", base_timestamp + 2.99375, np.full(200, 3.0))
         payloads.append(p3)
 
         assert len(payloads) == 3
@@ -591,12 +669,12 @@ class TestComplexScenarios:
         for i in range(159):
             timestamp = base_timestamp + (i * 100.0 / 16000.0)  # Time for each chunk
             data = np.full(100, i)
-            result = buffer.load_buffer("acoustic", data, timestamp)
+            result = buffer.load_buffer("acoustic", timestamp, data)
             assert result is None, f"Chunk {i} should not trigger packaging"
 
         # 160th chunk (final 100 samples) should cross boundary and trigger packaging
         final_timestamp = base_timestamp + (159 * 100.0 / 16000.0)
-        final_result = buffer.load_buffer("acoustic", np.full(100, 159), final_timestamp)
+        final_result = buffer.load_buffer("acoustic", final_timestamp, np.full(100, 159))
         assert final_result is not None, "Final chunk should trigger packaging"
 
     @pytest.mark.unit
@@ -609,15 +687,15 @@ class TestComplexScenarios:
             ts = base_timestamp + t
 
             # Acoustic: 160 samples every 10ms
-            buffer.load_buffer("acoustic", np.random.randn(160), ts)
+            buffer.load_buffer("acoustic", ts, np.random.randn(160))
 
             # Seismic: 1 sample every 10ms
-            buffer.load_buffer("seismic", np.array([t]), ts)
+            buffer.load_buffer("seismic", ts, np.array([t]))
 
             # Accel: 1 sample every 10ms per axis
-            buffer.load_buffer("accel_x", np.array([t]), ts)
-            buffer.load_buffer("accel_y", np.array([t * 2]), ts)
-            buffer.load_buffer("accel_z", np.array([t * 3]), ts)
+            buffer.load_buffer("accel_x", ts, np.array([t]))
+            buffer.load_buffer("accel_y", ts, np.array([t * 2]))
+            buffer.load_buffer("accel_z", ts, np.array([t * 3]))
 
         # All channels should be active
         assert len(buffer.active_channels) == 5
@@ -628,20 +706,25 @@ class TestComplexScenarios:
         buffer = SensorBuffer(sensor_id)
 
         # Fill acoustic continuously - use data that will cross boundary
-        buffer.load_buffer("acoustic", np.zeros(15900), base_timestamp)
+        buffer.load_buffer("acoustic", base_timestamp, np.zeros(15900))
 
         # Add seismic at sparse intervals
-        buffer.load_buffer("seismic", np.array([1.0]), base_timestamp + 0.0)
-        buffer.load_buffer("seismic", np.array([2.0]), base_timestamp + 0.5)
-        buffer.load_buffer("seismic", np.array([3.0]), base_timestamp + 0.9)
+        buffer.load_buffer("seismic", base_timestamp + 0.0, np.array([1.0]))
+        buffer.load_buffer("seismic", base_timestamp + 0.5, np.array([2.0]))
+        buffer.load_buffer("seismic", base_timestamp + 0.9, np.array([3.0]))
 
         # Cross boundary to trigger packaging
-        payload = buffer.load_buffer("acoustic", np.zeros(200), base_timestamp + 0.99375)
+        payload = buffer.load_buffer("acoustic", base_timestamp + 0.99375, np.zeros(200))
 
-        # Seismic buffer should have 3 non-zero values at correct positions
+        # Seismic buffer should have 3 non-zero values at correct positions.
+        # Default path preserves raw ADC counts (CRL contract); only mean
+        # subtraction is applied. Per-window mean of [1,2,3] over 100 samples
+        # is 0.06, so values land at {0.94, 1.94, 2.94}. Tolerance accounts
+        # for the protobuf float32 round-trip on the way out.
         assert payload is not None
         assert payload.HasField("seismic_data")
-        normalized = payload.seismic_data.data
-        assert abs(normalized[0] - 1.0 / 2**23) < 1e-8
-        assert abs(normalized[50] - 2.0 / 2**23) < 1e-8
-        assert abs(normalized[90] - 3.0 / 2**23) < 1e-8
+        out = payload.seismic_data.data
+        expected_mean = (1.0 + 2.0 + 3.0) / 100
+        assert abs(out[0] - (1.0 - expected_mean)) < 1e-6
+        assert abs(out[50] - (2.0 - expected_mean)) < 1e-6
+        assert abs(out[90] - (3.0 - expected_mean)) < 1e-6

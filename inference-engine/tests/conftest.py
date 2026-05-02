@@ -2,12 +2,18 @@
 Shared pytest fixtures for inference-engine tests.
 """
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
+
+# Buffer-level test fixtures assume per-channel native rates (seismic=100Hz,
+# accel=100Hz). Force NATIVE_RATES=1 before any ingestor module is imported
+# so SensorBuffer doesn't upsample everything to TARGET_RATE.
+os.environ.setdefault("NATIVE_RATES", "1")
 
 # Mirror the container layout: each node ships flat into /app, so its
 # siblings are imported via top-level names (``from whitelist import ...``,

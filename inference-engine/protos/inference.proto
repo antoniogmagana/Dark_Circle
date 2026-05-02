@@ -43,6 +43,12 @@ message EgressPayload {
     float detection_confidence = 4;
     string vehicle_class = 5;
     float classification_confidence = 6;
+    // End-to-end latency instrumentation. publish_time is the wall-clock
+    // moment the egress node published this result (Unix epoch seconds).
+    // latency_seconds is publish_time minus the window's original capture
+    // time_stamp; it includes the 1.0s window-fill duration as a floor.
+    double publish_time = 7;
+    double latency_seconds = 8;
 }
 
 // Packet receipt acknowledgement

@@ -15,3 +15,9 @@ string vehicle_class
 
 # vehicle type confidence score
 float32 classification_confidence
+
+# wall-clock moment egress published this result (Unix epoch seconds)
+float64 publish_time
+
+# publish_time - original capture timestamp; includes 1.0s window-fill floor
+float64 latency_seconds

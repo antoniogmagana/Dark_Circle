@@ -421,6 +421,10 @@ class ReplayNode(Node):
                 else entry["publish_wall"] + WINDOW_SEC
             )
             latency = recv_wall - ref_wall
+            # Egress stamps msg.latency_seconds = publish_time - capture_time,
+            # which excludes the ROS2 delivery hop back to this replay node.
+            # Older egress builds default it to 0.0; treat that as unavailable.
+            cluster_latency = float(msg.latency_seconds) if msg.latency_seconds > 0 else None
             self.results.append(
                 {
                     "publish_wall": entry["publish_wall"],
@@ -430,6 +434,7 @@ class ReplayNode(Node):
                     "cls": str(msg.vehicle_class),
                     "cls_conf": float(msg.classification_confidence),
                     "latency_s": latency,
+                    "cluster_latency_s": cluster_latency,
                 }
             )
         rel_t = entry["publish_wall"] - self.start_wall
@@ -439,11 +444,16 @@ class ReplayNode(Node):
             gt_str = "P"
         elif entry["gt_present"] is False:
             gt_str = "A"
+        cluster_str = (
+            f" cluster={cluster_latency * 1000:6.1f}ms"
+            if cluster_latency is not None
+            else ""
+        )
         self.get_logger().info(
             f"t={rel_t:6.1f}s GT={gt_str} "
             f"pred={'P' if msg.vehicle_detected else 'A'} "
             f"det={msg.detection_confidence:.2f} cls={cls_str:>10s} "
-            f"latency={latency * 1000:6.1f}ms"
+            f"latency={latency * 1000:6.1f}ms{cluster_str}"
         )
 
     def summarize(self):
@@ -456,11 +466,22 @@ class ReplayNode(Node):
             self.get_logger().warning("no inference results received")
             return
 
-        latencies_ms = sorted(r["latency_s"] * 1000 for r in results)
-        p50 = latencies_ms[len(latencies_ms) // 2]
-        p95 = latencies_ms[int(len(latencies_ms) * 0.95)]
-        p99 = latencies_ms[int(len(latencies_ms) * 0.99)]
-        mean = statistics.mean(latencies_ms)
+        def _stats(values_ms):
+            sv = sorted(values_ms)
+            return {
+                "mean": statistics.mean(sv),
+                "p50": sv[len(sv) // 2],
+                "p95": sv[int(len(sv) * 0.95)],
+                "p99": sv[int(len(sv) * 0.99)],
+            }
+
+        client_stats = _stats([r["latency_s"] * 1000 for r in results])
+        cluster_values = [
+            r["cluster_latency_s"] * 1000
+            for r in results
+            if r["cluster_latency_s"] is not None
+        ]
+        cluster_stats = _stats(cluster_values) if cluster_values else None
 
         print()
         print("=" * 60)
@@ -482,8 +503,21 @@ class ReplayNode(Node):
             print("(no ground-truth column found; presence scoring skipped)")
             print()
         print("end-to-end latency (publish-window-end → inference receive)")
-        print(f"  mean={mean:6.1f}ms  p50={p50:6.1f}ms  "
-              f"p95={p95:6.1f}ms  p99={p99:6.1f}ms")
+        print(f"  client : mean={client_stats['mean']:6.1f}ms  "
+              f"p50={client_stats['p50']:6.1f}ms  "
+              f"p95={client_stats['p95']:6.1f}ms  "
+              f"p99={client_stats['p99']:6.1f}ms")
+        if cluster_stats is not None:
+            print("cluster latency (capture timestamp → egress publish, "
+                  "excludes ROS2 return hop)")
+            print(f"  cluster: mean={cluster_stats['mean']:6.1f}ms  "
+                  f"p50={cluster_stats['p50']:6.1f}ms  "
+                  f"p95={cluster_stats['p95']:6.1f}ms  "
+                  f"p99={cluster_stats['p99']:6.1f}ms  "
+                  f"(n={len(cluster_values)})")
+        else:
+            print("(cluster latency unavailable — egress build pre-dates "
+                  "InferenceResult.latency_seconds)")
         print("=" * 60)
 
 

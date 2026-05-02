@@ -10,6 +10,13 @@ _AUDIO_BITS = int(os.environ.get("AUDIO_BIT_DEPTH", "16"))
 _SEISMIC_BITS = int(os.environ.get("SEISMIC_BIT_DEPTH", "24"))
 _ACCEL_BITS = int(os.environ.get("ACCEL_BIT_DEPTH", "24"))
 
+# CRL was trained on raw ADC counts with mean subtraction only (parquets store
+# int amplitudes cast to float32; see crl-train/crl_vehicle/data/dataset.py and
+# server-load/sample_parse.py). The legacy WaveformClassificationCNN path
+# expected [-1, 1] floats. Default to preserving raw counts; set
+# ADC_SCALE_NORMALIZE=1 to reinstate the legacy behaviour.
+_ADC_SCALE_NORMALIZE = os.environ.get("ADC_SCALE_NORMALIZE", "0") == "1"
+
 
 class SensorBuffer:
     def __init__(self, sensor_id):
@@ -69,7 +76,9 @@ class SensorBuffer:
         payload = inference_pb2.SensorData(sensor_id=self.sensor_id, time_stamp=ts)
 
         if "acoustic" in self.active_channels:
-            arr = self.buffers["acoustic"] / self.adc_scale["acoustic"]
+            arr = self.buffers["acoustic"]
+            if _ADC_SCALE_NORMALIZE:
+                arr = arr / self.adc_scale["acoustic"]
             arr = arr - arr.mean()
 
             payload.channels.append("acoustic")
@@ -78,7 +87,9 @@ class SensorBuffer:
             )
 
         if "seismic" in self.active_channels:
-            arr = self.buffers["seismic"] / self.adc_scale["seismic"]
+            arr = self.buffers["seismic"]
+            if _ADC_SCALE_NORMALIZE:
+                arr = arr / self.adc_scale["seismic"]
             arr = arr - arr.mean()
 
             payload.channels.append("seismic")
@@ -88,16 +99,15 @@ class SensorBuffer:
 
         if any(axis in self.active_channels for axis in ["accel_x", "accel_y", "accel_z"]):
             payload.channels.append("accel")
-            accel_matrix = (
-                np.vstack(
-                    (
-                        self.buffers["accel_x"],
-                        self.buffers["accel_y"],
-                        self.buffers["accel_z"],
-                    )
+            accel_matrix = np.vstack(
+                (
+                    self.buffers["accel_x"],
+                    self.buffers["accel_y"],
+                    self.buffers["accel_z"],
                 )
-                / self.adc_scale["accel"]
             )
+            if _ADC_SCALE_NORMALIZE:
+                accel_matrix = accel_matrix / self.adc_scale["accel"]
             accel_matrix = accel_matrix - accel_matrix.mean(axis=1, keepdims=True)
 
             payload.accel_data.CopyFrom(
