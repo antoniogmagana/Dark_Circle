@@ -276,6 +276,7 @@ scoring and end-to-end latency measurement.
 |--------|-----------|-------|
 | Parquet | `.parquet` | Columns inferred from file metadata. |
 | CSV | `.csv` | Header row required by default; use `--no-header` for positional. |
+| WAV | `.wav` | Mono PCM only (8 / 16 / 24 / 32-bit). Sample rate from the WAV header. No `present` ground-truth column — per-window precision/recall scoring is skipped. |
 
 Both formats need a paired (audio, seismic) recording with these
 columns at minimum:
@@ -336,8 +337,22 @@ python3 inference-engine/scripts/replay_publisher.py \
     --duration 60
 ```
 
-`--duration` caps the replay length in seconds. Without it, the tool
-plays the full recording.
+**Selecting a portion of the recording:**
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--start-second <S>` | `0` | Start replay `S` seconds into the recording. Validated against both files' lengths (errors out if negative or past the shorter recording) and snapped to the nearest 0.1s tick so audio + seismic stay aligned. |
+| `--duration <S>` | (full file) | Cap replay length to `S` seconds *from `--start-second`*. |
+
+For example, to play 30 seconds starting one minute into the recording:
+
+```bash
+python3 inference-engine/scripts/replay_publisher.py \
+    --audio path/to/audio.parquet \
+    --seismic path/to/seismic.parquet \
+    --start-second 60 \
+    --duration 30
+```
 
 The tool publishes to `/shake_001/aud` and `/shake_001/ehz` by default
 (matches the chart's default `expectedSensors.shake-001`). Override

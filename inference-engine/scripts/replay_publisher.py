@@ -7,13 +7,18 @@ RawSensorReading messages, same topics, same rates. Optionally subscribes
 back to the configured inference output topic to score predictions
 against ground truth and measure end-to-end latency.
 
-Supported file formats: parquet (.parquet), CSV (.csv). Format is
-inferred from the file extension.
+Supported file formats: parquet (.parquet), CSV (.csv), WAV (.wav).
+Format is inferred from the file extension.
 
-Required columns (defaults; override via ``--column-map``):
+Required columns (.parquet / .csv; defaults shown — override via
+``--column-map``):
     amplitude     raw ADC sample (int or float)
     time_stamp    seconds-since-start (float) — used to infer sample rate
     present       bool (optional; ground truth for presence scoring)
+
+WAV files carry no `present` column, so per-window precision/recall
+scoring is skipped automatically. Sample rate comes from the WAV
+header. Mono PCM only (8 / 16 / 24 / 32-bit).
 
 Either ``time_stamp`` OR ``--audio-rate`` / ``--seismic-rate`` must
 provide a sample rate. If both are present, the explicit rate wins.
@@ -188,6 +193,64 @@ def _parse_bool(raw: str) -> bool:
     raise ValueError(f"cannot parse bool from {raw!r}")
 
 
+def load_wav(path: Path) -> tuple[list, list | None, float | None]:
+    """Load a WAV file (PCM only). Returns (amplitudes, None, sample_rate).
+
+    WAV files carry no ground-truth `present` column, so per-window
+    precision/recall scoring is skipped. The sample rate comes from the
+    WAV header; no `time_stamp`-style inference needed.
+
+    Sample magnitudes are preserved as raw signed int values (cast to
+    float for the same-typed list the parquet path returns) — this
+    matches the rest of the pipeline's contract that `amplitude` is
+    raw ADC counts, not normalized.
+    """
+    import struct
+    import wave
+
+    with wave.open(str(path), "rb") as wf:
+        n_channels = wf.getnchannels()
+        sample_width = wf.getsampwidth()  # bytes per sample
+        sample_rate = wf.getframerate()
+        n_frames = wf.getnframes()
+        raw = wf.readframes(n_frames)
+
+    if n_channels != 1:
+        raise ValueError(
+            f"{path}: expected mono WAV, got {n_channels} channels. "
+            f"Mix down or split channels before replay."
+        )
+    # struct format codes for the supported PCM widths. WAV uses
+    # little-endian and signed for >=16-bit; 8-bit PCM is unsigned by
+    # spec.
+    if sample_width == 1:
+        fmt = f"<{n_frames}B"
+        # 8-bit PCM is unsigned 0..255 with center at 128. Re-center
+        # to a signed range so downstream DC-removal sees zero-mean.
+        amps = [int(s) - 128 for s in struct.unpack(fmt, raw)]
+    elif sample_width == 2:
+        amps = list(struct.unpack(f"<{n_frames}h", raw))
+    elif sample_width == 4:
+        amps = list(struct.unpack(f"<{n_frames}i", raw))
+    elif sample_width == 3:
+        # 24-bit PCM: not supported by struct directly. Read three
+        # bytes at a time, sign-extend to int32.
+        amps = []
+        for i in range(0, len(raw), 3):
+            b0, b1, b2 = raw[i], raw[i + 1], raw[i + 2]
+            v = b0 | (b1 << 8) | (b2 << 16)
+            if v & 0x800000:
+                v -= 0x1000000
+            amps.append(v)
+    else:
+        raise ValueError(
+            f"{path}: unsupported PCM sample width {sample_width} bytes "
+            f"({sample_width * 8} bits). Supported: 8, 16, 24, 32-bit PCM."
+        )
+    # Return floats so dtype matches the parquet/csv loaders.
+    return [float(a) for a in amps], None, float(sample_rate)
+
+
 def load_recording(
     path: Path, columns: dict[str, str], no_header: bool
 ) -> tuple[list, list | None, float | None]:
@@ -196,9 +259,11 @@ def load_recording(
         return load_parquet(path, columns)
     if suffix == ".csv":
         return load_csv(path, columns, no_header)
+    if suffix == ".wav":
+        return load_wav(path)
     raise ValueError(
         f"unsupported file format {suffix!r} for {path}; "
-        f"supported: .parquet, .csv"
+        f"supported: .parquet, .csv, .wav"
     )
 
 
@@ -230,8 +295,12 @@ class ReplayNode(Node):
         self.audio_per_tick = max(1, int(args.audio_rate / TICK_HZ))
         self.seismic_per_tick = max(1, int(args.seismic_rate / TICK_HZ))
 
-        self.audio_idx = 0
-        self.seismic_idx = 0
+        # Offset into each stream where playback begins. Validated and
+        # tick-aligned by main() before reaching this constructor.
+        self.start_audio_idx = int(args.start_second * args.audio_rate)
+        self.start_seismic_idx = int(args.start_second * args.seismic_rate)
+        self.audio_idx = self.start_audio_idx
+        self.seismic_idx = self.start_seismic_idx
         self.tick_count = 0
         self.start_wall = time.time()
 
@@ -282,10 +351,12 @@ class ReplayNode(Node):
         )
 
     def _max_duration(self) -> float:
-        return min(
-            len(self.audio_amp) / self.args.audio_rate,
-            len(self.seis_amp) / self.args.seismic_rate,
-        )
+        # Remaining duration from the configured start point — not the
+        # absolute file length. --duration caps replay length *from*
+        # --start-second, so this method has to do the same.
+        audio_remaining = (len(self.audio_amp) - self.start_audio_idx) / self.args.audio_rate
+        seis_remaining = (len(self.seis_amp) - self.start_seismic_idx) / self.args.seismic_rate
+        return min(audio_remaining, seis_remaining)
 
     def _tick(self):
         now = time.time()
@@ -321,8 +392,16 @@ class ReplayNode(Node):
             window_idx = self.tick_count // TICK_HZ
             gt = None
             if self.has_gt:
-                window_first_audio = window_idx * self.audio_per_tick * TICK_HZ
-                window_first_seis = window_idx * self.seismic_per_tick * TICK_HZ
+                # GT-presence arrays are absolute file positions, so we
+                # offset by start_*_idx to read the slice that
+                # corresponds to the window currently playing — not
+                # window 0 of the file when --start-second > 0.
+                window_first_audio = (
+                    self.start_audio_idx + window_idx * self.audio_per_tick * TICK_HZ
+                )
+                window_first_seis = (
+                    self.start_seismic_idx + window_idx * self.seismic_per_tick * TICK_HZ
+                )
                 a_pres = (
                     self.audio_pres[
                         window_first_audio : window_first_audio + int(self.args.audio_rate)
@@ -531,9 +610,35 @@ def parse_args() -> argparse.Namespace:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--audio", type=Path, required=True, help="Paired audio recording (.parquet | .csv)")
-    p.add_argument("--seismic", type=Path, required=True, help="Paired seismic recording (.parquet | .csv)")
-    p.add_argument("--duration", type=float, default=None, help="Cap replay length (seconds)")
+    p.add_argument(
+        "--audio",
+        type=Path,
+        required=True,
+        help="Paired audio recording (.parquet | .csv | .wav)",
+    )
+    p.add_argument(
+        "--seismic",
+        type=Path,
+        required=True,
+        help="Paired seismic recording (.parquet | .csv | .wav)",
+    )
+    p.add_argument(
+        "--start-second",
+        type=float,
+        default=0.0,
+        help=(
+            "Start replay at this many seconds into the recording "
+            "(default: 0). Validated against both files' lengths; the "
+            "script errors out before publishing if the offset is "
+            "negative or >= the shorter recording's duration."
+        ),
+    )
+    p.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Cap replay length to this many seconds *from --start-second* (default: play to end).",
+    )
     p.add_argument("--audio-rate", type=int, default=16000,
                    help="Audio sample rate in Hz. Used as authoritative when set; otherwise inferred from time_stamp.")
     p.add_argument("--seismic-rate", type=int, default=100, help="Seismic sample rate in Hz.")
@@ -570,6 +675,47 @@ def main():
     if seis_rate_actual is not None and abs(seis_rate_actual - args.seismic_rate) > 1:
         print(f"WARN: seismic inferred rate {seis_rate_actual:.1f} Hz != "
               f"declared {args.seismic_rate} Hz; using declared", file=sys.stderr)
+
+    # Validate --start-second against both files' actual lengths. We
+    # check here (post-load, pre-publish) so the script errors out
+    # before doing any cluster work.
+    audio_secs = len(audio_amp) / args.audio_rate
+    seis_secs = len(seis_amp) / args.seismic_rate
+    shortest_secs = min(audio_secs, seis_secs)
+    if args.start_second < 0:
+        print(
+            f"ERROR: --start-second {args.start_second} is negative.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if args.start_second >= shortest_secs:
+        which = "audio" if audio_secs <= seis_secs else "seismic"
+        print(
+            f"ERROR: --start-second {args.start_second:.3f} is past the "
+            f"shorter recording ({which}: {shortest_secs:.3f}s). "
+            f"Pick a value in [0, {shortest_secs:.3f}).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    # Snap to the nearest whole tick so audio + seismic stay aligned
+    # at TICK_HZ resolution. The two streams have different sample
+    # rates, so an arbitrary float start could put them on different
+    # ticks and skew the GT-window mapping.
+    snapped = round(args.start_second * TICK_HZ) / TICK_HZ
+    if abs(snapped - args.start_second) > 1e-6:
+        print(
+            f"NOTE: snapping --start-second {args.start_second:.3f} to "
+            f"{snapped:.3f} (nearest 1/{TICK_HZ}s tick).",
+            file=sys.stderr,
+        )
+    args.start_second = snapped
+    if args.start_second > 0:
+        remaining = shortest_secs - args.start_second
+        print(
+            f"[replay] starting {args.start_second:.3f}s into recording "
+            f"({remaining:.1f}s remaining)",
+            flush=True,
+        )
 
     rclpy.init()
     node = ReplayNode(args, audio_amp, audio_pres, seis_amp, seis_pres)

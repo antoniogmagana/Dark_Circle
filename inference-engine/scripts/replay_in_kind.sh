@@ -1,27 +1,28 @@
 #!/usr/bin/env bash
-# Convenience wrapper: run replay_publisher.py against the kind smoke-test
-# cluster as a one-off Pod, reusing the already-built ingestor:dev image
-# (which has ROS2 Jazzy + ros2_interfaces baked in). This avoids
-# installing ROS2 inside the kind node, which is minimal Debian without
-# the ROS2 apt repo and would balloon the node by ~500MB.
+# Replay a recorded audio + seismic pair through the live inference
+# pipeline, on a kind cluster.
 #
-# The Pod joins hostNetwork so its DDS participant lives on the same
-# 172.18.0.2 IP as the in-cluster pods — the cluster cannot tell this
-# apart from a real Raspberry Shake.
+# Independent of local_smoke.sh: brings up the cluster (without the
+# synthetic fake-publisher) if it isn't already up, then injects the
+# recording as a one-off Pod that publishes on the same ROS2 topics
+# the cluster expects. The Pod joins hostNetwork so its DDS
+# participant lives on the same IP as the in-cluster pods — the
+# pipeline cannot tell this apart from a real Raspberry Shake.
 #
 # Usage:
-#   scripts/replay_in_kind.sh <audio.parquet|csv> <seismic.parquet|csv> [replay flags...]
+#   scripts/replay_in_kind.sh <audio.parquet|csv|wav> <seismic.parquet|csv|wav> [replay flags...]
 #
 # Env:
 #   POD_NAME      override the one-off pod name (default: replay-publisher)
 #   IMAGE         override the base image (default: inference-engine/ingestor:dev)
+#   SKIP_CLUSTER_UP=1   don't touch the cluster (assume it's already running with no fake-publisher)
 set -eo pipefail
 
 POD_NAME="${POD_NAME:-replay-publisher}"
 IMAGE="${IMAGE:-inference-engine/ingestor:dev}"
 
 if [ "$#" -lt 2 ]; then
-    echo "usage: $0 <audio.parquet|csv> <seismic.parquet|csv> [replay flags...]" >&2
+    echo "usage: $0 <audio.parquet|csv|wav> <seismic.parquet|csv|wav> [replay flags...]" >&2
     exit 2
 fi
 
@@ -33,6 +34,15 @@ for f in "$AUDIO" "$SEISMIC"; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Bring up the cluster (without fake-publisher) unless the caller
+# explicitly opts out. The cluster_up function is idempotent — if
+# everything's already running, this is a fast no-op.
+if [ "${SKIP_CLUSTER_UP:-0}" != "1" ]; then
+    # shellcheck source=_cluster_up.sh
+    source "$SCRIPT_DIR/_cluster_up.sh"
+    WITH_FAKE_PUBLISHER=0 cluster_up
+fi
 
 # Forward extra flags through the pod's argv. Argparse-friendly quoting:
 # pass each as a separate `command:` element.
@@ -46,7 +56,7 @@ for a in "${EXTRA_ARGS[@]}"; do
 done
 EXTRA_ARGS_JSON+="]"
 
-# Clean up any prior run.
+# Clean up any prior replay run.
 kubectl delete pod "$POD_NAME" --ignore-not-found --wait=true >/dev/null
 
 # Stage the script + recordings inside a sleep container, then exec
@@ -91,7 +101,7 @@ kubectl exec "$POD_NAME" -- /bin/bash -c \
     'python3 -c "import pyarrow" 2>/dev/null || pip3 install --break-system-packages --quiet pyarrow'
 
 # Pick the actual filenames we copied (matches whatever extension the
-# caller passed — .parquet or .csv).
+# caller passed — .parquet, .csv, or .wav).
 AUDIO_FNAME="/tmp/replay_audio$(echo "$AUDIO"   | sed 's/.*\././')"
 SEISMIC_FNAME="/tmp/replay_seismic$(echo "$SEISMIC" | sed 's/.*\././')"
 

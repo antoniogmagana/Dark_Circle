@@ -14,8 +14,10 @@ What's been exercised end-to-end:
 | Ingestor → NATS JetStream | ✅ Verified | 1-second windows published as `SensorData` protobufs. Default emits raw ADC counts (mean-subtracted) to match the CRL training contract; legacy `[-1, 1]` normalization gated behind `ADC_SCALE_NORMALIZE=1`. |
 | infer-detect / infer-classify | ✅ Verified | `subscribe_bind` against pre-created consumers; `TORCH_NUM_THREADS=2` pins the intra-op pool to the cgroup CPU limit (otherwise 1900ms/window thrashing). |
 | Egress → ROS2 `/inference_result` | ✅ Verified | One publish per window: positives carry full `InferenceResult`, negatives carry detection-only fields. Stamped with `publish_time` + `latency_seconds` (capture-timestamp → publish, includes 1.0s window-fill floor). |
-| Helm chart install | ✅ Verified | Single `helm install` brings up the pipeline. NATS bundled, KEDA optional. |
-| Replay tool (parquet + CSV) | ✅ Verified | `scripts/replay_publisher.py` simulates a real ROS2 sensor source for testing on pre-recorded data; reports per-window precision/recall and side-by-side client + cluster end-to-end latency. |
+| Helm chart install | ✅ Verified | Single `helm install` brings up the pipeline. NATS bundled, KEDA optional. Note: on a kind cluster, run `scripts/build_containers.sh` (which auto-loads images into the kind node) *before* `helm install`, otherwise pods stay `Pending` with `ImagePullBackOff`. |
+| Local smoke test | ✅ Verified (2026-05-02) | `scripts/local_smoke.sh` brings up the full pipeline end-to-end on a single-node kind cluster: kind + Calico + KEDA + NATS + all six inference pods. Confirmed working on Ubuntu 24.04. |
+| Replay on recorded data | ✅ Independent path | `scripts/replay_in_kind.sh` brings up the cluster (no fake-publisher) on demand and injects a recording. Reuses the smoke cluster if one exists; works equally well from a clean clone. |
+| Replay tool (parquet / CSV / WAV) | ✅ Verified | `scripts/replay_publisher.py` simulates a real ROS2 sensor source for testing on pre-recorded data. Format auto-detected from extension. Reports per-window precision/recall (when `present` ground-truth is in the file) and side-by-side client + cluster end-to-end latency. |
 | End-to-end on synthetic data | ✅ Verified | `fake-publisher` driving the full pipeline produces `InferenceResult` ROS2 messages. |
 | End-to-end on real recording | ✅ Pipeline verified | On `data_files/parsed/test/focal_audio_pickup2_rs3.parquet` + paired seismic: 60/60 windows traversed the full pipeline cleanly. Pipeline latency was within budget. |
 | Model accuracy | 🔄 Re-test needed | Earlier near-random predictions traced to an ingestor-side ADC scale mismatch with the CRL training contract (training uses raw ADC counts, ingestor was dividing by `2^(bits-1)`). Fixed at `src/ingestor/buffer.py` (default off; `ADC_SCALE_NORMALIZE=1` restores legacy). The default `CRL_RUN_DIR` in `scripts/build_containers.sh` now points at the leaderboard winner — `multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type` (pres_f1 0.875, type_f1 0.657, cross-location min_type_f1 0.436; capstone target is 0.70). Live re-evaluation pending after rebuilding images on the server. |
@@ -418,7 +420,9 @@ Two deployment paths are supported:
 - **Raw manifests** (`k8s/`) — used by `scripts/local_smoke.sh` for
   development. Each manifest can be `kubectl apply`'d individually.
 
-### Helm install (recommended)
+### Helm install (recommended for real clusters)
+
+For a real Kubernetes cluster (not kind):
 
 ```bash
 # 1. Build, tag, and push containers to your registry
@@ -434,6 +438,12 @@ cp chart/values.yaml my-site-values.yaml
 # 3. Install
 helm install dark-circle ./chart -f my-site-values.yaml
 ```
+
+> **For local kind testing, use `scripts/local_smoke.sh` instead** — it
+> handles cluster creation, Calico CNI, image build + load, manifest
+> apply, and pod readiness in one command. The Helm path on kind needs
+> `scripts/build_containers.sh` to run **before** `helm install` so
+> images are loaded into the kind node; otherwise pods stay `Pending`.
 
 For multi-host deployments where ROS2 participants live on different
 machines, also configure `ros2.fastddsProfile` in `values.yaml` to
@@ -518,39 +528,124 @@ delivering each window three times.
 
 ---
 
-## Local smoke test (Linux kind)
+## Three customer modes
 
-A scripted end-to-end verification on a single-node kind cluster, with
-KEDA + JetStream + the full inference pipeline. The fake publisher inside
-the cluster drives the ROS2 graph so no real Raspberry Shake hardware is
-required.
+Bringing up the pipeline on a single Linux server has three distinct
+modes, each independent of the others. They share a kind cluster
+created on demand by whichever script you run first.
 
-**Prerequisites** (one-time): run `scripts/install_build_host.sh` —
-it checks for `docker`, `kubectl`, `helm`, `kind`, and `poetry`, and
-prompts before installing each missing piece on Ubuntu / Debian. See
-the [Prerequisites section](#prerequisites-from-a-fresh-clone) for
-manual steps on other platforms.
+| Mode | Entry point | What it does | When to use |
+|------|------------|--------------|-------------|
+| **Smoke** | `bash scripts/local_smoke.sh` | Cluster + synthetic fake-publisher driving every topic | One-time sanity check that the build + cluster-up logic works on this host. |
+| **Replay** | `bash scripts/replay_in_kind.sh <audio> <seismic>` | Cluster (no fake-publisher) + a one-off pod publishing recorded data | Real work on pre-recorded recordings. |
+| **Live** | point real ROS2 sensors at the cluster, no script | Cluster (no fake-publisher) + real Raspberry Shake topics | Real work on live sensor input. |
 
-**Run the smoke test:**
+All three modes share the same cluster; you can switch between them
+without re-running the build or recreating the cluster. The
+fake-publisher Deployment is automatically removed when you switch
+from Smoke into Replay or Live, so synthetic data doesn't compete
+with real input on the same topics.
+
+### Smoke test (one-time sanity check)
+
 ```bash
-cd inference-engine
-scripts/local_smoke.sh
+bash scripts/local_smoke.sh
 ```
 
-The script creates a kind cluster named `dark-circle` (with kindnet
-disabled and Calico installed for multicast-capable pod networking),
-installs KEDA, builds the six images, applies all manifests, and prints
-the next steps for inspecting JetStream consumers and the ROS2 output.
+Creates a kind cluster named `dark-circle` (Calico CNI, pod CIDR
+`192.168.0.0/16`), installs KEDA, builds the six images, loads them
+into the kind node, applies all manifests including
+`fake-publisher.yaml`, and waits for every Deployment to be Ready.
 
-**Tear down** the cluster:
+End-to-end runtime: ~5–10 minutes the first time (image pulls and
+torch wheel downloads), ~30 seconds on rebuild.
+
+Tear down when finished:
+
 ```bash
-scripts/local_smoke.sh --teardown
+bash scripts/local_smoke.sh --teardown
 ```
 
-The fake publisher emits `/shake_001/aud` and `/shake_001/ehz` (and the
-optional accel topics) at 10 Hz with synthetic samples — enough for
-Discovery to recognize the array as complete and for the Ingestor to fill
-its buffer.
+After the first successful smoke, you typically don't run this again.
+Replay and Live use the same cluster but skip fake-publisher.
+
+### Replay on recorded data
+
+```bash
+bash scripts/replay_in_kind.sh <audio.parquet|csv|wav> <seismic.parquet|csv|wav> [replay flags...]
+```
+
+Brings up the cluster automatically if it isn't already running
+(without fake-publisher), then injects the recording as a one-off
+hostNetwork-joined pod publishing on the same ROS2 topics the
+pipeline expects. The pipeline can't tell this apart from a real
+Raspberry Shake.
+
+**File format** is auto-detected from the extension:
+
+| Format | Sample rate source | Ground truth | Notes |
+|--------|-------------------|--------------|-------|
+| `.parquet` | `time_stamp` column (or `--audio-rate` / `--seismic-rate`) | `present` column if present | Default schema; preserves int amplitude. |
+| `.csv` | same as parquet | same | Header row required unless `--no-header`. |
+| `.wav` | WAV header | none — no per-window scoring | Mono PCM only (8 / 16 / 24 / 32-bit). Useful when you have a raw acoustic capture without ground-truth labels. |
+
+Replay subscribes back to `/inference_result` and prints per-window
+predictions and a summary block at the end (precision/recall against
+ground-truth `present` when available, plus client + cluster latency
+percentiles).
+
+**Common replay flags** (forwarded through to `replay_publisher.py`;
+see `replay_publisher.py --help` for the full list):
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--start-second <S>` | `0` | Start replay `S` seconds into the recording. Validated against both files' lengths (errors out if negative or past the shorter recording) and snapped to the nearest 0.1s tick so audio + seismic stay aligned. |
+| `--duration <S>` | (full file) | Cap replay length to `S` seconds *from `--start-second`*. |
+| `--no-subscribe` | (subscribe) | Skip subscribing to `/inference_result` — useful when you want pure data injection without the latency/scoring overlay. |
+
+Examples:
+
+```bash
+# Play the full recording from the beginning (default)
+bash scripts/replay_in_kind.sh audio.parquet seismic.parquet
+
+# Play 30 seconds starting at 1:00 into the recording
+bash scripts/replay_in_kind.sh audio.parquet seismic.parquet \
+    --start-second 60 --duration 30
+
+# Cluster already up? skip the bring-up check
+SKIP_CLUSTER_UP=1 bash scripts/replay_in_kind.sh audio.parquet seismic.parquet
+```
+
+### Live inference on real sensors
+
+No script needed. With the cluster up (from a prior smoke or replay
+invocation), point real Raspberry Shake topics at it:
+
+1. Edit `k8s/expected-sensors.yaml` (or your Helm values' `expectedSensors`)
+   to list your real array IDs and topics.
+2. `kubectl apply -f k8s/expected-sensors.yaml` if you used the
+   smoke/replay path; `helm upgrade` if Helm.
+3. Discovery picks the change up on its next 5-second poll and spawns
+   an Ingestor for each visible array.
+4. Watch results: `bash scripts/tail_egress.sh`.
+
+If you've been running smoke or replay and want to switch to live, no
+explicit teardown is needed — Discovery already only attaches to
+arrays listed in `expected-sensors.yaml`. Just remove `fake-publisher`
+(`kubectl delete deployment fake-publisher`) and update the ConfigMap.
+
+### Re-running after a failed bring-up
+
+If a smoke or replay run was interrupted partway through (CNI
+half-installed, control plane wedged, etc.), tear down before retrying
+— the cluster's "already exists, reusing" branch will otherwise skip
+re-installing whatever broke:
+
+```bash
+bash scripts/local_smoke.sh --teardown
+bash scripts/local_smoke.sh   # or replay_in_kind.sh
+```
 
 ### kind cluster DDS configuration
 
