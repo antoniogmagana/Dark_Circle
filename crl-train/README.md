@@ -212,6 +212,58 @@ Checkpoint names: `crl_best.pth` (ELBO), `crl_best_aux_type.pth` (F1 — epoch-i
 
 ---
 
+## Deploying a checkpoint to the inference engine
+
+Use `export_for_inference.py` to convert a probe-trained run into the
+TorchScript bundle the inference pods consume. The exporter writes
+**directly into `inference-engine/crl-bundles/`** when given
+`--bundle-name`, so the deployment artifact lands where
+`scripts/build_containers.sh` will find it via `CRL_BUNDLE`. Assumes
+`crl-train` and `inference-engine` are siblings under one parent
+directory (the standard project layout).
+
+```bash
+# Pick the run + probe, choose a versioned bundle name, write into the
+# inference-engine catalog.
+poetry run python export_for_inference.py \
+    --save-dir saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \
+    --bundle-name <frontend>-<mode>-<run>-<probe>-aux_type-v<N>
+```
+
+Naming convention (enforced by the exporter — fails fast if the name
+doesn't end in `-v<N>`): `<frontend>-<training_mode>-<run-id>-<probe>-[aux_type-]v<N>`.
+
+Example for the current shipping leader:
+
+```bash
+poetry run python export_for_inference.py \
+    --save-dir saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type \
+    --bundle-name multiscale-vae-v3_lowfreq-mlp_ztype-aux_type-v2
+```
+
+To promote the new bundle as the default that customers get when
+they don't override `CRL_BUNDLE`, repoint the symlink in the same
+invocation:
+
+```bash
+poetry run python export_for_inference.py \
+    --save-dir saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type \
+    --bundle-name multiscale-vae-v3_lowfreq-mlp_ztype-aux_type-v2 \
+    --update-default-symlink
+```
+
+After exporting:
+
+1. Update the catalog table in `inference-engine/crl-bundles/README.md`
+   with the new bundle's pres_f1 / type_f1 / min_type_f1 numbers.
+2. Commit the bundle directory and (if you promoted) the symlink change.
+
+For ad-hoc exports outside the bundle catalog (parity testing, scratch
+deploys), use `--out-dir <path>` instead of `--bundle-name` — that
+flag skips the naming check and writes wherever you point it.
+
+---
+
 ## Testing
 
 ```bash

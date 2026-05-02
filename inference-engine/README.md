@@ -53,13 +53,19 @@ debugging:
 
 - [`chart/README.md`](chart/README.md) — Helm chart values reference,
   install steps, replay tool docs.
+- [`crl-bundles/README.md`](crl-bundles/README.md) — pre-exported CRL
+  TorchScript bundles ready to bake into the inference images.
+  `CRL_BUNDLE=<name>` selects one; default is `multiscale-default`.
+- [`scripts/install_build_host.sh`](scripts/install_build_host.sh) —
+  guided Ubuntu / Debian bootstrap of the build host (docker, kubectl,
+  helm, kind, poetry venv, test self-check).
+- [`scripts/build_containers.sh`](scripts/build_containers.sh) — image
+  build, supports `REGISTRY=… TAG=… PUSH=1` for the customer-registry
+  workflow.
 - [`scripts/replay_publisher.py`](scripts/replay_publisher.py) — replay
   tool source. `--help` for full CLI.
 - [`scripts/install_replay.sh`](scripts/install_replay.sh) — guided
   Ubuntu / Debian setup for the replay tool's ROS2 prerequisites.
-- [`scripts/build_containers.sh`](scripts/build_containers.sh) — image
-  build, supports `REGISTRY=… TAG=… PUSH=1` for the customer-registry
-  workflow.
 - [`scripts/tail_egress.sh`](scripts/tail_egress.sh) — one-line-per-message
   live viewer of `/inference_result`. Runs against the egress pod, no
   local ROS2 install needed.
@@ -286,43 +292,30 @@ behavior by `monkeypatch`-ing `ingestor.buffer._ADC_SCALE_NORMALIZE`.
 
 Test dependencies live in the `test` group in `pyproject.toml`. `torch`
 and `torchaudio` are installed separately from the CPU-only PyTorch
-wheel index — the same way the production Dockerfiles do it
-(`src/ingestor/Dockerfile:18-24`). The PyPI default wheels pull in CUDA
-shared libraries (`libcudart.so`) that fail to load on hosts without an
-NVIDIA driver, so we sidestep them.
+wheel index, mirroring `src/ingestor/Dockerfile:18-24`. The default
+PyPI wheels pull in CUDA shared libraries (`libcudart.so`) that fail
+to dlopen on hosts without an NVIDIA driver, so we sidestep them. CPU
+wheels do not affect the deployed model — production containers
+install their own torch at build time.
+
+Run these four commands from the `inference-engine/` directory:
 
 ```bash
-cd inference-engine
 poetry install --with test
-poetry run pip install ./inference-protos    # protobuf bindings used by tests
+poetry run pip install ./inference-protos
 poetry run pip install \
     --extra-index-url https://download.pytorch.org/whl/cpu \
     torch torchaudio
-```
-
-If you see `pytest: command not found` after `poetry install --with
-test`, you're invoking pytest from outside the poetry venv. Either run
-`poetry shell` first or prefix every command with `poetry run` (as
-shown below). The system suggestion to `sudo apt install
-python3-pytest` would install pytest globally and bypass poetry's
-pinned dev deps — don't follow it.
-
-If `import torchaudio` raises `OSError: libcudart.so.13: cannot open
-shared object file`, you have the CUDA-enabled wheel from PyPI and
-need to reinstall using the `--extra-index-url` line above:
-
-```bash
-poetry run pip uninstall -y torch torchaudio
-poetry run pip install \
-    --extra-index-url https://download.pytorch.org/whl/cpu \
-    torch torchaudio
-```
-
-```bash
-# Run the full suite
 poetry run pytest tests/ -v
+```
 
-# Run by node
+Expected outcome on Linux x86_64 (verified 2026-05-02):
+**167 passed, 3 skipped (rclpy-only), 0 failed.**
+
+**Run subsets:**
+
+```bash
+# By node
 poetry run pytest tests/test_discovery.py -v       # Discovery
 poetry run pytest tests/test_ingestor.py -v        # Ingestor (dispatch / role map)
 poetry run pytest tests/test_buffer.py -v          # SensorBuffer (window math, both ADC modes)
@@ -330,11 +323,34 @@ poetry run pytest tests/test_egress.py -v          # Egress (protobuf, NATS, ROS
 poetry run pytest tests/test_infer_detect.py -v    # Vehicle Detection
 poetry run pytest tests/test_infer_classify.py -v  # Vehicle Classification
 
-# Run by category
+# By category
 poetry run pytest -m unit -v         # Unit tests only
 poetry run pytest -m integration -v  # Integration tests only
 poetry run pytest -m asyncio -v      # Async tests only
 ```
+
+**Troubleshooting:**
+
+- **`pytest: command not found`** after `poetry install --with test`:
+  you're invoking pytest from outside the poetry venv. Either run
+  `poetry shell` first or prefix every command with `poetry run` (as
+  shown above). The system suggestion to
+  `sudo apt install python3-pytest` would install pytest globally and
+  bypass poetry's pinned dev deps — don't follow it.
+
+- **`OSError: libcudart.so.13: cannot open shared object file`** on
+  `import torchaudio`: you have the CUDA-enabled wheel from PyPI and
+  need to reinstall the CPU build:
+  ```bash
+  poetry run pip uninstall -y torch torchaudio
+  poetry run pip install \
+      --extra-index-url https://download.pytorch.org/whl/cpu \
+      torch torchaudio
+  ```
+
+- **`ModuleNotFoundError: No module named 'inference_protos'`** during
+  test collection: the `poetry run pip install ./inference-protos`
+  step in the setup didn't complete. Re-run it.
 
 **Test coverage:**
 - **Discovery Node**: ConfigMap parsing, completeness checks, PollState grace logic, manifest construction
@@ -355,28 +371,40 @@ import; they run in CI when ROS2 is on the path. See
 ### Prerequisites (from a fresh clone)
 
 On the build host (a Linux box with Docker; Ubuntu 24.04 is the
-canonical target):
+canonical target). For Ubuntu / Debian, run the bootstrap script and
+skip the rest of this section:
 
-1. **Tooling on PATH**: `docker`, `kubectl`, `helm`. KEDA is *optional*
-   (off by default) — install it only if you want autoscaling on
+```bash
+cd inference-engine
+bash scripts/install_build_host.sh
+```
+
+It checks for `docker`, `kubectl`, `helm`, `kind`, and `poetry`,
+prompts before installing each missing piece, sets up the poetry venv
+with the test group + CPU-only torch, installs `inference-protos`, and
+runs the test suite as a self-check. Pass `ASSUME_YES=1` to skip the
+prompts. KEDA stays optional and isn't installed.
+
+For other platforms — or if you'd rather check things by hand — these
+are what the script verifies:
+
+1. **Tooling on PATH**: `docker`, `kubectl`, `helm`, `kind`, `poetry`.
+   KEDA is *optional* — install it only if you want autoscaling on
    JetStream backlog depth.
-2. **Sibling clone of `crl-train`** next to `inference-engine` in the
-   same parent directory. The container build re-exports a CRL
-   TorchScript bundle at build time and needs `crl-train`'s code +
-   Python deps to do it. Override the location with
-   `CRL_TRAIN_PYTHON=/path/to/python` if your layout differs (see
-   `scripts/build_containers.sh:56`).
-3. **Python deps installed in `crl-train`**:
-   ```bash
-   cd crl-train && poetry install
-   ```
-   The build script runs `crl-train/.venv/bin/python export_for_inference.py`
-   under the hood.
-4. **A saved CRL run** at the path named by `CRL_RUN_DIR` (default at
-   `scripts/build_containers.sh:55` — see [CRL inference deployment](#crl-inference-deployment)).
-   Saved runs are training artifacts, typically not in git; the customer
-   ships the run directory alongside the source repos.
-5. **`kubectl` context** pointing at the destination cluster.
+2. **A CRL inference bundle** under `crl-bundles/`. The repo ships
+   `crl-bundles/multiscale-default` as a symlink to the current
+   leaderboard winner; the build script reads it via the `CRL_BUNDLE`
+   env var (default `multiscale-default`). See
+   [crl-bundles/README.md](crl-bundles/README.md) for the catalog and
+   how to swap in a different bundle.
+3. **`kubectl` context** pointing at the destination cluster.
+
+`crl-train` is **not** a build-time dependency for customers. The
+training pipeline produces a TorchScript bundle once on a dev box and
+commits it under `crl-bundles/`; from there the inference build just
+copies the artifacts. The crl-train fallback path in
+`scripts/build_containers.sh` is for dev re-exports — you can ignore
+it.
 
 `compile_protos.py` is **not** required for a fresh clone — the
 generated `inference_pb2.py` is committed and is pure Python (arch
@@ -497,13 +525,11 @@ KEDA + JetStream + the full inference pipeline. The fake publisher inside
 the cluster drives the ROS2 graph so no real Raspberry Shake hardware is
 required.
 
-**Prerequisites** (one-time):
-```bash
-# Linux. Docker, kubectl, kind, and helm must be on PATH.
-sudo apt install docker.io kubectl
-go install sigs.k8s.io/kind@latest          # or your distro's package
-curl -L https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-```
+**Prerequisites** (one-time): run `scripts/install_build_host.sh` —
+it checks for `docker`, `kubectl`, `helm`, `kind`, and `poetry`, and
+prompts before installing each missing piece on Ubuntu / Debian. See
+the [Prerequisites section](#prerequisites-from-a-fresh-clone) for
+manual steps on other platforms.
 
 **Run the smoke test:**
 ```bash
@@ -550,27 +576,29 @@ multicast is the customer's network admin's problem (or use the
 ### CRL inference deployment
 
 The pipeline deploys the CRL frontend + presence head in `infer-detect`
-and the type head in `infer-classify`. The CRL TorchScript bundle is
-baked into the inference images at build time from a saved CRL run
-directory. The default run dir in `scripts/build_containers.sh` points
-at the current leaderboard winner on the **ship metric** —
-`min_type_f1`, the worst-case vehicle-type macro-F1 across hold-out
-locations (see `crl-train/saved_crl/analysis/cross_location.md`):
+and the type head in `infer-classify`. Each inference image carries a
+**pre-exported TorchScript bundle** from `crl-bundles/` — a small
+directory of `.ts` files plus a `meta.json`. Customers don't need
+crl-train installed; they just pick a bundle.
 
-| Run path | pres_f1 | type_f1 | min_type_f1 |
-|----------|--------:|--------:|------------:|
-| `crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type` | 0.875 | 0.657 | **0.436** |
+`scripts/build_containers.sh` reads `CRL_BUNDLE` (default
+`multiscale-default`) and resolves it against `crl-bundles/`. The
+shipping leader on the **ship metric** — `min_type_f1`, worst-case
+vehicle-type macro-F1 across hold-out locations (see
+`crl-train/saved_crl/analysis/cross_location.md`):
 
-The export script reads `meta.json` + `downstream_best.pth` from the
-probe subdirectory (`downstream/<probe>/`), so `CRL_RUN_DIR` must point
-at the probe folder, not the run root.
+| Bundle | Frontend | pres_f1 | type_f1 | min_type_f1 |
+|--------|----------|--------:|--------:|------------:|
+| `multiscale-vae-v3_lowfreq-mlp_ztype-aux_type-v1` | multiscale | 0.875 | 0.657 | **0.436** |
 
-Override the default to ship a different run:
+`multiscale-default` is a symlink to that bundle today. See
+[crl-bundles/README.md](crl-bundles/README.md) for the full catalog,
+naming convention, and how to swap defaults.
+
+Override the bundle for a customer-specific build:
 
 ```bash
-CRL_RUN_DIR=crl-train/saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \
-    CRL_FORCE_EXPORT=1 \
-    scripts/build_containers.sh infer-detect infer-classify
+CRL_BUNDLE=<bundle-name> bash scripts/build_containers.sh infer-detect infer-classify
 
 # Roll the inference pods (Helm install)
 kubectl rollout restart deploy/infer-detect deploy/infer-classify
@@ -589,6 +617,34 @@ The wire protocol (`DetectionResult.z_fused` vs `z_audio + z_seismic`)
 and the inference pods auto-detect mode from `meta.json` baked into the
 image. Per-sensor mode combines the two presence heads via OR; the type
 heads are averaged before argmax.
+
+#### Producing a new bundle (dev only)
+
+When a new training run beats the current leader, re-export and commit
+the new bundle. This requires `crl-train` installed alongside
+`inference-engine`. The exporter writes directly into this repo's
+`crl-bundles/` directory when given `--bundle-name`:
+
+```bash
+cd crl-train
+poetry run python export_for_inference.py \
+    --save-dir saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \
+    --bundle-name <frontend>-<mode>-<run>-<probe>-aux_type-v<N>
+```
+
+To promote it as the new shipping default in the same invocation:
+
+```bash
+poetry run python export_for_inference.py \
+    --save-dir saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \
+    --bundle-name <frontend>-<mode>-<run>-<probe>-aux_type-v<N> \
+    --update-default-symlink
+```
+
+Then update the catalog table in `crl-bundles/README.md` and commit
+the new bundle directory (plus the symlink change, if you promoted).
+See [`crl-train/README.md`](../crl-train/README.md) for the full
+deployment workflow.
 
 ---
 

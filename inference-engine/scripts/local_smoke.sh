@@ -47,7 +47,10 @@ else
     echo "=== creating kind cluster '$KIND_CLUSTER' (Calico CNI) ==="
     kind create cluster --name "$KIND_CLUSTER" --config "$SCRIPT_DIR/kind/kind-linux.yaml"
     echo "=== installing Calico for multicast-capable pod networking ==="
-    kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/tigera-operator.yaml
+    # --server-side: the tigera-operator CRDs exceed the 262144-byte
+    # annotation limit that client-side `kubectl apply` enforces on
+    # newer kubectl versions, so the apply has to happen server-side.
+    kubectl apply --server-side -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/tigera-operator.yaml
     cat <<EOF | kubectl apply -f -
 apiVersion: operator.tigera.io/v1
 kind: Installation

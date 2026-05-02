@@ -21,14 +21,30 @@ Output layout (in --out-dir):
     meta.json
 
 CLI:
-    python export_for_inference.py --save-dir saved_crl/runs/<frontend>/<mode>/<run> \\
-        --out-dir /path/to/model/folder
+    # Customer-facing path: write directly into the inference-engine
+    # bundle catalog (assumes crl-train and inference-engine are
+    # siblings under one parent dir).
+    python export_for_inference.py \\
+        --save-dir saved_crl/runs/multiscale/vae/<run>/downstream/<probe> \\
+        --bundle-name multiscale-vae-<run>-<probe>-aux_type-v2
+
+    # Promote the new bundle as the shipping default in the same run:
+    python export_for_inference.py \\
+        --save-dir saved_crl/runs/multiscale/vae/<run>/downstream/<probe> \\
+        --bundle-name multiscale-vae-<run>-<probe>-aux_type-v2 \\
+        --update-default-symlink
+
+    # Escape hatch: explicit out-dir for one-off exports outside the
+    # bundle catalog (e.g. ad-hoc evaluation).
+    python export_for_inference.py --save-dir saved_crl/runs/<run> \\
+        --out-dir /tmp/scratch-bundle
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import torch
@@ -38,6 +54,19 @@ from training.trainer import CRLModel
 
 PER_SENSOR_FRONTENDS = {"morlet", "morlet_per_sensor", "morlet_learnable"}
 FUSED_FRONTENDS = {"multiscale", "morlet_fused", "morlet_learnable_fused"}
+
+# Default location of the inference-engine bundle catalog, relative to
+# the parent of this repo. Customers and dev both place crl-train and
+# inference-engine as siblings under one parent dir.
+_DEFAULT_BUNDLES_PARENT = Path(__file__).resolve().parent.parent / "inference-engine" / "crl-bundles"
+
+# Bundle names follow the convention documented in
+# inference-engine/crl-bundles/README.md:
+#   <frontend>-<training-mode>-<run-id>-<probe>-[aux_type-]v<N>
+# We don't enforce the full grammar — just that it ends in -v<N> so a
+# version exists, and that there's no path separator (so a typo can't
+# write outside crl-bundles/).
+_BUNDLE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*-v\d+$")
 
 
 # ---------------------------------------------------------------------------
@@ -727,11 +756,44 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Saved-run directory (contains meta.json + downstream_best.pth)",
     )
-    ap.add_argument(
+
+    target_group = ap.add_mutually_exclusive_group(required=True)
+    target_group.add_argument(
+        "--bundle-name",
+        type=str,
+        help=(
+            "Name of a bundle directory under inference-engine/crl-bundles/. "
+            "Resolved relative to ../inference-engine/crl-bundles/ unless "
+            "--bundles-dir is set. Convention: "
+            "<frontend>-<training-mode>-<run-id>-<probe>-[aux_type-]v<N>. "
+            "Example: multiscale-vae-v3_lowfreq-mlp_ztype-aux_type-v2"
+        ),
+    )
+    target_group.add_argument(
         "--out-dir",
-        required=True,
         type=Path,
-        help="Output directory for TorchScript artifacts and meta.json",
+        help=(
+            "Explicit output directory (escape hatch for one-off exports). "
+            "Use --bundle-name for the customer-facing path."
+        ),
+    )
+    ap.add_argument(
+        "--bundles-dir",
+        type=Path,
+        default=_DEFAULT_BUNDLES_PARENT,
+        help=(
+            f"Parent directory holding bundle subdirs. "
+            f"Default: {_DEFAULT_BUNDLES_PARENT}"
+        ),
+    )
+    ap.add_argument(
+        "--update-default-symlink",
+        action="store_true",
+        help=(
+            "After a successful --bundle-name export, repoint "
+            "<bundles-dir>/multiscale-default at the new bundle. "
+            "Only valid with --bundle-name."
+        ),
     )
     ap.add_argument(
         "--ckpt-name",
@@ -761,7 +823,29 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip parity check between eager and scripted modules",
     )
-    return ap.parse_args()
+
+    args = ap.parse_args()
+
+    # Resolve --bundle-name to a concrete out_dir, with validation.
+    if args.bundle_name is not None:
+        if not _BUNDLE_NAME_RE.match(args.bundle_name):
+            ap.error(
+                f"--bundle-name {args.bundle_name!r} doesn't match the convention "
+                f"<name>-v<N>. See inference-engine/crl-bundles/README.md for the "
+                f"full naming guide."
+            )
+        if not args.bundles_dir.is_dir():
+            ap.error(
+                f"--bundles-dir {args.bundles_dir} does not exist. "
+                f"Pass --bundles-dir explicitly or place crl-train and "
+                f"inference-engine as siblings under one parent dir."
+            )
+        args.out_dir = args.bundles_dir / args.bundle_name
+
+    if args.update_default_symlink and args.bundle_name is None:
+        ap.error("--update-default-symlink requires --bundle-name")
+
+    return args
 
 
 def main() -> None:
@@ -847,6 +931,27 @@ def main() -> None:
     meta_path.write_text(json.dumps(deploy_meta, indent=2) + "\n")
     print(f"\nWrote {meta_path}")
     print(f"Done. {args.out_dir}/ ready for inference-engine deploy.")
+
+    if args.update_default_symlink:
+        # Repoint <bundles-dir>/multiscale-default at the new bundle.
+        # Use a relative target so the symlink survives a repo move.
+        link_path = args.bundles_dir / "multiscale-default"
+        target = args.bundle_name
+        if link_path.exists() or link_path.is_symlink():
+            link_path.unlink()
+        link_path.symlink_to(target)
+        print(f"Repointed {link_path} -> {target}")
+        print(
+            "Remember to update the catalog table in "
+            "inference-engine/crl-bundles/README.md and commit."
+        )
+    elif args.bundle_name is not None:
+        print(
+            f"\nTo make this the new shipping default, re-run with "
+            f"--update-default-symlink, or manually:\n"
+            f"  ln -sfn {args.bundle_name} "
+            f"{args.bundles_dir}/multiscale-default"
+        )
 
 
 if __name__ == "__main__":

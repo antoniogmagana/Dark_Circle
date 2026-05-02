@@ -1,0 +1,21 @@
+{
+  "frontend_type": "multiscale",
+  "mode": "fused",
+  "sensors": [
+    "audio",
+    "seismic"
+  ],
+  "probe_mode": "mlp_ztype",
+  "class_names": [
+    "pedestrian",
+    "light",
+    "medium",
+    "heavy"
+  ],
+  "presence_threshold": 0.5,
+  "z_dim": 24,
+  "audio_sample_rate": 16000,
+  "audio_window_size": 16000,
+  "seismic_sample_rate": 100,
+  "seismic_window_size": 100
+}

@@ -42,45 +42,93 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
 cd "$ROOT"
 
-# Where the CRL run lives, relative to the repo root. Override by setting
-# CRL_RUN_DIR before invoking the script. The export script writes
-# encoder_*.ts, type_head_*.ts, and meta.json into build/crl-export/.
+# Source of the CRL TorchScript bundle for the inference images. Two
+# resolution paths, in order:
 #
-# Default points at the current leaderboard winner on the ship metric
-# `min_type_f1` (worst-case cross-location type macro-F1) per
-# crl-train/saved_crl/analysis/cross_location.md:
-#   multiscale/vae/v3_lowfreq, probe mlp_ztype__crl_best_aux_type
-#   pres_f1=0.875, type_f1=0.6565, min_type_f1=0.4364
-# The probe subdir is what carries meta.json + downstream_best.pth.
+#   1. CRL_BUNDLE: name of a pre-exported bundle directory under
+#      crl-bundles/. Customer path. No crl-train install needed.
+#      Default is "multiscale-default", a symlink to whichever bundle
+#      is currently the shipping leader (see crl-bundles/README.md).
+#
+#   2. CRL_RUN_DIR + CRL_TRAIN_PYTHON: re-export from a saved run.
+#      Dev path — requires crl-train to be installed alongside.
+#      Used when CRL_BUNDLE doesn't resolve to an existing directory.
+#
+# Override CRL_FORCE_EXPORT=1 to redo the staging even if the cached
+# bundle in build/crl-export/ already matches.
+CRL_BUNDLE="${CRL_BUNDLE:-multiscale-default}"
 CRL_RUN_DIR="${CRL_RUN_DIR:-crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type}"
 CRL_TRAIN_PYTHON="${CRL_TRAIN_PYTHON:-$REPO_ROOT/crl-train/.venv/bin/python}"
 
-# Stage the CRL TorchScript export into build/crl-export/ so the
-# infer-detect / infer-classify Dockerfiles can COPY it. Re-runs every
-# build so a checkpoint or export-script update is picked up. Skipped if
-# the export already exists and CRL_FORCE_EXPORT is not set.
+# Stage the CRL TorchScript artifacts into build/crl-export/ so the
+# infer-detect / infer-classify Dockerfiles can COPY them. Resolution
+# order: pre-bundled (crl-bundles/$CRL_BUNDLE) first, then re-export
+# from $CRL_RUN_DIR if crl-train is available.
 stage_crl_export() {
     local out="$ROOT/build/crl-export"
-    if [ -d "$out" ] && [ -z "${CRL_FORCE_EXPORT:-}" ]; then
-        echo "=== CRL export already staged at $out (set CRL_FORCE_EXPORT=1 to redo) ==="
+    local bundle_path="$ROOT/crl-bundles/$CRL_BUNDLE"
+    local stamp="$out/.bundle_id"
+
+    # ---- Path 1: pre-bundled artifact ---------------------------------
+    if [ -d "$bundle_path" ]; then
+        # Resolve symlinks so the stamp records the underlying bundle,
+        # not the alias. This keeps the skip-if-same check robust when a
+        # symlink target changes.
+        local resolved
+        resolved="$(cd "$bundle_path" && pwd -P)"
+        local bundle_id
+        bundle_id="$(basename "$resolved")"
+
+        if [ -f "$stamp" ] && \
+           [ "$(cat "$stamp" 2>/dev/null)" = "$bundle_id" ] && \
+           [ -z "${CRL_FORCE_EXPORT:-}" ]; then
+            echo "=== CRL bundle '$bundle_id' already staged at $out (set CRL_FORCE_EXPORT=1 to redo) ==="
+            return 0
+        fi
+
+        echo "=== copying CRL bundle '$bundle_id' -> build/crl-export ==="
+        rm -rf "$out"
+        mkdir -p "$out"
+        cp -RL "$bundle_path"/. "$out"/
+        printf "%s\n" "$bundle_id" > "$stamp"
         return 0
     fi
+
+    # ---- Path 2: re-export from a crl-train saved run -----------------
     if [ ! -d "$REPO_ROOT/$CRL_RUN_DIR" ]; then
-        echo "CRL run dir not found: $REPO_ROOT/$CRL_RUN_DIR" >&2
+        echo "CRL bundle '$CRL_BUNDLE' not found at $bundle_path" >&2
+        echo "and CRL_RUN_DIR not found at $REPO_ROOT/$CRL_RUN_DIR" >&2
+        echo "" >&2
+        echo "Set CRL_BUNDLE to one of the directories under crl-bundles/," >&2
+        echo "or install crl-train and point CRL_RUN_DIR at a saved run." >&2
         exit 1
     fi
     if [ ! -x "$CRL_TRAIN_PYTHON" ]; then
-        echo "CRL_TRAIN_PYTHON not executable: $CRL_TRAIN_PYTHON" >&2
-        echo "(install crl-train deps with: cd $REPO_ROOT/crl-train && poetry install)" >&2
+        echo "CRL bundle '$CRL_BUNDLE' not found at $bundle_path" >&2
+        echo "and CRL_TRAIN_PYTHON not executable: $CRL_TRAIN_PYTHON" >&2
+        echo "" >&2
+        echo "Customer path: set CRL_BUNDLE to a bundle under crl-bundles/." >&2
+        echo "Dev path:      cd $REPO_ROOT/crl-train && poetry install" >&2
         exit 1
     fi
+
+    local run_id
+    run_id="run:$(basename "$CRL_RUN_DIR")"
+    if [ -f "$stamp" ] && \
+       [ "$(cat "$stamp" 2>/dev/null)" = "$run_id" ] && \
+       [ -z "${CRL_FORCE_EXPORT:-}" ]; then
+        echo "=== CRL re-export for '$run_id' already staged (set CRL_FORCE_EXPORT=1 to redo) ==="
+        return 0
+    fi
+
     rm -rf "$out"
     mkdir -p "$out"
-    echo "=== exporting CRL run $CRL_RUN_DIR -> build/crl-export ==="
+    echo "=== re-exporting CRL run $CRL_RUN_DIR -> build/crl-export ==="
     (cd "$REPO_ROOT/crl-train" && \
         "$CRL_TRAIN_PYTHON" export_for_inference.py \
             --save-dir "$REPO_ROOT/$CRL_RUN_DIR" \
             --out-dir "$out")
+    printf "%s\n" "$run_id" > "$stamp"
 }
 
 # Image short-name -> Dockerfile path lookup.
