@@ -94,8 +94,12 @@ it skips the naming convention check and writes wherever you ask.
 
 ## Current bundles
 
+`pres_f1` / `type_f1` are val-split numbers from the run's `report.json`;
+`min_type_f1` is the worst per-class F1 on the full eval split.
+
 | Bundle | Frontend | pres_f1 | type_f1 | min_type_f1 | Notes |
 |--------|----------|--------:|--------:|------------:|-------|
-| `multiscale-vae-v3_lowfreq-mlp_ztype-aux_type-v1` | multiscale | 0.875 | 0.657 | 0.436 | Current ship metric leader. Backed by the 2026-04-29 v3_lowfreq run, mlp_ztype probe with aux_type training. |
+| `multiscale-vae-2026_04_29_13_26_17-mlp_ztype-aux_type-v1` | multiscale | 0.873 | 0.664 | 0.433 | Current default. Backed by the 2026-04-29 13:26 run; `d_z=32`, `D_TYPE=12` (export rebinds the live latent constants from the checkpoint). |
+| `multiscale-vae-v3_lowfreq-mlp_ztype-aux_type-v1` | multiscale | 0.875 | 0.657 | 0.436 | Prior default. Backed by the v3_lowfreq run, `d_z=24`, `D_TYPE=6`. |
 
-`multiscale-default` → `multiscale-vae-v3_lowfreq-mlp_ztype-aux_type-v1`
+`multiscale-default` → `multiscale-vae-2026_04_29_13_26_17-mlp_ztype-aux_type-v1`
