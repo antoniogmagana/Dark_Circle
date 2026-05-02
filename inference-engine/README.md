@@ -284,14 +284,20 @@ behavior by `monkeypatch`-ing `ingestor.buffer._ADC_SCALE_NORMALIZE`.
 
 **Setup (one time):**
 
-Test dependencies live in the `test` group in `pyproject.toml`. Install
-them with poetry; pytest is invoked through `poetry run` so it picks up
-the venv automatically.
+Test dependencies live in the `test` group in `pyproject.toml`. `torch`
+and `torchaudio` are installed separately from the CPU-only PyTorch
+wheel index — the same way the production Dockerfiles do it
+(`src/ingestor/Dockerfile:18-24`). The PyPI default wheels pull in CUDA
+shared libraries (`libcudart.so`) that fail to load on hosts without an
+NVIDIA driver, so we sidestep them.
 
 ```bash
 cd inference-engine
 poetry install --with test
 poetry run pip install ./inference-protos    # protobuf bindings used by tests
+poetry run pip install \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    torch torchaudio
 ```
 
 If you see `pytest: command not found` after `poetry install --with
@@ -300,6 +306,17 @@ test`, you're invoking pytest from outside the poetry venv. Either run
 shown below). The system suggestion to `sudo apt install
 python3-pytest` would install pytest globally and bypass poetry's
 pinned dev deps — don't follow it.
+
+If `import torchaudio` raises `OSError: libcudart.so.13: cannot open
+shared object file`, you have the CUDA-enabled wheel from PyPI and
+need to reinstall using the `--extra-index-url` line above:
+
+```bash
+poetry run pip uninstall -y torch torchaudio
+poetry run pip install \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    torch torchaudio
+```
 
 ```bash
 # Run the full suite

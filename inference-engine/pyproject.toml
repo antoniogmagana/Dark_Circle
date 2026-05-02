@@ -43,13 +43,14 @@ test = [
     # Mocks for external systems
     "responses (>=0.24.0)",
     "aioresponses (>=0.7.6)",
-    # Runtime deps the tests import directly. Production Dockerfiles
-    # install the CPU-only wheel from the PyTorch index (see
-    # src/ingestor/Dockerfile:18-24); tests pull whatever PyPI serves,
-    # which is fine because torch is only imported, never run on real
-    # GPU work in tests.
+    # Runtime deps the tests import directly. torch / torchaudio are
+    # NOT listed here — install them separately via the CPU-only wheel
+    # index after `poetry install --with test`:
+    #     poetry run pip install --extra-index-url \
+    #         https://download.pytorch.org/whl/cpu torch torchaudio
+    # The PyPI torch wheel pulls in CUDA shared libraries that fail to
+    # dlopen on cudaless servers. Production Dockerfiles already use
+    # this CPU-only install pattern (src/ingestor/Dockerfile:18-24).
     "numpy (>=2.4.0)",
     "protobuf (>=4.0.0,<7.0.0)",
-    "torch (>=2.0)",
-    "torchaudio (>=2.0)",
 ]
