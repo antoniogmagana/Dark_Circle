@@ -20,8 +20,13 @@ Run directory layout (what's expected on disk):
     └── eval/<probe_mode>__<ckpt>/<split>/
         └── eval_report.json             # presence + type metrics per split
 
-`<split>` is one of {iobt, focal, m3nvc, full} — identifies which dataset
-the eval ran on.
+`<split>` names:
+- 'full' — all test windows pooled.
+- '<dataset>' (one of iobt, focal, m3nvc) — per-dataset aggregate.
+- '<dataset>__<vehicle>' — per-vehicle within a dataset (e.g. focal__pickup).
+  These are diagnostic-only and are EXCLUDED from `_cross_location_metrics`'s
+  per-dataset aggregator (see `_PER_DATASET_KEYS` below) so they don't pollute
+  worst-dataset / min-F1 calculations.
 """
 
 from __future__ import annotations
@@ -39,6 +44,11 @@ from pathlib import Path
 # it's the minimal-capacity probe on the ELBO-selected checkpoint — everything
 # else is a variation.
 CANONICAL_PROBE = "linear_ztype__crl_best"
+
+# Split names that count as "per-dataset" for cross-location aggregation.
+# Per-vehicle splits (named '<dataset>__<vehicle>') and 'full' are excluded —
+# they are diagnostic-only or aggregate, not per-dataset data points.
+_PER_DATASET_KEYS = frozenset({"focal", "iobt", "m3nvc"})
 
 # val_ref_elbo threshold above which a run is considered diverged. Based on
 # empirical observation: healthy morlet runs land in [0.2, 5], divergent ones
@@ -246,12 +256,12 @@ def _cross_location_metrics(run_dir: Path, preferred: str = CANONICAL_PROBE) -> 
         # type metric: prefer macro_f1_support_only (correct for missing classes).
         type_block = report.get("type", {})
         f1 = type_block.get("macro_f1_support_only") or type_block.get("macro_f1")
-        if f1 is not None and split != "full":
+        if f1 is not None and split in _PER_DATASET_KEYS:
             per_type[split] = float(f1)
         # presence metric
         pres_block = report.get("presence", {})
         pres_f1 = pres_block.get("f1")
-        if pres_f1 is not None and split != "full":
+        if pres_f1 is not None and split in _PER_DATASET_KEYS:
             per_pres[split] = float(pres_f1)
         # calibrated metrics — read from 'full' if present.
         if split == "full":

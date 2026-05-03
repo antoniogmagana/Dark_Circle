@@ -35,8 +35,8 @@ DATASET_VEHICLE_MAP = {
         "mustang0528": ["medium", "mustang", "test"],
         "pickup": ["heavy", "pickup", "train"],
         "pickup2": ["heavy", "pickup", "split"],
-        # "tesla":       ["heavy",      "tesla",      "train"],
-        # "tesla2":      ["heavy",      "tesla",      "split"],
+        "tesla": ["heavy", "tesla", "train"],
+        "tesla2": ["heavy", "tesla", "split"],
     },
     "m3nvc": {
         "background": ["background", "background"],

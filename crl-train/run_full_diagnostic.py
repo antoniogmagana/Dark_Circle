@@ -9,7 +9,9 @@ Phases
 1. CRL pre-training (skipped with --crl-run-dir)
    Emits crl_best.pth (val_ref_elbo) and crl_best_aux_type.pth (val_aux_type_f1).
 2. B1 — downstream probes: 3 probe modes × 2 checkpoints = 6 runs.
-3. B2 — test evals: each downstream on {full, focal-only, iobt-only} = 18 evals.
+3. B2 — test evals: each downstream on aggregate splits {full, focal, iobt, m3nvc}
+   plus per-vehicle splits inside each dataset (focal/walk, focal/pickup, ...,
+   m3nvc/cx30, ...). Surfaces which vehicles are confounding within each dataset.
 4. Consolidated report.json / report.md at the run root.
 
 Usage
@@ -42,7 +44,7 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from crl_vehicle.config import CRLConfig
+from crl_vehicle.config import DATASET_VEHICLE_MAP, CRLConfig
 from crl_vehicle.data.dataset import (
     SensorDataset,
     StratifiedPairDataset,
@@ -86,11 +88,38 @@ def _probe_modes_for(cfg: CRLConfig) -> tuple[str, ...]:
 
 
 CKPT_NAMES = ("crl_best.pth", "crl_best_aux_type.pth")
-EVAL_SPLITS = (
-    ("full", None),  # no filter — full test set
-    ("focal", ["focal"]),  # ID vehicles (bicycle2, mustang0528)
-    ("iobt", ["iobt"]),  # OOD vehicles (polaris, warhog, silverado)
-)
+
+# Datasets present in DATASET_VEHICLE_MAP (id_split._KNOWN_DATASETS mirrors this).
+# Background entries are filtered out — they're length-2 in the map and have no
+# train/val/test/split marker.
+_EVAL_DATASETS: tuple[str, ...] = ("focal", "iobt", "m3nvc")
+
+
+def _build_eval_splits() -> tuple[tuple[str, list[str] | None, str | None], ...]:
+    """Enumerate (split_name, dataset_filter, vehicle_filter) tuples.
+
+    - ('full', None, None): no filter — every test window.
+    - ('<dataset>', [<dataset>], None): aggregate per dataset (focal, iobt, m3nvc).
+    - ('<dataset>__<vehicle>', [<dataset>], <vehicle>): per-vehicle within dataset.
+
+    Per-vehicle rows are enumerated from DATASET_VEHICLE_MAP. Background entries
+    have no third (split-marker) element and are skipped.
+
+    Vehicle filter matches against the parsed vehicle field in the dataset's
+    _index rows (gkey[1]) — see crl_vehicle/data/dataset.py.
+    """
+    splits: list[tuple[str, list[str] | None, str | None]] = [("full", None, None)]
+    for ds in _EVAL_DATASETS:
+        splits.append((ds, [ds], None))
+        ds_map = DATASET_VEHICLE_MAP.get(ds, {})
+        for vehicle, entry in sorted(ds_map.items()):
+            if len(entry) < 3:
+                continue  # background / unmarked
+            splits.append((f"{ds}__{vehicle}", [ds], vehicle))
+    return tuple(splits)
+
+
+EVAL_SPLITS = _build_eval_splits()
 
 
 # ---------------------------------------------------------------------------
@@ -534,10 +563,14 @@ def phase_evals(
     seed: int,
     recalibrate: bool = False,
 ) -> list[dict]:
-    """Evaluate each downstream model on {full, focal, iobt} splits.
+    """Evaluate each downstream model on every entry in EVAL_SPLITS.
+
+    Splits include 'full', per-dataset aggregates ({focal, iobt, m3nvc}), and
+    per-vehicle splits within each dataset (focal/walk, m3nvc/cx30, ...) — see
+    _build_eval_splits().
 
     Shares one preloaded test_ds across all evals by snapshotting then filtering
-    test_ds._index in place per run.
+    parent indices into per-split Subsets (no test_ds mutation).
     """
     print(
         f"\n{'=' * 72}\n  PHASE 3 — test evals " f"(probes × {len(EVAL_SPLITS)} splits)\n{'=' * 72}"
@@ -554,13 +587,18 @@ def phase_evals(
     # Subset to filter rows by parent-index without mutating the dataset.
     from torch.utils.data import Subset
 
-    split_loaders: list[tuple[str, list | None, Subset, DataLoader]] = []
-    for split_name, include in EVAL_SPLITS:
-        if include is None:
+    split_loaders: list[tuple[str, list | None, str | None, Subset, DataLoader]] = []
+    for split_name, include, vehicle in EVAL_SPLITS:
+        if include is None and vehicle is None:
             split_idxs = list(range(len(orig_index)))
         else:
-            allowed = set(include)
-            split_idxs = [i for i, row in enumerate(orig_index) if row[0][0] in allowed]
+            allowed = set(include) if include is not None else None
+            split_idxs = [
+                i
+                for i, row in enumerate(orig_index)
+                if (allowed is None or row[0][0] in allowed)
+                and (vehicle is None or row[0][1] == vehicle)
+            ]
         if not split_idxs:
             print(f"  [warn] {split_name}: no windows after filter, skipping")
             continue
@@ -575,7 +613,7 @@ def phase_evals(
             persistent_workers=num_workers > 0,
             **seeded_dataloader_kwargs(seed),
         )
-        split_loaders.append((split_name, include, split_ds, split_loader))
+        split_loaders.append((split_name, include, vehicle, split_ds, split_loader))
 
     probe_dirs = sorted(probes_root.iterdir()) if probes_root.exists() else []
     for probe_dir in probe_dirs:
@@ -600,7 +638,7 @@ def phase_evals(
         )
         model.eval()
 
-        for split_name, include, split_ds, loader in split_loaders:
+        for split_name, include, vehicle, split_ds, loader in split_loaders:
             out_dir = evals_root / run_name / split_name
             out_dir.mkdir(parents=True, exist_ok=True)
             report_path = out_dir / "eval_report.json"
@@ -624,6 +662,7 @@ def phase_evals(
                 "ckpt_name": meta.get("ckpt_name"),
                 "split": split_name,
                 "include_datasets": include,
+                "include_vehicle": vehicle,
                 "n_windows": len(split_ds),
                 "presence": pres_m,
                 "type": type_m,
