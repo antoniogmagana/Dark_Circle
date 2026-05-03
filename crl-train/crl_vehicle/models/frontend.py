@@ -118,6 +118,11 @@ class MorletFilterbank(nn.Module):
         kernel_re, kernel_im = self._build_kernels(scales, w0)
         self.register_buffer("kernel_re", kernel_re)
         self.register_buffer("kernel_im", kernel_im)
+        # Lazy cache for kernel rFFTs, keyed by n_fft. Filled on first
+        # _fft_morlet_conv call per signal length and reused thereafter.
+        # Not registered as a buffer (it changes shape lazily and depends on
+        # device); cleared automatically on .to() via _apply override below.
+        self._kernel_rfft_cache: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
 
     @property
     def total_out_channels(self) -> int:
@@ -229,6 +234,12 @@ class MorletFilterbank(nn.Module):
         which in frequency domain is irfft(rfft(x) * conj(rfft(k))).
         Bundling re + im kernels as complex k = kernel_re + i·kernel_im
         lets one complex multiply produce both outputs.
+
+        The kernel's rfft (`K_re_f`, `K_im_f`) is cached per n_fft length on
+        the fixed-Morlet path — kernels are buffers there and don't change
+        between forwards, so re-running rfft on the kernel every step is
+        wasted work. The learnable subclass overrides _kernel_rfft() to
+        always recompute.
         """
         B, C_in, L = x.shape
         C_out, _, ks = kernel_re.shape
@@ -240,11 +251,10 @@ class MorletFilterbank(nn.Module):
         while n_fft < L + ks - 1:
             n_fft <<= 1
 
-        # rFFT of the real input and both real kernels. Using rFFT (not FFT)
-        # saves ~half the cost on real signals. Shape (..., n_fft // 2 + 1).
+        # rFFT of the real input. Using rFFT (not FFT) saves ~half the cost
+        # on real signals. Shape (..., n_fft // 2 + 1).
         X = torch.fft.rfft(x, n=n_fft, dim=-1)
-        K_re_f = torch.fft.rfft(kernel_re, n=n_fft, dim=-1)
-        K_im_f = torch.fft.rfft(kernel_im, n=n_fft, dim=-1)
+        K_re_f, K_im_f = self._kernel_rfft(kernel_re, kernel_im, n_fft)
 
         # Cross-correlation in frequency domain: Y = X * conj(K).
         # Summed over C_in via einsum, for both re and im kernels.
@@ -267,6 +277,39 @@ class MorletFilterbank(nn.Module):
         re_out = torch.roll(re_full, shifts=shift, dims=-1)[..., :L]
         im_out = torch.roll(im_full, shifts=shift, dims=-1)[..., :L]
         return re_out, im_out
+
+    def _kernel_rfft(
+        self,
+        kernel_re: torch.Tensor,
+        kernel_im: torch.Tensor,
+        n_fft: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return rFFT of the real/imag kernels at length n_fft, cached.
+
+        Fixed-Morlet kernels are buffers; their rFFTs are deterministic
+        functions of (kernel_re, kernel_im, n_fft) and don't change between
+        forwards. Cache them keyed by n_fft. The learnable subclass overrides
+        this to always recompute (since kernels change every step).
+        """
+        cached = self._kernel_rfft_cache.get(n_fft)
+        if cached is not None:
+            K_re_f, K_im_f = cached
+            # Defensive: if the buffer has moved devices since we cached,
+            # invalidate. (`_apply` already clears on standard .to(), but a
+            # direct buffer reassignment could bypass it.)
+            if K_re_f.device == kernel_re.device:
+                return K_re_f, K_im_f
+        K_re_f = torch.fft.rfft(kernel_re, n=n_fft, dim=-1)
+        K_im_f = torch.fft.rfft(kernel_im, n=n_fft, dim=-1)
+        self._kernel_rfft_cache[n_fft] = (K_re_f, K_im_f)
+        return K_re_f, K_im_f
+
+    def _apply(self, fn):  # type: ignore[override]
+        # nn.Module.to / .cuda / .cpu funnel through _apply. Invalidate the
+        # rFFT cache when the module is moved so we don't keep stale
+        # device-resident tensors.
+        self._kernel_rfft_cache = {}
+        return super()._apply(fn)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.float()
@@ -346,6 +389,17 @@ class LearnableMorletFilterbank(MorletFilterbank):
                 self.w0_per_filter if self.learnable_w0 else torch.full_like(scales, float(self.w0))
             )
             return w0_vec / (2 * math.pi * scales)
+
+    def _kernel_rfft(  # type: ignore[override]
+        self,
+        kernel_re: torch.Tensor,
+        kernel_im: torch.Tensor,
+        n_fft: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Kernels change every forward (scales are learnable); never cache.
+        K_re_f = torch.fft.rfft(kernel_re, n=n_fft, dim=-1)
+        K_im_f = torch.fft.rfft(kernel_im, n=n_fft, dim=-1)
+        return K_re_f, K_im_f
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.float()

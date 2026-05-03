@@ -4,6 +4,17 @@ import torch.nn as nn
 from crl_vehicle.config import CRLConfig
 from training.trainer import CRLModel, Trainer
 
+# Active frontend variants. `frontend_type='morlet'` is deprecated and
+# removed (see config.py for the migration error); kept out of this list so
+# parametrized tests don't try to construct an invalid config.
+ALL_FRONTENDS = (
+    "multiscale",
+    "morlet_per_sensor",
+    "morlet_fused",
+    "morlet_learnable",
+    "morlet_learnable_fused",
+)
+
 
 @pytest.fixture
 def cfg_ms():
@@ -19,7 +30,9 @@ def cfg_ms():
 
 @pytest.fixture
 def cfg_morlet():
-    return CRLConfig(d_model=32, n_layers=1, n_heads=4, frontend_type="morlet", d_z=24)
+    return CRLConfig(
+        d_model=32, n_layers=1, n_heads=4, frontend_type="morlet_per_sensor", d_z=24
+    )
 
 
 def _synthetic_batch(B=4, n_partners=4):
@@ -122,49 +135,19 @@ class TestCRLModelMorlet:
 
 
 class TestCRLModelShared:
-    @pytest.mark.parametrize(
-        "fe",
-        [
-            "multiscale",
-            "morlet",
-            "morlet_per_sensor",
-            "morlet_fused",
-            "morlet_learnable",
-            "morlet_learnable_fused",
-        ],
-    )
+    @pytest.mark.parametrize("fe", ALL_FRONTENDS)
     def test_has_latent(self, fe):
         from crl_vehicle.models.latent import CausalLatentSpace
 
         model = CRLModel(CRLConfig(frontend_type=fe, d_model=32, n_layers=1))
         assert isinstance(model.latent, CausalLatentSpace)
 
-    @pytest.mark.parametrize(
-        "fe",
-        [
-            "multiscale",
-            "morlet",
-            "morlet_per_sensor",
-            "morlet_fused",
-            "morlet_learnable",
-            "morlet_learnable_fused",
-        ],
-    )
+    @pytest.mark.parametrize("fe", ALL_FRONTENDS)
     def test_has_interv_classifier(self, fe):
         model = CRLModel(CRLConfig(frontend_type=fe, d_model=32, n_layers=1))
         assert hasattr(model, "interv_classifier")
 
-    @pytest.mark.parametrize(
-        "fe",
-        [
-            "multiscale",
-            "morlet",
-            "morlet_per_sensor",
-            "morlet_fused",
-            "morlet_learnable",
-            "morlet_learnable_fused",
-        ],
-    )
+    @pytest.mark.parametrize("fe", ALL_FRONTENDS)
     def test_backbone_excludes_downstream_heads(self, fe):
         model = CRLModel(CRLConfig(frontend_type=fe, d_model=32, n_layers=1))
         backbone_ids = {id(p) for p in model.backbone_parameters()}
@@ -178,17 +161,7 @@ class TestCRLModelShared:
 
 
 class TestForwardPair:
-    @pytest.mark.parametrize(
-        "fe",
-        [
-            "multiscale",
-            "morlet",
-            "morlet_per_sensor",
-            "morlet_fused",
-            "morlet_learnable",
-            "morlet_learnable_fused",
-        ],
-    )
+    @pytest.mark.parametrize("fe", ALL_FRONTENDS)
     def test_finite_loss(self, fe, tmp_path):
         cfg = CRLConfig(frontend_type=fe, d_model=32, n_layers=1, fused_seq_len=16)
         model = CRLModel(cfg)
@@ -197,17 +170,7 @@ class TestForwardPair:
         loss, metrics = trainer._forward_pair(_synthetic_batch(), beta=0.5)
         assert loss.isfinite(), f"Loss not finite: {loss.item()}"
 
-    @pytest.mark.parametrize(
-        "fe",
-        [
-            "multiscale",
-            "morlet",
-            "morlet_per_sensor",
-            "morlet_fused",
-            "morlet_learnable",
-            "morlet_learnable_fused",
-        ],
-    )
+    @pytest.mark.parametrize("fe", ALL_FRONTENDS)
     def test_metrics_keys(self, fe, tmp_path):
         cfg = CRLConfig(frontend_type=fe, d_model=32, n_layers=1, fused_seq_len=16)
         trainer = Trainer(CRLModel(cfg), cfg, torch.device("cpu"), tmp_path)
@@ -215,17 +178,7 @@ class TestForwardPair:
         for k in ("recon", "kl", "raw_kl", "interv", "total"):
             assert k in metrics
 
-    @pytest.mark.parametrize(
-        "fe",
-        [
-            "multiscale",
-            "morlet",
-            "morlet_per_sensor",
-            "morlet_fused",
-            "morlet_learnable",
-            "morlet_learnable_fused",
-        ],
-    )
+    @pytest.mark.parametrize("fe", ALL_FRONTENDS)
     def test_finite_grads(self, fe, tmp_path):
         cfg = CRLConfig(frontend_type=fe, d_model=32, n_layers=1, fused_seq_len=16)
         model = CRLModel(cfg)
@@ -252,7 +205,7 @@ class TestBetaAnnealing:
         cfg = CRLConfig(
             d_model=32,
             n_layers=1,
-            frontend_type="morlet",
+            frontend_type="morlet_per_sensor",
             kl_floor=0.01,
             kl_target=0.5,
             beta_step=0.1,

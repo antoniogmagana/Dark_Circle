@@ -84,3 +84,18 @@ class TrainingMode(nn.Module, ABC):
             "bests": {k: round(v, 6) for k, v in state.bests.items()},
             "best_epochs": dict(state.best_epochs),
         }
+
+    def set_class_weights(
+        self,
+        pres_pos_weight: torch.Tensor | None,
+        type_class_weights: torch.Tensor | None,
+    ) -> None:
+        """Inject class weights for any aux supervision the mode applies during CRL.
+
+        Default is a no-op. Modes that compute auxiliary classification losses on
+        labels (VAE, disentangled) override this to apply the same weights the
+        downstream probe uses, removing the train/eval class-balance mismatch
+        that otherwise locks a frozen-backbone downstream into a biased
+        representation.
+        """
+        return None

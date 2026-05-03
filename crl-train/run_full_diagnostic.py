@@ -50,7 +50,7 @@ from crl_vehicle.data.dataset import (
     collate_single,
     compute_class_weights,
 )
-from crl_vehicle.seeding import seed_everything, seeded_dataloader_kwargs
+from crl_vehicle.seeding import eval_num_workers, seed_everything, seeded_dataloader_kwargs
 from eval import (
     IDX_TO_CLASS,
     N_TYPE_CLASSES,
@@ -131,14 +131,15 @@ def parse_args() -> argparse.Namespace:
         "--frontend",
         choices=[
             "multiscale",
-            "morlet",
             "morlet_per_sensor",
             "morlet_fused",
             "morlet_learnable",
             "morlet_learnable_fused",
         ],
         default="multiscale",
-        help="Legacy frontend selector. Translates to " "(--frontend-bank, --frontend-fusion).",
+        help="Legacy frontend selector. Translates to "
+        "(--frontend-bank, --frontend-fusion). ('morlet' deprecated — "
+        "use 'morlet_per_sensor'.)",
     )
     p.add_argument(
         "--frontend-bank",
@@ -261,6 +262,8 @@ def phase_crl(
     steps_per_epoch: int | None,
     skip_existing: bool,
     seed: int,
+    pres_pos_weight: torch.Tensor | None = None,
+    type_class_weights: torch.Tensor | None = None,
 ) -> Path:
     """Run CRL pre-training, emit crl_best.pth + crl_best_aux_type.pth + meta.json.
 
@@ -294,19 +297,27 @@ def phase_crl(
         persistent_workers=cfg.num_workers > 0,
         **seeded_dataloader_kwargs(seed),
     )
+    pair_val_workers = eval_num_workers(cfg.num_workers)
     pair_val = DataLoader(
         StratifiedPairDataset(val_ds),
         batch_size=cfg.batch_size,
         shuffle=False,
-        num_workers=cfg.num_workers,
+        num_workers=pair_val_workers,
         collate_fn=collate_pairs,
         pin_memory=torch.cuda.is_available(),
-        persistent_workers=cfg.num_workers > 0,
+        persistent_workers=pair_val_workers > 0,
         **seeded_dataloader_kwargs(seed),
     )
 
     t0 = time.time()
-    trainer.train_crl(pair_train, pair_val, epochs=crl_epochs, steps_per_epoch=steps_per_epoch)
+    trainer.train_crl(
+        pair_train,
+        pair_val,
+        epochs=crl_epochs,
+        steps_per_epoch=steps_per_epoch,
+        pres_pos_weight=pres_pos_weight,
+        type_class_weights=type_class_weights,
+    )
     elapsed_min = (time.time() - t0) / 60
     print(f"  CRL done in {elapsed_min:.1f} min")
 
@@ -397,14 +408,15 @@ def phase_probes(
         persistent_workers=cfg.num_workers > 0,
         **seeded_dataloader_kwargs(seed),
     )
+    single_val_workers = eval_num_workers(cfg.num_workers)
     single_val = DataLoader(
         val_ds,
         batch_size=cfg.batch_size,
         shuffle=False,
-        num_workers=cfg.num_workers,
+        num_workers=single_val_workers,
         collate_fn=collate_single,
         pin_memory=torch.cuda.is_available(),
-        persistent_workers=cfg.num_workers > 0,
+        persistent_workers=single_val_workers > 0,
         **seeded_dataloader_kwargs(seed),
     )
 
@@ -533,6 +545,38 @@ def phase_evals(
     orig_index = list(test_ds._index)
     results: list[dict] = []
 
+    # Build one DataLoader per split, reused across all probes. The legacy
+    # implementation mutated test_ds._index per (probe, split) pair and
+    # rebuilt the DataLoader each time, paying worker-startup cost up to
+    # 18× per diagnostic (6 probes × 3 splits). Workers spawned with
+    # persistent_workers=True hold their own snapshot of test_ds, so the
+    # parent's mutations didn't reach them anyway. We use torch.utils.data.
+    # Subset to filter rows by parent-index without mutating the dataset.
+    from torch.utils.data import Subset
+
+    split_loaders: list[tuple[str, list | None, Subset, DataLoader]] = []
+    for split_name, include in EVAL_SPLITS:
+        if include is None:
+            split_idxs = list(range(len(orig_index)))
+        else:
+            allowed = set(include)
+            split_idxs = [i for i, row in enumerate(orig_index) if row[0][0] in allowed]
+        if not split_idxs:
+            print(f"  [warn] {split_name}: no windows after filter, skipping")
+            continue
+        split_ds = Subset(test_ds, split_idxs)
+        split_loader = DataLoader(
+            split_ds,
+            batch_size=eval_batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=collate_single,
+            pin_memory=torch.cuda.is_available(),
+            persistent_workers=num_workers > 0,
+            **seeded_dataloader_kwargs(seed),
+        )
+        split_loaders.append((split_name, include, split_ds, split_loader))
+
     probe_dirs = sorted(probes_root.iterdir()) if probes_root.exists() else []
     for probe_dir in probe_dirs:
         if not (probe_dir / "downstream_best.pth").exists():
@@ -556,7 +600,7 @@ def phase_evals(
         )
         model.eval()
 
-        for split_name, include in EVAL_SPLITS:
+        for split_name, include, split_ds, loader in split_loaders:
             out_dir = evals_root / run_name / split_name
             out_dir.mkdir(parents=True, exist_ok=True)
             report_path = out_dir / "eval_report.json"
@@ -565,28 +609,7 @@ def phase_evals(
                 results.append(json.loads(report_path.read_text()))
                 continue
 
-            # Filter test set in place for this split.
-            if include is None:
-                test_ds._index = list(orig_index)
-            else:
-                allowed = set(include)
-                test_ds._index = [row for row in orig_index if row[0][0] in allowed]
-            if not test_ds._index:
-                print(f"  [warn] {run_name}/{split_name}: no windows after filter, skipping")
-                continue
-
-            loader = DataLoader(
-                test_ds,
-                batch_size=eval_batch_size,
-                shuffle=False,
-                num_workers=num_workers,
-                collate_fn=collate_single,
-                pin_memory=torch.cuda.is_available(),
-                persistent_workers=num_workers > 0,
-                **seeded_dataloader_kwargs(seed),
-            )
-
-            print(f"  ── eval: {run_name}/{split_name} " f"({len(test_ds):,} windows)")
+            print(f"  ── eval: {run_name}/{split_name} " f"({len(split_ds):,} windows)")
             outputs = run_inference(model, loader, device, cfg)
             pres_m = binary_metrics(outputs["pres_logits"], outputs["pres_labels"])
             type_m = (
@@ -601,7 +624,7 @@ def phase_evals(
                 "ckpt_name": meta.get("ckpt_name"),
                 "split": split_name,
                 "include_datasets": include,
-                "n_windows": len(test_ds),
+                "n_windows": len(split_ds),
                 "presence": pres_m,
                 "type": type_m,
             }
@@ -637,7 +660,9 @@ def phase_evals(
                 )
             results.append(report)
 
-    # Restore original index so subsequent callers see an unfiltered dataset.
+    # test_ds._index is no longer mutated (per-split filtering uses
+    # _FrozenIndexSensorDS snapshots instead) — kept here for callers that
+    # may reuse the dataset.
     test_ds._index = orig_index
     return results
 
@@ -987,6 +1012,8 @@ def main() -> None:
             steps_per_epoch=args.steps_per_epoch,
             skip_existing=args.skip_existing,
             seed=args.seed,
+            pres_pos_weight=pres_weight.to(device),
+            type_class_weights=type_weights.to(device),
         )
         crl_meta = json.loads((crl_dir / "meta.json").read_text())
 
@@ -1015,7 +1042,7 @@ def main() -> None:
         probes_root=out_root / "downstream",
         evals_root=out_root / "eval",
         eval_batch_size=args.eval_batch_size,
-        num_workers=args.num_workers,
+        num_workers=eval_num_workers(args.num_workers),
         skip_existing=args.skip_existing,
         seed=args.seed,
         recalibrate=args.recalibrate,

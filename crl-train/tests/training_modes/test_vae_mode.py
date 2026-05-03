@@ -59,7 +59,9 @@ def cfg_ms():
 
 @pytest.fixture
 def cfg_morlet():
-    return CRLConfig(d_model=32, n_layers=1, n_heads=4, frontend_type="morlet", d_z=24)
+    return CRLConfig(
+        d_model=32, n_layers=1, n_heads=4, frontend_type="morlet_per_sensor", d_z=24
+    )
 
 
 @pytest.fixture

@@ -18,7 +18,7 @@ from crl_vehicle.data.dataset import (
     collate_single,
     compute_class_weights,
 )
-from crl_vehicle.seeding import seed_everything, seeded_dataloader_kwargs
+from crl_vehicle.seeding import eval_num_workers, seed_everything, seeded_dataloader_kwargs
 from torch.utils.data import DataLoader
 from training.trainer import CRLModel, Trainer
 
@@ -54,7 +54,6 @@ def parse_args() -> argparse.Namespace:
         "--frontend",
         choices=[
             "multiscale",
-            "morlet",
             "morlet_per_sensor",
             "morlet_fused",
             "morlet_learnable",
@@ -63,7 +62,8 @@ def parse_args() -> argparse.Namespace:
         default="multiscale",
         help="Legacy frontend selector. Translates to "
         "(--frontend-bank, --frontend-fusion). Prefer the new "
-        "two-flag form for new experiments.",
+        "two-flag form for new experiments. ('morlet' deprecated — "
+        "use 'morlet_per_sensor'.)",
     )
     p.add_argument(
         "--frontend-bank",
@@ -355,14 +355,15 @@ def main() -> None:
             persistent_workers=cfg.num_workers > 0,
             **seeded_dataloader_kwargs(args.seed),
         )
+        val_workers = eval_num_workers(cfg.num_workers)
         val_loader = DataLoader(
             val_pair,
             batch_size=cfg.batch_size,
             shuffle=False,
-            num_workers=cfg.num_workers,
+            num_workers=val_workers,
             collate_fn=collate_pairs,
             pin_memory=True,
-            persistent_workers=cfg.num_workers > 0,
+            persistent_workers=val_workers > 0,
             **seeded_dataloader_kwargs(args.seed),
         )
         trainer.train_crl(
@@ -370,6 +371,8 @@ def main() -> None:
             val_loader,
             epochs=args.crl_epochs,
             steps_per_epoch=args.steps_per_epoch,
+            pres_pos_weight=pres_weight.to(device),
+            type_class_weights=type_weights.to(device),
         )
 
     if args.phase in ("downstream", "full"):
@@ -383,14 +386,15 @@ def main() -> None:
             persistent_workers=cfg.num_workers > 0,
             **seeded_dataloader_kwargs(args.seed),
         )
+        ds_val_workers = eval_num_workers(cfg.num_workers)
         val_loader = DataLoader(
             val_ds,
             batch_size=cfg.batch_size,
             shuffle=False,
-            num_workers=cfg.num_workers,
+            num_workers=ds_val_workers,
             collate_fn=collate_single,
             pin_memory=True,
-            persistent_workers=cfg.num_workers > 0,
+            persistent_workers=ds_val_workers > 0,
             **seeded_dataloader_kwargs(args.seed),
         )
         trainer.train_downstream(

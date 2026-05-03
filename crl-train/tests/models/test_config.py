@@ -110,7 +110,6 @@ def test_audio_target_rate_invalid_raises():
 @pytest.mark.parametrize(
     "legacy_type,expected_bank,expected_fusion",
     [
-        ("morlet", "morlet", "late"),
         ("morlet_per_sensor", "morlet", "late"),
         ("morlet_fused", "morlet", "early"),
         ("morlet_learnable", "morlet_learnable", "late"),
@@ -122,6 +121,14 @@ def test_legacy_frontend_type_translates(legacy_type, expected_bank, expected_fu
         cfg = CRLConfig(frontend_type=legacy_type)
     assert cfg.frontend_bank == expected_bank
     assert cfg.frontend_fusion == expected_fusion
+
+
+def test_legacy_morlet_type_is_removed():
+    # The plain `frontend_type='morlet'` variant collapsed seismic to one
+    # post-pool token at SR=100. Construction must raise with a migration
+    # message so a stray run doesn't silently revert to the broken path.
+    with pytest.raises(ValueError, match="morlet_per_sensor"):
+        CRLConfig(frontend_type="morlet")
 
 
 def test_legacy_frontend_type_multiscale_no_warning():

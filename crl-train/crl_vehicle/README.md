@@ -8,6 +8,7 @@ Python package that holds everything the training pipeline and analysis scripts 
 |---|---|
 | `config.py` | `CRLConfig` dataclass — single source of truth for every training knob. Also `ModalityConfig`, `DATASET_VEHICLE_MAP`, `CATEGORY_TO_IDX`, `LABEL_BACKGROUND`, `LABEL_MULTI`. |
 | `analysis.py` | Post-hoc run readers (`discover_runs`, `load_run_metrics`, `load_crl_timeseries`, `apply_filters`). Used by `compare_*.py` and `plot_*.py`. Read-only; never mutates run dirs. |
+| `seeding.py` | Determinism helpers: `seed_everything`, `seeded_dataloader_kwargs(seed)` for spread into `DataLoader(...)`, and `eval_num_workers(train_n)` which caps val/eval/inference DataLoader worker counts at 8 (train-side `cfg.num_workers` is correct for the partner-sampling + augmentation pipeline; val/eval don't need that many). |
 | `stage2.py` | Two-stage training helpers. `find_compatible_run` searches for a compatible stage-1 run given a target learnable config; `resolve_source_checkpoint` picks the right `.pth` to load. |
 
 ## Subpackages
@@ -16,10 +17,10 @@ Python package that holds everything the training pipeline and analysis scripts 
 |---|---|
 | `data/` | `SensorDataset` + `StratifiedPairDataset` + collate functions + 7 intervention noise types |
 | `losses/` | Reconstruction, KL divergence, intervention matching BCE, NT-Xent contrastive |
-| `models/` | Frontends (6 variants), Transformer encoder/decoder, latent split, intervention classifier, downstream heads |
+| `models/` | Frontends (5 variants), Transformer encoder/decoder, latent splits (`CausalLatentSpace`, `SplitLatentSpace`), intervention classifier, downstream heads |
 | `priors/` | `Prior` ABC + `StandardPrior` (N(0,I)) + `ConditionalPrior` (iVAE label-conditioned MLP) |
 | `probe/` | Log-prior shift for probe evaluation (target-prior-aware classification) |
-| `training_modes/` | `TrainingMode` ABC + `VAETrainingMode` + `ContrastiveTrainingMode` + factory |
+| `training_modes/` | `TrainingMode` ABC + `VAETrainingMode` + `DisentangledVAETrainingMode` + `ContrastiveTrainingMode` + factory |
 
 Each subpackage has its own README with file-level detail.
 

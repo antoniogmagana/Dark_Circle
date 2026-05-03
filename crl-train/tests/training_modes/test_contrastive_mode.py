@@ -79,7 +79,7 @@ def cfg_morlet():
         d_model=32,
         n_layers=1,
         n_heads=4,
-        frontend_type="morlet",
+        frontend_type="morlet_per_sensor",
         d_z=24,
         training_mode="contrastive",
         contrastive_d_proj=32,

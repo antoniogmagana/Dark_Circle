@@ -29,11 +29,12 @@ Dispatches on `config.frontend_type` in an if/elif ladder:
 | frontend_type | Init method | head_keys |
 |---|---|---|
 | `multiscale` | `_init_multiscale` | `["fused"]` (early fusion) |
-| `morlet` | `_init_morlet` | `sensors` (late fusion) |
 | `morlet_per_sensor` | `_init_morlet_per_sensor` | `sensors` |
 | `morlet_fused` | `_init_morlet_fused` | `["fused"]` |
 | `morlet_learnable` | `_init_morlet_learnable` | `sensors` |
 | `morlet_learnable_fused` | `_init_morlet_learnable_fused` | `["fused"]` |
+
+The legacy SR-heuristic `morlet` variant is removed — `CRLConfig(frontend_type='morlet')` raises with a migration error pointing at `morlet_per_sensor`.
 
 Each init method:
 1. Builds per-sensor frontends (`MultiScale1DFrontend`, `MorletFilterbank`, or `LearnableMorletFilterbank` wrapped in an `nn.Sequential` with appropriate pooling).
@@ -52,14 +53,18 @@ Each init method:
 - `load_from_fixed_morlet_checkpoint(state_dict, strict=True)` — stage-2 conversion (drops kernel_re/im buffers, injects `log_scales`, strips probe heads)
 - `backbone_parameters() / head_parameters() / _finetune_params(top_n)` — parameter subsets for optimizer groups
 
-### Causal structure
+### Causal structure (vae mode)
 
 Every forward yields `z` from the encoder, then `model.latent.split(z)` partitions it into:
 - `z_pres` (D_PRES=4) → presence head + aux presence head
 - `z_type` (D_TYPE=6) → type head + aux type head
 - `z_prox` (D_PROX=3) → proximity head
-- `z_env` (D_ENV=6) → `UnknownInterventionClassifier`
+- `z_env` (D_ENV=6) → `UnknownInterventionClassifier` (gated on `cfg.use_interv_classifier`, default off)
 - `z_free` (d_z − 19) → unstructured nuisance, no supervision
+
+Aux heads (presence + type) read **μ** rather than the reparameterized sample `z`. Sampling at training time injects noise that hurts partition-routing supervision; the change keeps recon and KL on `z` (correct VAE semantics) while letting aux losses see a deterministic signal. The intervention classifier still takes `z` (sampled) for KL semantics.
+
+Disentangled mode uses a different latent: `SplitLatentSpace(d_z, d_signal=12)` partitions z into `z_signal` and `z_env` only, no per-feature sub-slicing. Aux heads on the mode (sized to `d_signal`) replace the model's D_PRES/D_TYPE-sized heads.
 
 ## `Trainer`
 
@@ -101,6 +106,12 @@ Warmup protects the converged encoder from sudden filter drift when stage-2 star
 ### CRL training loop (`train_crl`)
 
 ```python
+trainer.train_crl(
+    train_loader, val_loader, epochs,
+    pres_pos_weight=...,         # forwarded to mode.set_class_weights
+    type_class_weights=...,      # forwarded to mode.set_class_weights
+)
+
 for epoch in range(epochs):
     train_m = self._train_epoch(train_loader, self.beta, steps_per_epoch)
     val_m   = self._eval_epoch(val_loader, self.beta)
@@ -115,7 +126,11 @@ for epoch in range(epochs):
     # Break on early-stop patience
 ```
 
+`mode.set_class_weights(pres_pos_weight, type_class_weights)` runs before the loop. VAE and disentangled modes apply the weights to their aux pres/type losses during CRL — without this, the backbone learns an unweighted representation while the downstream probe applies class weighting, locking a class-imbalanced backbone in place. Contrastive mode ignores the call (no aux losses).
+
 At training end: saves `crl_final.pth` and writes `crl_checkpoint_summary.json` (adding `learned_morlet_params` block for learnable variants).
+
+Per-batch metric `.item()` calls have been hoisted out of the inner loop. Running totals stay as on-device 0-d tensors and are converted to Python floats once per epoch in `_finalize_epoch_metrics`.
 
 ### Downstream training loop (`train_downstream`)
 

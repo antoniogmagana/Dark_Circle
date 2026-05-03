@@ -117,15 +117,8 @@ class CRLModel(nn.Module):
         post-construction. Tests and ad-hoc scripts sometimes do
         `cfg.morlet_per_sensor_params[sensor] = ...` after CRLConfig() is
         built, which bypasses __post_init__ translation.
-
-        Skipped for `frontend_type="morlet"` (the SR-heuristic variant) —
-        that path uses synthesized params from the legacy heuristic, not
-        the morlet_per_sensor_params dict. Refreshing would overwrite the
-        synthesized values with the (irrelevant) default dict entries.
         """
         if config.frontend_bank not in ("morlet", "morlet_learnable"):
-            return
-        if config.frontend_type == "morlet":
             return
         legacy = config.morlet_per_sensor_params
         if not legacy:
@@ -521,24 +514,43 @@ class Trainer:
 
     def _accumulate(
         self,
-        scalar_agg: dict[str, float],
+        scalar_agg: dict[str, torch.Tensor | float],
         tensor_agg: dict[str, list[torch.Tensor]],
         metrics: dict,
     ) -> None:
+        """Sum scalar metrics on-device when possible.
+
+        Modes may emit scalar metrics as either 0-d tensors (preferred — keeps
+        the running sum on-device, no per-batch D→H sync) or as Python floats
+        (legacy). Both are summed into a single bucket per key; the eventual
+        `.item()` happens once at epoch end in `_finalize_epoch_metrics`.
+        """
         for k, v in metrics.items():
             if k in self._AUX_TENSOR_KEYS:
                 tensor_agg.setdefault(k, []).append(v)
+                continue
+            cur = scalar_agg.get(k)
+            if cur is None:
+                scalar_agg[k] = v.detach() if isinstance(v, torch.Tensor) else v
+            elif isinstance(cur, torch.Tensor):
+                scalar_agg[k] = cur + (v.detach() if isinstance(v, torch.Tensor) else v)
             else:
-                scalar_agg[k] = scalar_agg.get(k, 0.0) + v
+                scalar_agg[k] = cur + (v.item() if isinstance(v, torch.Tensor) else v)
 
     def _finalize_epoch_metrics(
         self,
-        scalar_agg: dict[str, float],
+        scalar_agg: dict[str, torch.Tensor | float],
         tensor_agg: dict[str, list[torch.Tensor]],
         n_batches: int,
         prefix: str,
     ) -> dict:
-        out = {f"{prefix}{k}": v / max(n_batches, 1) for k, v in scalar_agg.items()}
+        denom = max(n_batches, 1)
+        out: dict = {}
+        for k, v in scalar_agg.items():
+            mean_v = v / denom
+            if isinstance(mean_v, torch.Tensor):
+                mean_v = float(mean_v.detach().cpu().item())
+            out[f"{prefix}{k}"] = mean_v
         pres_logits = (
             torch.cat(tensor_agg.get("aux_pres_logits", []))
             if tensor_agg.get("aux_pres_logits")
@@ -651,10 +663,22 @@ class Trainer:
         val_loader: DataLoader,
         epochs: int,
         steps_per_epoch: int | None = None,
+        pres_pos_weight: torch.Tensor | None = None,
+        type_class_weights: torch.Tensor | None = None,
     ) -> None:
         """Run CRL pre-training. Algorithm-specific logic (beta, checkpoints,
         early stopping metric) is delegated to self.mode; this method owns
-        only the epoch loop, CSV logging, and patience counting."""
+        only the epoch loop, CSV logging, and patience counting.
+
+        pres_pos_weight / type_class_weights are forwarded to the mode so its
+        aux classification losses use the same class balance the downstream
+        probe applies — without this the CRL backbone learns an unweighted
+        representation that the frozen-backbone downstream cannot recover.
+        """
+        self.mode.set_class_weights(
+            pres_pos_weight.to(self.device) if pres_pos_weight is not None else None,
+            type_class_weights.to(self.device) if type_class_weights is not None else None,
+        )
         early_stop_metric = self.mode.early_stop_metric()
         csv_path = self.save_dir / "crl_metrics.csv"
         csv_file: IO | None = None
@@ -810,18 +834,20 @@ class Trainer:
         try:
             for epoch in range(epochs):
                 self.model.train()
-                train_loss = 0.0
+                # Running totals stay on-device so we don't D→H sync per batch;
+                # `.item()` happens once at epoch end below.
+                train_loss_t = torch.zeros((), device=self.device)
                 n = 0
                 for batch in train_loader:
                     head_opt.zero_grad()
                     loss, _ = self._downstream_forward(batch)
                     loss.backward()
                     head_opt.step()
-                    train_loss += loss.item()
+                    train_loss_t = train_loss_t + loss.detach()
                     n += 1
 
                 self.model.eval()
-                val_loss = 0.0
+                val_loss_t = torch.zeros((), device=self.device)
                 m = 0
                 pres_logits_all: list[torch.Tensor] = []
                 pres_labels_all: list[torch.Tensor] = []
@@ -830,13 +856,16 @@ class Trainer:
                 with torch.no_grad():
                     for batch in val_loader:
                         loss, outputs = self._downstream_forward(batch)
-                        val_loss += loss.item()
+                        val_loss_t = val_loss_t + loss.detach()
                         m += 1
                         pres_logits_all.append(outputs["pres_logits"].cpu())
                         pres_labels_all.append(outputs["pres_labels"].cpu())
                         if outputs["type_logits"] is not None:
                             type_logits_all.append(outputs["type_logits"].cpu())
                             type_labels_all.append(outputs["type_labels"].cpu())
+
+                train_loss = float(train_loss_t.cpu().item())
+                val_loss = float(val_loss_t.cpu().item())
 
                 pres_f1, pres_acc = _binary_f1_acc(
                     torch.cat(pres_logits_all), torch.cat(pres_labels_all)

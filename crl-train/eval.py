@@ -9,6 +9,7 @@ from pathlib import Path
 import torch
 from crl_vehicle.config import CATEGORY_TO_IDX, CRLConfig
 from crl_vehicle.data.dataset import SensorDataset, collate_single
+from crl_vehicle.seeding import eval_num_workers
 from crl_vehicle.probe.recalibration import (
     apply_binary_log_prior_shift,
     apply_multiclass_log_prior_shift,
@@ -391,14 +392,15 @@ def main() -> None:
         out_dir = out_dir / ("filter_" + "_".join(sorted(allowed)))
         out_dir.mkdir(parents=True, exist_ok=True)
 
+    workers = eval_num_workers(args.num_workers)
     loader = DataLoader(
         test_ds,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=args.num_workers,
+        num_workers=workers,
         collate_fn=collate_single,
         pin_memory=torch.cuda.is_available(),
-        persistent_workers=args.num_workers > 0,
+        persistent_workers=workers > 0,
     )
 
     # Run inference

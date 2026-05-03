@@ -189,22 +189,30 @@ def apply_intervention_batch(
         interv_ids = interv_ids.to(device)
 
     out = x.clone()
-    # Generate ALL noise types once on this batch, then mask per-sample. This
-    # is wasteful in raw FLOPs (7× the noise we use) but each generator is one
-    # batched FFT/op and the GPU is idle anyway — the win comes from
-    # eliminating per-sample CPU FFTs and host↔device copies.
     sig_rms = x.pow(2).mean(dim=(1, 2)).sqrt().clamp(min=1e-8)  # (B,)
 
-    for k, gen in enumerate(_BATCH_GENERATORS, start=1):
-        mask = interv_ids == k
-        if not mask.any():
+    # Each generator runs only on the rows that need it. Two wins over the
+    # legacy per-id approach:
+    #   1. We avoid host syncs (`mask.any()`) by iterating only the IDs that
+    #      appear in `interv_ids`, computed once via `unique`.
+    #   2. Each generator is given only the subset size it needs, not B,
+    #      saving ~5–7× audio FFT work on a typical batch.
+    # `interv_ids.unique()` returns a CPU tensor when called on CPU; on GPU it
+    # forces one D→H sync per batch — far cheaper than 7 wasted generators.
+    unique_ids = interv_ids.unique().tolist()
+    for k in unique_ids:
+        if k == 0 or k > len(_BATCH_GENERATORS):
             continue
-        noise = gen(B, W, sample_rate, device, dtype)  # (B, W)
-        noise_rms = noise.pow(2).mean(dim=1).sqrt().clamp(min=1e-8)  # (B,)
-        scale = (0.2 * sig_rms / noise_rms).unsqueeze(-1)  # (B, 1)
-        scaled = (noise * scale).unsqueeze(1).expand(B, C, W)  # (B, C, W)
-        # Apply only to rows assigned this intervention id.
-        m = mask.view(B, 1, 1).to(dtype)
-        out = out + m * scaled
+        mask = interv_ids == k
+        idx = mask.nonzero(as_tuple=True)[0]
+        n_k = idx.numel()
+        if n_k == 0:
+            continue
+        gen = _BATCH_GENERATORS[k - 1]
+        noise = gen(n_k, W, sample_rate, device, dtype)  # (n_k, W)
+        noise_rms = noise.pow(2).mean(dim=1).sqrt().clamp(min=1e-8)  # (n_k,)
+        scale = (0.2 * sig_rms[idx] / noise_rms).unsqueeze(-1)  # (n_k, 1)
+        scaled = (noise * scale).unsqueeze(1).expand(n_k, C, W)  # (n_k, C, W)
+        out[idx] = out[idx] + scaled
 
     return out

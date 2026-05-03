@@ -6,39 +6,46 @@ Causal Representation Learning for multi-modal vehicle detection. A modular VAE/
 
 ## What this repo does
 
-Trains a latent representation from paired audio (16 kHz) and seismic (200 Hz) sensor windows. The representation has a **causal latent structure**: dedicated blocks for presence, vehicle type, proximity, and environment, plus a free noise block. Downstream probe heads (linear, MLP, or full-latent) are trained on the frozen representation to predict presence + vehicle type.
+Trains a latent representation from paired audio (16 kHz) and seismic (100 Hz, post-resample) sensor windows. The representation has a **causal latent structure**: dedicated blocks for presence, vehicle type, proximity, and environment, plus a free noise block. Downstream probe heads (linear, MLP, or full-latent) are trained on the frozen representation to predict presence + vehicle type.
 
 ```
 raw audio  ┐                                                ┌→ presence
            ├→ Morlet / Multiscale frontend → Transformer ───┤→ vehicle type (4 classes)
 raw seismic┘          (fused or per-sensor)   encoder       ├→ proximity
-                                              (VAE or       └→ (free nuisance)
-                                               contrastive)
+                                              (VAE,         └→ (free nuisance)
+                                               disentangled,
+                                               or contrastive)
 ```
 
-The model is **not hardcoded to a specific frontend or training objective**. Six frontends and two training modes are registered; any valid combination runs through the same `Trainer`.
+The model is **not hardcoded to a specific frontend or training objective**. Five frontends and three training modes are registered; any valid combination runs through the same `Trainer`.
 
 ---
 
-## Architecture (current, as of 2026-04-24)
+## Architecture
 
-### Six frontend variants
+### Five frontend variants
 
 | Frontend | Fusion | Kernels | Per-sensor params | Notes |
 |---|---|---|---|---|
 | `multiscale` | Early | Learnable Conv1D, 3 kernel sizes | Shared `d_model` | Fastest, strongest aggregate F1 today |
-| `morlet` | Late | Fixed analytic Morlet wavelets | SR-derived freq range | Legacy; defaults to broad-band heuristic |
 | `morlet_per_sensor` | Late | Fixed Morlet, per-sensor freq bands | `morlet_per_sensor_params` | Coupled kernel/stride derivation |
 | `morlet_fused` | Early | Fixed Morlet, per-sensor freq bands | Same as above | Morlet kernels + multiscale topology |
 | `morlet_learnable` | Late | Learnable log-space scales | Same as above | Stage-2 init optional |
 | `morlet_learnable_fused` | Early | Learnable scales, early fusion | Same as above | Combines learnable + fusion |
 
-All Morlet variants use **FFT-based convolution** when kernel_size ≥ 512 (automatic; ~3× faster on CPU for audio kernel size 4585).
+The legacy SR-heuristic `morlet` variant has been **removed** — its global `morlet_pool_stride=64` collapsed seismic to a single post-pool token at SR=100. `CRLConfig(frontend_type='morlet')` now raises a migration error pointing at `morlet_per_sensor`.
 
-### Two training modes
+All Morlet variants use **FFT-based convolution** when kernel_size ≥ 512 (automatic; ~3× faster on CPU for audio kernel size 4585). For the fixed-Morlet variants the kernel rFFT is cached per signal length, so each forward pays one input rFFT instead of three.
 
-- **`vae`** — classical CRL. ELBO + adaptive β annealing + intervention matching + aux heads. Prior is pluggable: `standard` (N(0,I)) or `conditional` (iVAE-style label-conditioned MLP for identifiability).
+### Three training modes
+
+- **`vae`** — classical CRL. ELBO + adaptive β annealing + optional intervention classifier + aux heads. Prior is pluggable: `standard` (N(0,I)) or `conditional` (iVAE-style label-conditioned MLP for identifiability). Aux heads read the **deterministic μ** (not the reparameterized sample) and apply the same class weights the downstream probe uses, so the CRL backbone learns a class-balanced representation.
+- **`disentangled`** — ELBO over a 2-block (signal/env) `SplitLatentSpace` with cross-modal alignment, env temporal stability, and signal intervention-invariance losses. Aux heads read the full d_signal block (no D_PRES/D_TYPE sub-slicing); same dual-checkpoint shape as `vae`.
 - **`contrastive`** — NT-Xent over `StratifiedPairDataset` partners. Same-type and consecutive-window partners are positives; different-type and cross-dataset are negatives. No decoder / KL / aux during CRL; downstream probes train post-hoc on the frozen encoder.
+
+#### Intervention classifier (vae mode only)
+
+The CITRIS-style `UnknownInterventionClassifier` reads the env block but is supervised against `[pres_changed, type_changed]` — a known misrouting that pushes presence/type information INTO the env block. It is **off by default**: `cfg.use_interv_classifier=False`. Set it to `True` only for A/B comparisons against the legacy targeting; `lambda_interv` still controls magnitude when enabled. Disentangled mode replaces this with an explicit invariance loss and ignores the flag.
 
 ### Two-stage training
 
@@ -46,9 +53,16 @@ All Morlet variants use **FFT-based convolution** when kernel_size ≥ 512 (auto
 
 Rationale: learnable scales trained from scratch chase a moving target (the encoder is drifting too). Two-stage separates "learn a representation" from "tune the filterbank" so the filters see a stable target.
 
+### Performance notes
+
+- **Eval/val DataLoaders cap workers at 8.** Train-side `cfg.num_workers` (often 24) is correct for the partner-sampling + intervention-augmenting pipeline; val and eval don't need that many. `crl_vehicle.seeding.eval_num_workers(cfg.num_workers)` is threaded through every val/eval DataLoader site.
+- **Fixed-Morlet kernel rFFT cached** per signal length. The old path recomputed the kernel rFFT every forward; now it's computed once and re-used.
+- **Active-only intervention dispatch.** `apply_intervention_batch` only runs the noise generators that appear in the batch's `interv_ids` (and only on the masked subset of rows), instead of running all 7 generators on the full batch and masking after.
+- **Per-batch metric `.item()` syncs hoisted out of inner loops** in `Trainer._train_epoch` / `_eval_epoch` and `train_downstream`. Running totals stay on-device until epoch end.
+
 ### Sweep tooling
 
-`run_experiments.py --sweep configs/sweeps/<file>.yaml` runs a YAML-driven sweep. Each run spawns `train.py` as a subprocess (GPU + crash isolation); results aggregate into `summary.csv` + `summary.json`. See `configs/sweeps/frontend_comparison.yaml` for the reference sweep over all 6 frontends + phase + learnable_w0.
+`run_experiments.py --sweep configs/sweeps/<file>.yaml` runs a YAML-driven sweep. Each run spawns `train.py` as a subprocess (GPU + crash isolation); results aggregate into `summary.csv` + `summary.json`. See `configs/sweeps/frontend_comparison.yaml` for the reference sweep over all 5 frontends + phase + learnable_w0.
 
 ### Analysis scripts
 
@@ -77,21 +91,20 @@ crl-train/
 │   ├── models/                  # frontends, encoder/decoder, latent split, heads
 │   ├── priors/                  # Prior ABC, Standard, Conditional
 │   ├── probe/                   # log-prior recalibration
-│   └── training_modes/          # TrainingMode ABC, VAE, Contrastive, factory
+│   └── training_modes/          # TrainingMode ABC, VAE, Disentangled, Contrastive, factory
 ├── training/
 │   └── trainer.py               # CRLModel + Trainer (epoch loop, opt groups, stage-2)
 ├── configs/
 │   └── sweeps/                  # YAML sweep specs
-├── tests/                       # 354 tests mirror the module tree
+├── tests/                       # 488 tests mirror the module tree
 ├── saved_crl/                   # run outputs (see analysis scripts)
 │   ├── runs/                    # canonical: <frontend>/<training_mode>/<run-id>/{crl,downstream,eval}/
 │   │   ├── multiscale/
 │   │   ├── morlet_per_sensor/
 │   │   ├── morlet_fused/
 │   │   ├── morlet_learnable/
-│   │   ├── morlet/
 │   │   ├── supervised/          # non-CRL baselines: id_split/, file_split/
-│   │   └── _archive/            # smoke tests, sweeps, old-layout dirs
+│   │   └── _archive/            # archived sweeps
 │   ├── caches/
 │   │   ├── waveform/            # SensorDataset feature cache
 │   │   └── id_split/            # ID-split manifest cache
@@ -124,6 +137,10 @@ python run_full_diagnostic.py --frontend multiscale --crl-epochs 100
 python train.py --frontend morlet_per_sensor --crl-epochs 100 \
     --config-overrides-json '{"morlet_use_phase": true}'
 
+# Disentangled mode (replaces the misrouted intervention classifier with an
+# explicit signal-invariance loss; aux heads read the full d_signal block).
+python train.py --frontend multiscale --training-mode disentangled --crl-epochs 100
+
 # Contrastive NT-Xent, multiscale backbone.
 python train.py --frontend multiscale --training-mode contrastive --crl-epochs 100
 
@@ -153,8 +170,9 @@ python plot_aggregate.py
 | `d_model` | 64 | Transformer hidden size + frontend output channels |
 | `n_layers` / `n_heads` | 2 / 4 | Transformer shape |
 | `frontend_type` | `"multiscale"` | See frontend variants above |
-| `training_mode` | `"vae"` | `"vae"` or `"contrastive"` |
-| `prior_type` | `"standard"` | `"standard"` or `"conditional"` (iVAE) |
+| `training_mode` | `"vae"` | `"vae"`, `"disentangled"`, or `"contrastive"` |
+| `prior_type` | `"standard"` | `"standard"` or `"conditional"` (iVAE; vae mode only) |
+| `use_interv_classifier` | `False` | When `True`, vae mode includes the CITRIS-style intervention classifier. Default off because it reads `z_env` but is supervised against `[pres_changed, type_changed]` — known to push presence/type info into the env block. Set `True` only for A/B comparisons; `lambda_interv` controls magnitude when enabled. |
 | `morlet_use_phase` | `False` | Emit `[log_power, cos_phase, sin_phase]` → 3× channels |
 | `morlet_learnable_w0` | `False` | Learnable per-filter bandwidth (only for `morlet_learnable*`) |
 | `morlet_learnable_lr_mult` | 0.1 | Filter LR = `lr × this` |
@@ -267,10 +285,10 @@ flag skips the naming check and writes wherever you point it.
 ## Testing
 
 ```bash
-python -m pytest --ignore=smoke_test.py -q
+python -m pytest tests/ -q
 ```
 
-354 tests across `tests/` mirroring the module tree. Skip `smoke_test.py` because it's a script, not a pytest module (historical name collision).
+488 tests across `tests/` mirroring the module tree. Run pytest against `tests/` directly — the top-level `smoke_test.py` is a script, not a pytest module, and pytest will fail at collection if pointed at the repo root.
 
 ---
 
@@ -280,7 +298,7 @@ Start with the nested READMEs for specifics on each layer:
 
 - **`crl_vehicle/README.md`** — package overview, config dataclass, post-hoc analysis helpers
 - **`crl_vehicle/data/README.md`** — dataset format, stratified partner sampling, interventions
-- **`crl_vehicle/models/README.md`** — all 6 frontends, encoder/decoder, latent split, heads
+- **`crl_vehicle/models/README.md`** — all 5 frontends, encoder/decoder, latent split, heads
 - **`crl_vehicle/losses/README.md`** — reconstruction, KL, intervention matching, NT-Xent
 - **`crl_vehicle/priors/README.md`** — Prior ABC, StandardPrior, ConditionalPrior (iVAE)
 - **`crl_vehicle/probe/README.md`** — log-prior recalibration (target-prior shift)

@@ -58,6 +58,28 @@ class VAETrainingMode(TrainingMode):
         super().__init__()
         self.prior = prior
         self.config = config
+        # Class weights are injected by the trainer via set_class_weights()
+        # before train_crl(). Held as buffers so they move with .to(device).
+        self.register_buffer("_pres_pos_weight", torch.empty(0), persistent=False)
+        self.register_buffer("_type_class_weights", torch.empty(0), persistent=False)
+
+    def set_class_weights(
+        self,
+        pres_pos_weight: torch.Tensor | None,
+        type_class_weights: torch.Tensor | None,
+    ) -> None:
+        if pres_pos_weight is not None:
+            self._pres_pos_weight = pres_pos_weight.detach().to(self._pres_pos_weight.device)
+        if type_class_weights is not None:
+            self._type_class_weights = type_class_weights.detach().to(
+                self._type_class_weights.device
+            )
+
+    def _aux_pres_pos_weight(self) -> torch.Tensor | None:
+        return self._pres_pos_weight if self._pres_pos_weight.numel() > 0 else None
+
+    def _aux_type_weight(self) -> torch.Tensor | None:
+        return self._type_class_weights if self._type_class_weights.numel() > 0 else None
 
     # ------------------------------------------------------------------
     # Prior-aware KL — uses injected prior; beta applied at call site.
@@ -120,31 +142,41 @@ class VAETrainingMode(TrainingMode):
         type_t = batch["vehicle_type_t"][avail].to(dev)
         kl, raw_kl = self._kl_terms(mu_t, lv_t, det_t, type_t, beta)
 
-        z_pres, z_type, z_prox, z_env, _ = model.latent.split(z_t)
+        # Aux supervision reads μ (deterministic) so the partition-routing
+        # gradient is not noised by the reparameterization sample. The
+        # intervention classifier still runs on z_env at z_t (sampled), so KL
+        # and intervention semantics are unchanged.
+        mu_pres, mu_type, _, _, _ = model.latent.split(mu_t)
+        _, _, _, z_env, _ = model.latent.split(z_t)
 
-        aux_pres_logit = model.aux_pres_heads["fused"](z_pres).squeeze(-1)
-        aux_pres = F.binary_cross_entropy_with_logits(aux_pres_logit, det_t)
+        aux_pres_logit = model.aux_pres_heads["fused"](mu_pres).squeeze(-1)
+        aux_pres = F.binary_cross_entropy_with_logits(
+            aux_pres_logit, det_t, pos_weight=self._aux_pres_pos_weight()
+        )
 
         valid_type = type_t >= 0
         aux_type = torch.tensor(0.0, device=dev)
         aux_type_logit_valid = torch.empty(0, device=dev)
         type_labels_valid = torch.empty(0, dtype=torch.long, device=dev)
         if valid_type.any():
-            aux_type_logit_valid = model.aux_type_heads["fused"](z_type[valid_type])
+            aux_type_logit_valid = model.aux_type_heads["fused"](mu_type[valid_type])
             type_labels_valid = type_t[valid_type].long()
+            type_weight = self._aux_type_weight()
             if cfg.use_focal_type:
                 aux_type = focal_cross_entropy(
                     aux_type_logit_valid,
                     type_labels_valid,
-                    weight=None,
+                    weight=type_weight,
                     gamma=cfg.focal_type_gamma,
                 )
             else:
-                aux_type = F.cross_entropy(aux_type_logit_valid, type_labels_valid)
+                aux_type = F.cross_entropy(
+                    aux_type_logit_valid, type_labels_valid, weight=type_weight
+                )
 
         n_partners = batch["n_partners"]
         interv = torch.tensor(0.0, device=dev)
-        if n_partners > 0:
+        if n_partners > 0 and cfg.use_interv_classifier:
             x_a_p0 = batch["x_audio_p0"][avail].to(dev)
             x_s_p0 = batch["x_seismic_p0"][avail].to(dev)
             _, z_tn, _, _ = model.encode_fused(x_a_p0, x_s_p0)
@@ -164,11 +196,11 @@ class VAETrainingMode(TrainingMode):
         )
 
         metrics = {
-            "recon": recon.item(),
-            "kl": kl.item(),
-            "raw_kl": raw_kl.item(),
-            "interv": interv.item() if isinstance(interv, torch.Tensor) else interv,
-            "total": total.item(),
+            "recon": recon.detach(),
+            "kl": kl.detach(),
+            "raw_kl": raw_kl.detach(),
+            "interv": interv.detach() if isinstance(interv, torch.Tensor) else interv,
+            "total": total.detach(),
             "aux_pres_logits": aux_pres_logit.detach().cpu(),
             "aux_pres_labels": det_t.detach().long().cpu(),
             "aux_type_logits": aux_type_logit_valid.detach().cpu(),
@@ -180,12 +212,15 @@ class VAETrainingMode(TrainingMode):
         cfg = self.config
 
         total_loss = torch.tensor(0.0, device=dev)
-        agg: dict[str, float] = {
-            "recon": 0.0,
-            "kl": 0.0,
-            "raw_kl": 0.0,
-            "interv": 0.0,
-            "total": 0.0,
+        # Scalar aggregators kept as 0-d on-device tensors so we don't sync
+        # per-sensor. _accumulate / _finalize_epoch_metrics convert to float
+        # exactly once at epoch end.
+        agg: dict = {
+            "recon": torch.zeros((), device=dev),
+            "kl": torch.zeros((), device=dev),
+            "raw_kl": torch.zeros((), device=dev),
+            "interv": torch.zeros((), device=dev),
+            "total": torch.zeros((), device=dev),
         }
         aux_pres_logits_all: list[torch.Tensor] = []
         aux_pres_labels_all: list[torch.Tensor] = []
@@ -210,33 +245,39 @@ class VAETrainingMode(TrainingMode):
             type_t = batch["vehicle_type_t"][avail].to(dev)
             kl, raw_kl = self._kl_terms(mu_t, lv_t, det_t, type_t, beta)
 
-            z_pres, z_type, z_prox, z_env, _ = model.latent.split(z_t)
+            mu_pres, mu_type, _, _, _ = model.latent.split(mu_t)
+            _, _, _, z_env, _ = model.latent.split(z_t)
 
-            aux_pres_logit = model.aux_pres_heads[sensor](z_pres).squeeze(-1)
-            aux_pres = F.binary_cross_entropy_with_logits(aux_pres_logit, det_t)
+            aux_pres_logit = model.aux_pres_heads[sensor](mu_pres).squeeze(-1)
+            aux_pres = F.binary_cross_entropy_with_logits(
+                aux_pres_logit, det_t, pos_weight=self._aux_pres_pos_weight()
+            )
             aux_pres_logits_all.append(aux_pres_logit.detach().cpu())
             aux_pres_labels_all.append(det_t.detach().long().cpu())
 
             valid_type = type_t >= 0
             aux_type = torch.tensor(0.0, device=dev)
             if valid_type.any():
-                type_logit_valid = model.aux_type_heads[sensor](z_type[valid_type])
+                type_logit_valid = model.aux_type_heads[sensor](mu_type[valid_type])
                 type_labels_valid = type_t[valid_type].long()
+                type_weight = self._aux_type_weight()
                 if cfg.use_focal_type:
                     aux_type = focal_cross_entropy(
                         type_logit_valid,
                         type_labels_valid,
-                        weight=None,
+                        weight=type_weight,
                         gamma=cfg.focal_type_gamma,
                     )
                 else:
-                    aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
+                    aux_type = F.cross_entropy(
+                        type_logit_valid, type_labels_valid, weight=type_weight
+                    )
                 aux_type_logits_all.append(type_logit_valid.detach().cpu())
                 aux_type_labels_all.append(type_labels_valid.detach().cpu())
 
             interv = torch.tensor(0.0, device=dev)
             n_partners = batch["n_partners"]
-            if n_partners > 0:
+            if n_partners > 0 and cfg.use_interv_classifier:
                 x_p0 = batch[f"x_{sensor}_p0"][avail].to(dev)
                 _, z_tn, _, _ = model.encode(sensor, x_p0)
                 _, _, _, z_env_tn, _ = model.latent.split(z_tn)
@@ -254,17 +295,17 @@ class VAETrainingMode(TrainingMode):
                 + cfg.lambda_aux_type * aux_type
             )
             total_loss = total_loss + sensor_loss
-            agg["recon"] += recon.item()
-            agg["kl"] += kl.item()
-            agg["raw_kl"] += raw_kl.item()
-            agg["interv"] += interv.item() if isinstance(interv, torch.Tensor) else interv
-            agg["total"] += sensor_loss.item()
+            agg["recon"] = agg["recon"] + recon.detach()
+            agg["kl"] = agg["kl"] + kl.detach()
+            agg["raw_kl"] = agg["raw_kl"] + raw_kl.detach()
+            agg["interv"] = agg["interv"] + (interv.detach() if isinstance(interv, torch.Tensor) else interv)
+            agg["total"] = agg["total"] + sensor_loss.detach()
             n_active += 1
 
         if n_active > 1:
             total_loss = total_loss / n_active
-            for k in agg:
-                agg[k] /= n_active
+            for k in ("recon", "kl", "raw_kl", "interv", "total"):
+                agg[k] = agg[k] / n_active
         if n_active == 0:
             total_loss = torch.tensor(0.0, device=dev, requires_grad=True)
 

@@ -66,8 +66,8 @@ EXPERIMENTS = [
     },
     {
         "name": "baseline_morlet",
-        "description": "Morlet frontend, otherwise default",
-        "overrides": {"frontend_type": "morlet"},
+        "description": "Morlet (per-sensor) frontend, otherwise default",
+        "overrides": {"frontend_type": "morlet_per_sensor"},
     },
     {
         "name": "high_interv",

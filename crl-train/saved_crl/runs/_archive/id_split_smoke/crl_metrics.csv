@@ -1,2 +1,0 @@
-epoch,beta,beta_event,train_recon,train_kl,train_raw_kl,train_interv,train_total,train_aux_pres_f1,train_aux_pres_acc,train_aux_type_f1,train_aux_type_acc,val_recon,val_kl,val_raw_kl,val_interv,val_total,val_aux_pres_f1,val_aux_pres_acc,val_aux_type_f1,val_aux_type_acc,val_ref_elbo
-0,0.02,↑,283.57716941833496,0.0,15.963041067123413,0.6797445118427277,286.6453037261963,0.5098,0.4141,0.1824,0.2041,280.29046019687445,14.608000184130924,14.608000184130924,0.6747711482547945,297.64120776268743,0.8437,0.7299,0.163,0.2457,294.89846038100535

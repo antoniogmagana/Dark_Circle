@@ -48,23 +48,6 @@ DATASET_VEHICLE_MAP = {
 }
 
 
-def _morlet_legacy_receptive_cycles(
-    kernel_size: int,
-    freq_min: float,
-    w0: float,
-    sample_rate: int,
-) -> float:
-    """Inverse of `kernel_size = round(2·receptive_cycles·w0/(2π·freq_min)·SR)`.
-
-    Used to translate legacy `morlet_kernel_size` into the per-sensor
-    `receptive_cycles` parameter the new schema expects. Returns the
-    receptive_cycles value that reproduces the given kernel_size.
-    """
-    import math
-
-    return kernel_size * 2 * math.pi * freq_min / (2 * w0 * sample_rate)
-
-
 @dataclass
 class ModalityConfig:
     # Defaults match the canonical seismic target (post-resample). The actual
@@ -103,7 +86,6 @@ class CRLConfig:
 
     # Frontend
     # "multiscale"              — shared learned conv bank (early fusion).
-    # "morlet"                  — shared Morlet bank per sensor, SR-derived freq range.
     # "morlet_per_sensor"       — Morlet bank per sensor with explicit freq ranges
     #                             from morlet_per_sensor_params (below).
     # "morlet_fused"            — Morlet bank per sensor (same per-sensor params
@@ -116,10 +98,19 @@ class CRLConfig:
     #                             Initialized identically to morlet_per_sensor.
     # "morlet_learnable_fused"  — Early-fusion version of morlet_learnable
     #                             (matches morlet_fused topology).
+    #
+    # `frontend_type='morlet'` is deprecated and removed — the global
+    # morlet_pool_stride collapsed seismic to one post-pool token. Use
+    # 'morlet_per_sensor' (per-sensor stride derivation) instead.
     frontend_type: str = "multiscale"
     fused_seq_len: int = 32  # per-sensor token count after AdaptiveAvgPool1d
-    morlet_kernel_size: int = 257
     multiscale_pool_stride: int = 16
+    # morlet_kernel_size / morlet_pool_stride were the global knobs for the
+    # deprecated `frontend_type='morlet'` variant. Kept here as no-ops so
+    # existing test fixtures and saved configs that pass them don't break;
+    # `morlet_per_sensor` (and learnable variants) derive both per-sensor
+    # from target_tokens + receptive_cycles.
+    morlet_kernel_size: int = 257
     morlet_pool_stride: int = 64
 
     # New unified schema (supersedes frontend_type). Two orthogonal axes:
@@ -252,6 +243,15 @@ class CRLConfig:
     lambda_aux_type: float = 1.0
     lambda_aux_prox: float = 0.1
 
+    # The CITRIS-style intervention classifier in vae_mode reads only z_env
+    # but is supervised against [pres_changed, type_changed]. That gradient
+    # actively routes presence/type information INTO the env block — the
+    # opposite of what the partition wants. Default OFF; set True only when
+    # re-running the legacy targeting for an A/B comparison. lambda_interv
+    # still controls magnitude when this is True. Disentangled mode replaces
+    # this with an invariance loss and ignores this flag.
+    use_interv_classifier: bool = False
+
     # Focal cross-entropy on the type loss only (pres BCE unaffected). When
     # enabled, the loss becomes (1 - p_t)^gamma * weighted_CE — stacked on
     # top of inverse-frequency type_class_weights, not a replacement.
@@ -318,9 +318,13 @@ class CRLConfig:
     # Map between the legacy `frontend_type` string and the new
     # (frontend_bank, frontend_fusion) decomposition. Single source of truth;
     # used in both directions during __post_init__ reconciliation.
+    # `frontend_type='morlet'` (SR-heuristic global stride) is deprecated and
+    # removed: at seismic SR=100 with morlet_pool_stride=64 it collapsed
+    # post-pool tokens to 1, leaving the temporal transformer with no seismic
+    # sequence to attend over. Use 'morlet_per_sensor' (which derives
+    # per-sensor stride from target_tokens) instead.
     _LEGACY_TYPE_TO_BANK_FUSION: ClassVar[dict[str, tuple[str, str]]] = {
         "multiscale": ("multiscale", "early"),
-        "morlet": ("morlet", "late"),
         "morlet_per_sensor": ("morlet", "late"),
         "morlet_fused": ("morlet", "early"),
         "morlet_learnable": ("morlet_learnable", "late"),
@@ -348,6 +352,15 @@ class CRLConfig:
         determine which the user intended by checking which one is at its
         default. If both differ from default and disagree, raise.
         """
+        if self.frontend_type == "morlet":
+            raise ValueError(
+                "frontend_type='morlet' is deprecated and removed: at "
+                "seismic SR=100 with the global morlet_pool_stride=64 it "
+                "collapsed post-pool tokens to 1, leaving the seismic "
+                "transformer no temporal sequence to attend over. Use "
+                "frontend_type='morlet_per_sensor' (derives per-sensor "
+                "stride from target_tokens) instead."
+            )
         if self.frontend_type not in self._LEGACY_TYPE_TO_BANK_FUSION:
             raise ValueError(
                 f"frontend_type must be one of "
@@ -403,33 +416,10 @@ class CRLConfig:
         or morlet_per_sensor_params) into frontend_per_sensor_params.
         """
         if self.frontend_bank in ("morlet", "morlet_learnable"):
-            if self.frontend_type == "morlet":
-                # Legacy SR-heuristic morlet has no per-sensor params dict;
-                # synthesize from the heuristic
-                # (freq_min = 2 if SR ≤ 200 else 20; freq_max = SR/4).
-                self.frontend_per_sensor_params = {}
-                for sensor in ("audio", "seismic"):
-                    mc = self.modality_cfg(sensor)
-                    sr = mc.sample_rate
-                    freq_min = 2.0 if sr <= 200 else 20.0
-                    self.frontend_per_sensor_params[sensor] = {
-                        "freq_min": freq_min,
-                        "freq_max": sr / 4.0,
-                        "w0": 6.0,
-                        "receptive_cycles": _morlet_legacy_receptive_cycles(
-                            self.morlet_kernel_size,
-                            freq_min,
-                            6.0,
-                            sr,
-                        ),
-                        "target_tokens": max(1, mc.window_size // self.morlet_pool_stride),
-                        "out_channels_frac": 1.0,
-                    }
-            else:
-                if self.morlet_per_sensor_params:
-                    self.frontend_per_sensor_params = {
-                        s: dict(p) for s, p in self.morlet_per_sensor_params.items()
-                    }
+            if self.morlet_per_sensor_params:
+                self.frontend_per_sensor_params = {
+                    s: dict(p) for s, p in self.morlet_per_sensor_params.items()
+                }
             # For early fusion, override target_tokens with fused_seq_len.
             # Legacy `morlet_fused` always pooled to fused_seq_len, ignoring
             # per-sensor target_tokens in the params dict.

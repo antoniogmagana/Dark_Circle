@@ -61,3 +61,24 @@ def seeded_dataloader_kwargs(seed: int) -> dict:
         "generator": g,
         "worker_init_fn": _worker_init_fn_factory(seed),
     }
+
+
+# Worker count above which val/eval DataLoaders see diminishing returns:
+# inference passes are short, no augmentation, no partner sampling, so the
+# worker-startup + IPC fixed cost outweighs the parallel-fetch benefit past
+# ~8 workers. Empirically chosen — adjust if profiling shows otherwise.
+_EVAL_NUM_WORKERS_CAP = 8
+
+
+def eval_num_workers(train_num_workers: int) -> int:
+    """Cap worker count for val / eval / inference DataLoaders.
+
+    Train-side DataLoaders fetch (anchor, partners) tuples with rejection
+    sampling and per-step intervention augmentation that benefit from many
+    workers. Val/eval/inference passes don't, so reusing the train-side
+    `cfg.num_workers` (often 24 on a 60-core server) wastes worker-startup
+    and IPC cost on short passes. This helper returns a capped count so
+    callers can opt in by writing `eval_num_workers(cfg.num_workers)`
+    instead of `cfg.num_workers`.
+    """
+    return min(max(train_num_workers, 0), _EVAL_NUM_WORKERS_CAP)

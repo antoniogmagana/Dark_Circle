@@ -31,7 +31,10 @@ class TrainingMode(nn.Module, ABC):
     def early_stop_mode() -> str    # "min" or "max"
 
     def checkpoint_summary(state) -> dict
+    def set_class_weights(pres_pos_weight, type_class_weights)  # default no-op
 ```
+
+`set_class_weights` is called once by `Trainer.train_crl` before the loop; modes that compute aux classification losses (VAE, disentangled) override it to apply the same weights the downstream probe uses, removing the train/eval class-balance mismatch that otherwise locked a frozen-backbone downstream into a biased representation. Contrastive mode keeps the default no-op.
 
 Modes are `nn.Module` subclasses so learnable sub-modules they carry (iVAE's conditional prior, the contrastive projection head) get discovered by `Trainer`'s param-group logic. The Trainer does:
 
@@ -48,7 +51,9 @@ Classical CRL. Implements:
 
 - **Forward dispatch** by frontend topology: `model.is_fused_frontend()` → `_forward_pair_fused` (shared encoder, one head key `"fused"`) vs `_forward_pair_per_sensor` (per-sensor encoders, one head key per sensor).
 - **Loss** = `recon + β·kl + λ_interv·interv + λ_aux_pres·aux_pres + λ_aux_type·aux_type`.
-  - `aux_type` is `F.cross_entropy(unweighted)` by default, or `focal_cross_entropy(weight=None, gamma=cfg.focal_type_gamma)` when `cfg.use_focal_type=True`. `aux_pres` is BCE and not affected by the focal flag.
+  - `aux_type` is `F.cross_entropy(weight=type_class_weights)` by default, or `focal_cross_entropy(weight=type_class_weights, gamma=cfg.focal_type_gamma)` when `cfg.use_focal_type=True`. `aux_pres` is `BCEWithLogitsLoss(pos_weight=pres_pos_weight)`. Class weights come from `set_class_weights` and match what the downstream probe uses.
+  - `interv` is gated on `cfg.use_interv_classifier` (default `False`). The classifier reads `z_env` but is supervised against `[pres_changed, type_changed]` — known to push presence/type info into the env block. Set the flag `True` only for A/B comparisons.
+- **Aux supervision reads μ, not the sampled z.** `latent.split` runs on `mu_t` for the aux head paths so the partition-routing gradient is not noised by the reparameterization sample. Recon and KL still operate on `z_t` (correct VAE semantics); only the aux pres/type losses use μ. The intervention classifier — when enabled — still takes the sampled `z_env`.
 - **KL computation** via the injected `Prior`. Y = `stack(det_t, type_t)` plumbed through even to `StandardPrior` (which ignores it).
 - **Adaptive β schedule** in `update_beta`:
   - If raw_kl below `config.kl_floor` → β decreases (prior collapsing).
@@ -86,6 +91,8 @@ Dispatches on `(config.training_mode, config.prior_type)`:
 |---|---|---|
 | `"vae"` | `"standard"` | `VAETrainingMode(prior=StandardPrior(), config)` |
 | `"vae"` | `"conditional"` | `VAETrainingMode(prior=ConditionalPrior(d_z), config)` |
+| `"disentangled"` | `"standard"` | `DisentangledVAETrainingMode(config)` (uses a fixed StandardPrior internally) |
+| `"disentangled"` | anything else | **raises** (disentangled fixes the prior on the full latent) |
 | `"contrastive"` | `"standard"` | `ContrastiveTrainingMode(config)` |
 | `"contrastive"` | anything else | **raises** (contrastive doesn't use a prior) |
 

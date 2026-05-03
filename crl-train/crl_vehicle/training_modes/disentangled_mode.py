@@ -83,6 +83,28 @@ class DisentangledVAETrainingMode(TrainingMode):
         self.lambda_align = config.lambda_align
         self.lambda_stab = config.lambda_stab
         self.lambda_interv_inv = config.lambda_interv_inv
+        # Class weights are injected by the trainer via set_class_weights()
+        # before train_crl(). Held as buffers so they move with .to(device).
+        self.register_buffer("_pres_pos_weight", torch.empty(0), persistent=False)
+        self.register_buffer("_type_class_weights", torch.empty(0), persistent=False)
+
+    def set_class_weights(
+        self,
+        pres_pos_weight: torch.Tensor | None,
+        type_class_weights: torch.Tensor | None,
+    ) -> None:
+        if pres_pos_weight is not None:
+            self._pres_pos_weight = pres_pos_weight.detach().to(self._pres_pos_weight.device)
+        if type_class_weights is not None:
+            self._type_class_weights = type_class_weights.detach().to(
+                self._type_class_weights.device
+            )
+
+    def _aux_pres_pos_weight(self) -> torch.Tensor | None:
+        return self._pres_pos_weight if self._pres_pos_weight.numel() > 0 else None
+
+    def _aux_type_weight(self) -> torch.Tensor | None:
+        return self._type_class_weights if self._type_class_weights.numel() > 0 else None
 
     # ------------------------------------------------------------------
     # Forward pair — dispatches by frontend topology.
@@ -126,7 +148,9 @@ class DisentangledVAETrainingMode(TrainingMode):
         type_t = batch["vehicle_type_t"][avail].to(dev)
 
         aux_pres_logit = self.pres_head(mu_signal).squeeze(-1)
-        aux_pres = F.binary_cross_entropy_with_logits(aux_pres_logit, det_t)
+        aux_pres = F.binary_cross_entropy_with_logits(
+            aux_pres_logit, det_t, pos_weight=self._aux_pres_pos_weight()
+        )
 
         valid_type = type_t >= 0
         aux_type = torch.tensor(0.0, device=dev)
@@ -135,15 +159,18 @@ class DisentangledVAETrainingMode(TrainingMode):
         if valid_type.any():
             type_logit_valid = self.type_head(mu_signal[valid_type])
             type_labels_valid = type_t[valid_type].long()
+            type_weight = self._aux_type_weight()
             if cfg.use_focal_type:
                 aux_type = focal_cross_entropy(
                     type_logit_valid,
                     type_labels_valid,
-                    weight=None,
+                    weight=type_weight,
                     gamma=cfg.focal_type_gamma,
                 )
             else:
-                aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
+                aux_type = F.cross_entropy(
+                    type_logit_valid, type_labels_valid, weight=type_weight
+                )
 
         # Temporal stability on env via consecutive partner.
         stab = torch.tensor(0.0, device=dev)
@@ -177,13 +204,13 @@ class DisentangledVAETrainingMode(TrainingMode):
         )
 
         metrics = {
-            "recon": recon.item(),
-            "kl": kl.item(),
-            "raw_kl": raw_kl.item(),
+            "recon": recon.detach(),
+            "kl": kl.detach(),
+            "raw_kl": raw_kl.detach(),
             "align": 0.0,  # n/a for fused frontends
-            "stab": stab.item(),
-            "interv_inv": interv_inv.item(),
-            "total": total.item(),
+            "stab": stab.detach() if isinstance(stab, torch.Tensor) else stab,
+            "interv_inv": interv_inv.detach() if isinstance(interv_inv, torch.Tensor) else interv_inv,
+            "total": total.detach(),
             "aux_pres_logits": aux_pres_logit.detach().cpu(),
             "aux_pres_labels": det_t.detach().long().cpu(),
             "aux_type_logits": type_logit_valid.detach().cpu(),
@@ -255,7 +282,9 @@ class DisentangledVAETrainingMode(TrainingMode):
         type_valid = type_t[any_avail]
 
         aux_pres_logit = self.pres_head(mu_signal_avg).squeeze(-1)
-        aux_pres = F.binary_cross_entropy_with_logits(aux_pres_logit, det_valid)
+        aux_pres = F.binary_cross_entropy_with_logits(
+            aux_pres_logit, det_valid, pos_weight=self._aux_pres_pos_weight()
+        )
 
         valid_type_mask = type_valid >= 0
         aux_type = torch.tensor(0.0, device=dev)
@@ -264,15 +293,18 @@ class DisentangledVAETrainingMode(TrainingMode):
         if valid_type_mask.any():
             type_logit_valid = self.type_head(mu_signal_avg[valid_type_mask])
             type_labels_valid = type_valid[valid_type_mask].long()
+            type_weight = self._aux_type_weight()
             if cfg.use_focal_type:
                 aux_type = focal_cross_entropy(
                     type_logit_valid,
                     type_labels_valid,
-                    weight=None,
+                    weight=type_weight,
                     gamma=cfg.focal_type_gamma,
                 )
             else:
-                aux_type = F.cross_entropy(type_logit_valid, type_labels_valid)
+                aux_type = F.cross_entropy(
+                    type_logit_valid, type_labels_valid, weight=type_weight
+                )
 
         # Cross-modal alignment: only if BOTH audio and seismic are present
         # for at least one sample. Compare on the joint-availability subset.
@@ -325,13 +357,13 @@ class DisentangledVAETrainingMode(TrainingMode):
         )
 
         metrics = {
-            "recon": recon_total.item(),
-            "kl": kl_total.item(),
-            "raw_kl": raw_kl_total.item(),
-            "align": align.item(),
-            "stab": stab.item(),
-            "interv_inv": interv_inv.item(),
-            "total": total.item(),
+            "recon": recon_total.detach(),
+            "kl": kl_total.detach(),
+            "raw_kl": raw_kl_total.detach(),
+            "align": align.detach() if isinstance(align, torch.Tensor) else align,
+            "stab": stab.detach() if isinstance(stab, torch.Tensor) else stab,
+            "interv_inv": interv_inv.detach() if isinstance(interv_inv, torch.Tensor) else interv_inv,
+            "total": total.detach(),
             "aux_pres_logits": aux_pres_logit.detach().cpu(),
             "aux_pres_labels": det_valid.detach().long().cpu(),
             "aux_type_logits": type_logit_valid.detach().cpu(),

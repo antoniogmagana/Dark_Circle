@@ -8,13 +8,13 @@ All nn.Modules that make up `CRLModel`. The model is assembled in `training/trai
 |---|---|
 | `frontend.py` | `MultiScale1DFrontend`, `MorletFilterbank`, `LearnableMorletFilterbank` |
 | `encoder_decoder.py` | `TemporalEncoder` (Transformer) + `FeatureDecoder` (MLP) |
-| `latent.py` | `CausalLatentSpace` — partition of z into causal blocks |
+| `latent.py` | `CausalLatentSpace` (vae mode) + `SplitLatentSpace` (disentangled mode) |
 | `intervention.py` | `UnknownInterventionClassifier` + `label_change_target` |
 | `heads.py` | `LinearPresenceHead`, `LinearTypeHead`, `MLPTypeHead`, `FullZTypeHead`, `LinearProximityHead` |
 
 ---
 
-## `frontend.py` — 6 variants in 3 classes
+## `frontend.py` — 5 variants in 3 classes
 
 ### `MultiScale1DFrontend`
 Three parallel `Conv1D` branches with different kernel sizes (default `[9, 19, 39]`), each followed by GroupNorm + GELU. Outputs are concatenated on the channel axis and projected back to `d_model` by a 1×1 conv. Runs in fp32 to avoid overflow on large audio inputs.
@@ -35,7 +35,9 @@ kernel_im = (π·s)^(-0.25) · exp(-½(t/s)²) · sin(w0·t/s)
 
 **Phase output** (`use_phase=True`): forward returns `[log_power, cos_phase, sin_phase]` on the channel axis → 3× out_channels. Phase is computed per bin as `(re/mag, im/mag)` with `mag = sqrt(re² + im² + 1e-8)`. Represented in the unit circle so downstream layers see a differentiable, wrap-free signal.
 
-Wired by `frontend_type="morlet"` (SR-derived heuristic freq range), `"morlet_per_sensor"` (explicit per-sensor ranges from `morlet_per_sensor_params`), and `"morlet_fused"` (same as per_sensor but with `AdaptiveAvgPool1d` → time-concat → shared encoder).
+Wired by `frontend_type="morlet_per_sensor"` (explicit per-sensor ranges from `morlet_per_sensor_params`) and `"morlet_fused"` (same as per_sensor but with `AdaptiveAvgPool1d` → time-concat → shared encoder).
+
+The legacy `frontend_type="morlet"` (SR-derived heuristic freq range, global `morlet_pool_stride=64`) is removed — it collapsed seismic to a single post-pool token at SR=100. `CRLConfig(frontend_type='morlet')` raises with a migration error pointing at `morlet_per_sensor`.
 
 ### `LearnableMorletFilterbank(MorletFilterbank)`
 Scales become `nn.Parameter` in log space (`log_scales`). `scales = exp(log_scales)` on every forward pass — keeps scales positive without a hard clamp and gives gradients a well-behaved magnitude. Per-filter `w0` becomes an `nn.Parameter` when `learnable_w0=True`.
@@ -47,10 +49,12 @@ Wired by `frontend_type="morlet_learnable"` (late fusion) and `"morlet_learnable
 ### FFT-based convolution
 Both fixed and learnable Morlet variants use FFT conv automatically when `kernel_size ≥ 512`. Below that threshold, cuDNN's direct conv is faster. Implementation in `_fft_morlet_conv`:
 - Zero-pad to `n_fft = next_pow2(L + ks - 1)`
-- rFFT input + both kernels separately
+- rFFT input + both kernels (kernel rFFT comes from `_kernel_rfft`)
 - Multiply `X · conj(K)` to get cross-correlation (matches `F.conv1d` semantics)
 - `torch.roll` the output by `ks//2` to align with direct-conv centering
 - Slice to length `L`
+
+The fixed-Morlet variant caches kernel rFFTs in `_kernel_rfft` per `n_fft` length: kernels are buffers and don't change between forwards, so re-computing their rFFT every step was wasted work. The cache is invalidated automatically by an `_apply` override when the module moves devices. The learnable subclass overrides `_kernel_rfft` to skip the cache (kernels change every step from `log_scales`).
 
 Delivers ~3× audio speedup on CPU (ks=4585), larger on GPU. Autograd flows through because `torch.fft.rfft`/`irfft` are differentiable — critical for the learnable variant.
 
@@ -89,7 +93,9 @@ Simple MLP: `Linear(d_z → d_model) + GELU + Linear(d_model → out_channels·s
 
 ---
 
-## `latent.py` — `CausalLatentSpace`
+## `latent.py` — `CausalLatentSpace` and `SplitLatentSpace`
+
+### `CausalLatentSpace` (vae mode)
 
 Partitions the d_z latent into four causal blocks plus a free subspace:
 
@@ -103,7 +109,13 @@ Partitions the d_z latent into four causal blocks plus a free subspace:
 
 `D_CAUSAL = 19`. `d_z` must be strictly greater to leave a free/nuisance subspace. Default `d_z=24` gives 5 free dims.
 
-Single method: `split(z) → (z_pres, z_type, z_prox, z_env, z_free)`. Every training mode and every aux head uses these slices to read the right subspace. The `env` block is what feeds `UnknownInterventionClassifier`; `pres`/`type`/`prox` feed their respective aux heads.
+Single method: `split(z) → (z_pres, z_type, z_prox, z_env, z_free)`. Each aux head reads the slice it owns. The `env` block feeds `UnknownInterventionClassifier` when `cfg.use_interv_classifier=True`; `pres`/`type`/`prox` feed their respective aux heads.
+
+### `SplitLatentSpace` (disentangled mode)
+
+Partitions the d_z latent into two blocks: `z_signal` (vehicle-relevant, default 12 dims) and `z_env` (rest). No per-feature sub-slicing — routing is enforced by losses (cross-modal alignment, env temporal stability, signal intervention-invariance), not by dim assignment.
+
+Single method: `split(z) → (z_signal, z_env)`. The disentangled aux pres/type heads (sized to `d_signal` and owned by `DisentangledVAETrainingMode`) read `z_signal` directly; the env temporal-stability loss reads `z_env`.
 
 ---
 
@@ -115,7 +127,9 @@ Binary targets `[pres_changed, type_changed]` between anchor `t` and partner `tn
 ### `UnknownInterventionClassifier(z_env_t, z_env_tn) → (B, 2) logits`
 MLP that takes concatenated `env` blocks from anchor and partner and predicts the 2-bit change vector. Hidden dim 64, two GELU layers, then Linear(64 → 2). Loss is BCE against `label_change_target`.
 
-Pressures the `env` block to factorize temporal change correctly — if presence changes, the classifier must recover that from the env block's movement alone.
+**Gated off by default** in vae mode (`cfg.use_interv_classifier=False`): the inputs come from `z_env` but the targets are `[pres_changed, type_changed]`, which trains the encoder to push presence/type change information INTO the env block — the opposite of what the partition wants. Set the flag `True` only for A/B comparisons against the legacy targeting; `lambda_interv` controls magnitude when enabled. Disentangled mode replaces this with an explicit `intervention_invariance_loss` on `z_signal` and ignores the flag.
+
+The classifier's parameters stay allocated unconditionally so the model topology doesn't depend on the flag — only the loss term is skipped.
 
 ---
 

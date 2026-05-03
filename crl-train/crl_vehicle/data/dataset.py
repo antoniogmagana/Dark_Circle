@@ -747,9 +747,18 @@ def compute_class_weights(ds: SensorDataset) -> tuple[torch.Tensor, torch.Tensor
     if total_typed == 0:
         type_weights = torch.ones(n_classes, dtype=torch.float32)
     else:
-        inv_freq = [total_typed / max(c, 1) for c in type_counts]
+        # Absent classes (count==0) get weight 0 — F.cross_entropy(weight=...) with
+        # weight[c]==0 contributes nothing for class c and the present-class weights
+        # carry the loss. Clamping count up to 1 instead would invert the imbalance
+        # by giving the absent class the LARGEST inverse-frequency weight.
+        present = [c > 0 for c in type_counts]
+        n_present = sum(present)
+        inv_freq = [(total_typed / c) if c > 0 else 0.0 for c in type_counts]
         s = sum(inv_freq)
-        type_weights = torch.tensor([v / s * n_classes for v in inv_freq], dtype=torch.float32)
+        type_weights = torch.tensor(
+            [(v / s * n_present) if v > 0 else 0.0 for v in inv_freq],
+            dtype=torch.float32,
+        )
 
     return pres_pos_weight, type_weights
 

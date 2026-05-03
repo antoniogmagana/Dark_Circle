@@ -28,7 +28,7 @@ This is the CITRIS piece: rather than learning which latent factor causes which 
 ### `focal_cross_entropy(logits, target, weight=None, gamma=2.0) → scalar`
 Focal cross-entropy: `(1 - p_t)^γ · weighted_CE`, mean-reduced (or weight-normalized when `weight` is given). Easy confident-correct samples (p_t near 1) contribute less; uncertain samples (p_t near 1/n_classes) contribute more. With `gamma=0` and a `weight` argument it reduces *exactly* to `F.cross_entropy(weight=weight)`, so it's a strict superset of weighted CE.
 
-Stacked, not substituted: when `cfg.use_focal_type=True`, the downstream type loss becomes `focal_cross_entropy(weight=type_class_weights, gamma=cfg.focal_type_gamma)` — the focal modulator multiplies the inverse-frequency-weighted CE rather than replacing it. So minority classes still get extra gradient *and* hard examples within each class get extra gradient. The pretraining `aux_type` site uses `weight=None` (matching its existing unweighted behavior) and only adds the focal modulator.
+Stacked, not substituted: when `cfg.use_focal_type=True`, the type loss becomes `focal_cross_entropy(weight=type_class_weights, gamma=cfg.focal_type_gamma)` at both the pretraining aux-type site and the downstream probe site. Class weights come from `mode.set_class_weights(...)` (forwarded by `Trainer.train_crl`); minority classes still get extra gradient *and* hard examples within each class get extra gradient. Pretraining and downstream now share the same loss shape, removing the train/eval class-balance mismatch that previously locked a frozen-backbone downstream into a biased representation.
 
 ## `contrastive.py` — NT-Xent
 
@@ -46,4 +46,12 @@ Negatives are implicit: all `B·P` partners in the batch serve as candidates, wi
 Default 0.1 (SimCLR-standard). Lower → sharper softmax, more punishing on wrong-side similarities. Exposed via `config.contrastive_temperature`; passed into `ContrastiveTrainingMode`.
 
 ### Why `mu`, not sampled `z`?
-`ContrastiveTrainingMode` calls the encoder's `mu` (posterior mean) rather than the reparameterized sample. Sampling at train time injects noise that hurts NT-Xent discriminability — the point of contrastive is a deterministic representation. The VAE path stays stochastic; they share the same encoder but call it differently.
+`ContrastiveTrainingMode` calls the encoder's `mu` (posterior mean) rather than the reparameterized sample. Sampling at train time injects noise that hurts NT-Xent discriminability — the point of contrastive is a deterministic representation. The VAE path keeps recon and KL on the sampled `z`, but its aux pres/type heads also read μ for the same reason — the partition-routing gradient shouldn't be noised by reparameterization.
+
+## `disentanglement.py` — disentangled-mode auxiliary losses
+
+Used by `DisentangledVAETrainingMode` to enforce the signal/env separation in `SplitLatentSpace`:
+
+- `cross_modal_alignment_loss(mu_a, mu_s)` — pulls the per-sample `z_signal` from the audio and seismic encoders together (per-sensor frontends only; fused frontends share an encoder so this is skipped).
+- `temporal_stability_loss(mu_env_t, mu_env_tn, consec_mask)` — penalizes drift between consecutive-window `z_env` pairs. Env should change slowly.
+- `intervention_invariance_loss(mu_signal_clean, mu_signal_intervened)` — `z_signal` must be invariant to noise interventions; the intervention applies to the anchor and the loss penalizes any change in `z_signal`. This replaces the misrouted `UnknownInterventionClassifier` from vae mode — pushing intervention-induced variation INTO `z_env` (where it belongs) instead of training the encoder to put pres/type-change signals into env.
