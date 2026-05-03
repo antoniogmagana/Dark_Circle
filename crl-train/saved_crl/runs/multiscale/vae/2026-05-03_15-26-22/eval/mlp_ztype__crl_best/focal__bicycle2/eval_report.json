@@ -1,0 +1,83 @@
+{
+  "run_name": "mlp_ztype__crl_best",
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best.pth",
+  "split": "focal__bicycle2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "bicycle2",
+  "n_windows": 3911,
+  "presence": {
+    "accuracy": 0.6696,
+    "precision": 0.9555,
+    "recall": 0.5238,
+    "specificity": 0.9526,
+    "f1": 0.6767,
+    "balanced_accuracy": 0.7382,
+    "mcc": 0.4697,
+    "tp": 1352,
+    "fp": 63,
+    "fn": 1229,
+    "tn": 1267
+  },
+  "type": {
+    "accuracy": 0.0,
+    "macro_f1": 0.0,
+    "macro_f1_support_only": 0.0,
+    "macro_precision": 0.0,
+    "macro_recall": 0.0,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 2581
+      },
+      "light": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "medium": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "heavy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        1,
+        2542,
+        38
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  }
+}
