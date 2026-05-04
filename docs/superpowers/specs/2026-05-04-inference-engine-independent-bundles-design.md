@@ -1,6 +1,6 @@
 # Independent CRL Bundles for `infer-detect` and `infer-classify`
 
-**Status:** Design approved 2026-05-04. Ready for implementation plan.
+**Status:** Implemented 2026-05-04. Catalogs are empty; populate via the exporter.
 
 ## 1. Goal & scope
 
