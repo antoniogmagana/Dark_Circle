@@ -1,10 +1,20 @@
 """Export a trained CRLModel into TorchScript artifacts for the
 inference-engine deployment pipeline.
 
-Reads a saved run (meta.json + downstream_best.pth) and emits per-mode
-TorchScript files plus a deployment-only meta.json that the inference pods
-consume. The inference image has zero Python dependency on crl_vehicle —
-only torch.jit.load is needed.
+Reads a saved run and emits per-mode TorchScript files plus a deployment-only
+meta.json that the inference pods consume. The inference image has zero Python
+dependency on crl_vehicle — only torch.jit.load is needed.
+
+Two checkpoints are required (the heads are checkpointed independently):
+  * downstream_best_pres.pth — argmax val_pres_f1 over training epochs
+  * downstream_best_type.pth — argmax val_type_f1 over training epochs
+
+Presence-side parameters (encoder + pres_heads + aux_pres_heads) are taken from
+the pres ckpt; type-side parameters (type_heads + aux_type_heads) are taken
+from the type ckpt. The encoder is shared across both heads at inference time,
+so the source for it is configurable via --encoder-from (default: pres). For
+runs trained with a frozen backbone, both checkpoints have bit-identical
+encoder state and the choice is irrelevant.
 
 Output layout (in --out-dir):
 
@@ -533,8 +543,16 @@ def _infer_d_type_from_checkpoint(state: dict) -> int | None:
     return None
 
 
-def load_trained_model(save_dir: Path, ckpt_name: str) -> tuple[CRLModel, dict]:
-    """Load a trained CRLModel from a saved-run directory."""
+def load_trained_model(save_dir: Path, encoder_from: str = "pres") -> tuple[CRLModel, dict]:
+    """Load a trained CRLModel by merging the two head-specific checkpoints.
+
+    Presence-side parameters (encoder, frontends, latent, pres_heads, aux_pres_heads)
+    come from downstream_best_pres.pth. Type-side parameters (type_heads,
+    aux_type_heads) come from downstream_best_type.pth. The shared encoder source
+    is selected by ``encoder_from`` ('pres' or 'type'). For frozen-backbone runs
+    both ckpts have bit-identical encoder state, so the default ('pres') is
+    equivalent to either choice.
+    """
     meta_path = save_dir / "meta.json"
     if not meta_path.exists():
         raise FileNotFoundError(f"meta.json not found in {save_dir}")
@@ -546,11 +564,27 @@ def load_trained_model(save_dir: Path, ckpt_name: str) -> tuple[CRLModel, dict]:
 
     cfg_kwargs = {k: v for k, v in cfg_dict.items() if k in CRLConfig.__dataclass_fields__}
 
-    ckpt_path = save_dir / ckpt_name
-    if not ckpt_path.exists():
-        raise FileNotFoundError(f"{ckpt_name} not found in {save_dir}")
+    pres_path = save_dir / "downstream_best_pres.pth"
+    type_path = save_dir / "downstream_best_type.pth"
+    for p in (pres_path, type_path):
+        if not p.exists():
+            raise FileNotFoundError(f"{p.name} not found in {save_dir}")
 
-    state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    pres_state = torch.load(pres_path, map_location="cpu", weights_only=True)
+    type_state = torch.load(type_path, map_location="cpu", weights_only=True)
+
+    # Build merged state_dict. Type-head keys come from type_state; presence-head
+    # keys come from pres_state; everything else (encoder, frontends, latent
+    # space) comes from whichever ckpt the user named via --encoder-from.
+    encoder_state = pres_state if encoder_from == "pres" else type_state
+    merged: dict = dict(encoder_state)
+    for k, v in type_state.items():
+        if k.startswith(("type_heads.", "aux_type_heads.")):
+            merged[k] = v
+    for k, v in pres_state.items():
+        if k.startswith(("pres_heads.", "aux_pres_heads.")):
+            merged[k] = v
+    state = merged
 
     # Realign CausalLatentSpace.D_TYPE with the trained checkpoint before
     # building the model. Heads belong to the run, not the live code.
@@ -806,7 +840,8 @@ def parse_args() -> argparse.Namespace:
         "--save-dir",
         required=True,
         type=Path,
-        help="Saved-run directory (contains meta.json + downstream_best.pth)",
+        help="Saved-run directory (contains meta.json + downstream_best_pres.pth "
+        "+ downstream_best_type.pth).",
     )
 
     target_group = ap.add_mutually_exclusive_group(required=True)
@@ -848,9 +883,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     ap.add_argument(
-        "--ckpt-name",
-        default="downstream_best.pth",
-        help="Checkpoint filename inside --save-dir (default: downstream_best.pth)",
+        "--encoder-from",
+        choices=["pres", "type"],
+        default="pres",
+        help="Which checkpoint supplies the shared encoder/frontend/latent "
+        "weights (default: pres). For frozen-backbone runs the choice is "
+        "irrelevant — the encoder state is bit-identical in both ckpts. Only "
+        "matters when the run was trained with finetune_top_n != 0, in which "
+        "case the two ckpts may have diverged encoder states.",
     )
     ap.add_argument(
         "--threshold-audio",
@@ -904,8 +944,8 @@ def main() -> None:
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Loading model from {args.save_dir} (ckpt={args.ckpt_name})")
-    model, meta = load_trained_model(args.save_dir, args.ckpt_name)
+    print(f"Loading model from {args.save_dir} (encoder_from={args.encoder_from})")
+    model, meta = load_trained_model(args.save_dir, encoder_from=args.encoder_from)
     cfg: CRLConfig = model.cfg
     sensors: list[str] = list(model.sensors)
     probe_mode: str = model.probe_mode

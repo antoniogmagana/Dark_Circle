@@ -69,7 +69,9 @@ def parse_args() -> argparse.Namespace:
         required=True,
         type=Path,
         help="Path to a downstream/<probe>__<ckpt>/ directory "
-        "containing meta.json + downstream_best.pth.",
+        "containing meta.json + downstream_best_type.pth. Per-vehicle "
+        "confusion is a type-level diagnostic, so this script always loads "
+        "the type checkpoint.",
     )
     p.add_argument("--test-dir", default="../data_files/parsed/test/")
     p.add_argument("--cache-dir", default="./saved_crl/caches/waveform")
@@ -118,7 +120,7 @@ def load_model_and_cfg(
     sensors = meta["sensors"]
     probe_mode = meta.get("probe_mode", "linear_ztype")
     model = CRLModel(cfg, sensors=sensors, probe_mode=probe_mode).to(device)
-    state = torch.load(downstream_dir / "downstream_best.pth", map_location=device)
+    state = torch.load(downstream_dir / "downstream_best_type.pth", map_location=device)
     model.load_state_dict(state, strict=False)
     if not model.is_fused_frontend():
         raise SystemExit(

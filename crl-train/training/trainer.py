@@ -818,36 +818,60 @@ class Trainer:
             for p in backbone_params:
                 p.requires_grad_(True)
 
-        param_groups = [{"params": list(self.model.head_parameters()), "lr": self.cfg.lr}]
+        # Two independent optimizers — one per head — so the training dynamics
+        # never couple. Per-parameter Adam moments and LR schedules stay isolated.
+        # When backbone is partially unfrozen (finetune_top_n != 0), backbone
+        # params join BOTH optimizers at 0.1× LR; each optimizer steps only on
+        # its own task's loss, so the backbone receives the sum of the two task
+        # gradients across the two .step() calls.
+        pres_groups: list[dict] = [
+            {"params": list(self.model.pres_heads.parameters()), "lr": self.cfg.lr}
+        ]
+        type_groups: list[dict] = [
+            {"params": list(self.model.type_heads.parameters()), "lr": self.cfg.lr}
+        ]
         if backbone_params:
-            param_groups.append({"params": backbone_params, "lr": self.cfg.lr * 0.1})
+            pres_groups.append({"params": backbone_params, "lr": self.cfg.lr * 0.1})
+            type_groups.append({"params": backbone_params, "lr": self.cfg.lr * 0.1})
+        pres_opt = torch.optim.AdamW(pres_groups)
+        type_opt = torch.optim.AdamW(type_groups)
+        backbone_shared = bool(backbone_params)
 
-        head_opt = torch.optim.AdamW(param_groups)
         self._pres_pos_weight = pres_pos_weight
         self._type_class_weights = type_class_weights
 
         csv_path = self.save_dir / "downstream_metrics.csv"
         csv_file: IO | None = None
         csv_writer: csv.DictWriter | None = None
-        best_val_loss = float("inf")
+        best_pres_f1 = -1.0
+        best_type_f1 = -1.0
 
         try:
             for epoch in range(epochs):
                 self.model.train()
                 # Running totals stay on-device so we don't D→H sync per batch;
                 # `.item()` happens once at epoch end below.
-                train_loss_t = torch.zeros((), device=self.device)
+                train_pres_t = torch.zeros((), device=self.device)
+                train_type_t = torch.zeros((), device=self.device)
                 n = 0
                 for batch in train_loader:
-                    head_opt.zero_grad()
-                    loss, _ = self._downstream_forward(batch)
-                    loss.backward()
-                    head_opt.step()
-                    train_loss_t = train_loss_t + loss.detach()
+                    pres_opt.zero_grad()
+                    type_opt.zero_grad()
+                    pres_loss, type_loss, _ = self._downstream_forward(batch)
+                    # When backbone is shared between optimizers, the first
+                    # backward must retain the autograd graph so the second can
+                    # backprop through the shared subgraph too.
+                    pres_loss.backward(retain_graph=backbone_shared)
+                    type_loss.backward()
+                    pres_opt.step()
+                    type_opt.step()
+                    train_pres_t = train_pres_t + pres_loss.detach()
+                    train_type_t = train_type_t + type_loss.detach()
                     n += 1
 
                 self.model.eval()
-                val_loss_t = torch.zeros((), device=self.device)
+                val_pres_t = torch.zeros((), device=self.device)
+                val_type_t = torch.zeros((), device=self.device)
                 m = 0
                 pres_logits_all: list[torch.Tensor] = []
                 pres_labels_all: list[torch.Tensor] = []
@@ -855,8 +879,9 @@ class Trainer:
                 type_labels_all: list[torch.Tensor] = []
                 with torch.no_grad():
                     for batch in val_loader:
-                        loss, outputs = self._downstream_forward(batch)
-                        val_loss_t = val_loss_t + loss.detach()
+                        pres_loss, type_loss, outputs = self._downstream_forward(batch)
+                        val_pres_t = val_pres_t + pres_loss.detach()
+                        val_type_t = val_type_t + type_loss.detach()
                         m += 1
                         pres_logits_all.append(outputs["pres_logits"].cpu())
                         pres_labels_all.append(outputs["pres_labels"].cpu())
@@ -864,8 +889,10 @@ class Trainer:
                             type_logits_all.append(outputs["type_logits"].cpu())
                             type_labels_all.append(outputs["type_labels"].cpu())
 
-                train_loss = float(train_loss_t.cpu().item())
-                val_loss = float(val_loss_t.cpu().item())
+                train_pres = float(train_pres_t.cpu().item())
+                train_type = float(train_type_t.cpu().item())
+                val_pres = float(val_pres_t.cpu().item())
+                val_type = float(val_type_t.cpu().item())
 
                 pres_f1, pres_acc = _binary_f1_acc(
                     torch.cat(pres_logits_all), torch.cat(pres_labels_all)
@@ -878,11 +905,17 @@ class Trainer:
                         n_classes=4,
                     )
 
-                avg_val = val_loss / max(m, 1)
+                avg_val_pres = val_pres / max(m, 1)
+                avg_val_type = val_type / max(m, 1)
+                avg_val = avg_val_pres + avg_val_type  # legacy combined loss
                 row = {
                     "epoch": epoch,
-                    "train_loss": train_loss / max(n, 1),
+                    "train_loss": (train_pres + train_type) / max(n, 1),
+                    "train_pres_loss": train_pres / max(n, 1),
+                    "train_type_loss": train_type / max(n, 1),
                     "val_loss": avg_val,
+                    "val_pres_loss": avg_val_pres,
+                    "val_type_loss": avg_val_type,
                     "val_pres_f1": round(pres_f1, 4),
                     "val_pres_acc": round(pres_acc, 4),
                     "val_type_f1": round(type_f1, 4),
@@ -895,14 +928,24 @@ class Trainer:
                 csv_writer.writerow(row)
                 csv_file.flush()
 
-                if avg_val < best_val_loss:
-                    best_val_loss = avg_val
-                    torch.save(self.model.state_dict(), self.save_dir / "downstream_best.pth")
+                if pres_f1 > best_pres_f1:
+                    best_pres_f1 = pres_f1
+                    torch.save(
+                        self.model.state_dict(), self.save_dir / "downstream_best_pres.pth"
+                    )
+                if type_f1 > best_type_f1:
+                    best_type_f1 = type_f1
+                    torch.save(
+                        self.model.state_dict(), self.save_dir / "downstream_best_type.pth"
+                    )
 
                 print(
-                    f"DS Epoch {epoch:3d} | train_loss={row['train_loss']:.4f} "
-                    f"val_loss={avg_val:.4f} "
-                    f"pres_f1={pres_f1:.3f} type_f1={type_f1:.3f}"
+                    f"DS Epoch {epoch:3d} | "
+                    f"train_pres={row['train_pres_loss']:.4f} "
+                    f"train_type={row['train_type_loss']:.4f} | "
+                    f"val_pres={avg_val_pres:.4f} val_type={avg_val_type:.4f} | "
+                    f"pres_f1={pres_f1:.3f} (best {best_pres_f1:.3f}) "
+                    f"type_f1={type_f1:.3f} (best {best_type_f1:.3f})"
                 )
         finally:
             if csv_file is not None:
@@ -913,16 +956,26 @@ class Trainer:
         for p in self.model.parameters():
             p.requires_grad_(True)
 
-    def _downstream_forward(self, batch: dict) -> tuple[torch.Tensor, dict]:
-        """Return (loss, {pres_logits, pres_labels, type_logits, type_labels}).
+    def _downstream_forward(
+        self, batch: dict
+    ) -> tuple[torch.Tensor, torch.Tensor, dict]:
+        """Return (pres_loss, type_loss, {pres_logits, pres_labels, type_logits, type_labels}).
 
-        type_logits/type_labels are None when no valid-type samples exist in batch.
-        Logits returned on the same device as model; accumulate on CPU for epoch metrics.
+        Two losses are returned separately so callers can backward each into its own
+        optimizer (presence and type heads are trained with independent AdamW
+        instances). Both are mean-reduced across the sensors that contributed in
+        this batch.
+
+        type_loss is a scalar zero on this device when no valid-type samples exist
+        in the batch (so the caller can call .backward() unconditionally without a
+        no-grad path).
         """
         model = self.model
         dev = self.device
-        total = torch.tensor(0.0, device=dev)
-        n = 0
+        pres_total = torch.tensor(0.0, device=dev)
+        type_total = torch.tensor(0.0, device=dev)
+        n_pres = 0
+        n_type = 0
 
         pres_logits_list: list[torch.Tensor] = []
         pres_labels_list: list[torch.Tensor] = []
@@ -964,19 +1017,23 @@ class Trainer:
                 det = batch["detection_label"][avail].float().to(dev)
                 vtype = batch["vehicle_type"][avail].to(dev)
                 pres_logit = model.pres_heads["fused"](z_pres).squeeze(-1)
-                total = total + torch.nn.functional.binary_cross_entropy_with_logits(
-                    pres_logit, det, pos_weight=ppw
+                pres_total = (
+                    pres_total
+                    + torch.nn.functional.binary_cross_entropy_with_logits(
+                        pres_logit, det, pos_weight=ppw
+                    )
                 )
                 pres_logits_list.append(pres_logit.detach())
                 pres_labels_list.append(det.long())
+                n_pres += 1
                 valid = vtype >= 0
                 if valid.any():
                     z_for_type = _select_type_slice(z, z_type, valid)
                     type_logit = model.type_heads["fused"](z_for_type)
-                    total = total + _type_loss(type_logit, vtype[valid])
+                    type_total = type_total + _type_loss(type_logit, vtype[valid])
                     type_logits_list.append(type_logit.detach())
                     type_labels_list.append(vtype[valid])
-                n += 1
+                    n_type += 1
         else:
             for sensor in model.sensors:
                 avail = batch[f"{sensor}_avail"].bool()
@@ -988,19 +1045,23 @@ class Trainer:
                 det = batch["detection_label"][avail].float().to(dev)
                 vtype = batch["vehicle_type"][avail].to(dev)
                 pres_logit = model.pres_heads[sensor](z_pres).squeeze(-1)
-                total = total + torch.nn.functional.binary_cross_entropy_with_logits(
-                    pres_logit, det, pos_weight=ppw
+                pres_total = (
+                    pres_total
+                    + torch.nn.functional.binary_cross_entropy_with_logits(
+                        pres_logit, det, pos_weight=ppw
+                    )
                 )
                 pres_logits_list.append(pres_logit.detach())
                 pres_labels_list.append(det.long())
+                n_pres += 1
                 valid = vtype >= 0
                 if valid.any():
                     z_for_type = _select_type_slice(z, z_type, valid)
                     type_logit = model.type_heads[sensor](z_for_type)
-                    total = total + _type_loss(type_logit, vtype[valid])
+                    type_total = type_total + _type_loss(type_logit, vtype[valid])
                     type_logits_list.append(type_logit.detach())
                     type_labels_list.append(vtype[valid])
-                n += 1
+                    n_type += 1
 
         outputs = {
             "pres_logits": (
@@ -1014,4 +1075,6 @@ class Trainer:
             "type_logits": torch.cat(type_logits_list) if type_logits_list else None,
             "type_labels": torch.cat(type_labels_list) if type_labels_list else None,
         }
-        return total / max(n, 1), outputs
+        pres_loss = pres_total / max(n_pres, 1)
+        type_loss = type_total / max(n_type, 1)
+        return pres_loss, type_loss, outputs

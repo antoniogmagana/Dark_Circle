@@ -34,7 +34,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--save-dir",
         required=True,
-        help="Run directory containing meta.json and downstream_best.pth",
+        help="Run directory containing meta.json and downstream_best_pres.pth / "
+        "downstream_best_type.pth (which one is loaded depends on --head).",
+    )
+    p.add_argument(
+        "--head",
+        choices=["pres", "type"],
+        required=True,
+        help="Which head to evaluate. 'pres' loads downstream_best_pres.pth and "
+        "reports presence metrics only; 'type' loads downstream_best_type.pth "
+        "and reports type metrics only. The two heads are checkpointed at "
+        "different epochs (argmax val_pres_f1 vs argmax val_type_f1), so a "
+        "single eval run cannot mix the two without contaminating either result.",
     )
     p.add_argument("--test-dir", default="../data_files/parsed/test/")
     p.add_argument("--cache-dir", default="./saved_crl/caches/waveform")
@@ -357,17 +368,20 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"  Device: {device}")
 
-    # Load model
-    ckpt_path = save_dir / "downstream_best.pth"
+    # Load model — head choice picks the checkpoint.
+    ckpt_filename = (
+        "downstream_best_pres.pth" if args.head == "pres" else "downstream_best_type.pth"
+    )
+    ckpt_path = save_dir / ckpt_filename
     if not ckpt_path.exists():
         raise FileNotFoundError(
-            f"downstream_best.pth not found in {save_dir}. "
+            f"{ckpt_filename} not found in {save_dir}. "
             "Run train.py --phase full (or --phase downstream) first."
         )
     model = CRLModel(cfg, sensors=sensors, probe_mode=probe_mode).to(device)
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
     model.eval()
-    print(f"  Loaded checkpoint: {ckpt_path} (probe_mode={probe_mode})")
+    print(f"  Loaded checkpoint: {ckpt_path} (head={args.head}, probe_mode={probe_mode})")
 
     # Load test dataset
     cache_dir = Path(args.cache_dir)
@@ -407,30 +421,44 @@ def main() -> None:
     print("  Running inference …")
     outputs = run_inference(model, loader, device, cfg)
 
-    # Compute metrics
-    pres_m = binary_metrics(outputs["pres_logits"], outputs["pres_labels"])
+    # Compute metrics — only the head we loaded. Computing both from the
+    # other-head checkpoint would mix random/poorly-tuned weights with real
+    # ones; refuse to do it.
+    pres_m = (
+        binary_metrics(outputs["pres_logits"], outputs["pres_labels"])
+        if args.head == "pres"
+        else None
+    )
     type_m = (
         multiclass_metrics(outputs["type_logits"], outputs["type_labels"], N_TYPE_CLASSES)
-        if outputs["type_logits"] is not None and outputs["type_logits"].numel() > 0
+        if args.head == "type"
+        and outputs["type_logits"] is not None
+        and outputs["type_logits"].numel() > 0
         else None
     )
 
     pres_cal_m = None
     type_cal_m = None
     if args.recalibrate:
-        pres_cal_m = recalibrated_binary_metrics(outputs["pres_logits"], outputs["pres_labels"])
-        if outputs["type_logits"] is not None and outputs["type_logits"].numel() > 0:
+        if args.head == "pres":
+            pres_cal_m = recalibrated_binary_metrics(
+                outputs["pres_logits"], outputs["pres_labels"]
+            )
+        elif (
+            outputs["type_logits"] is not None and outputs["type_logits"].numel() > 0
+        ):
             type_cal_m = recalibrated_multiclass_metrics(
                 outputs["type_logits"], outputs["type_labels"], N_TYPE_CLASSES
             )
 
-    # Print summary
-    print(f"\n{'=' * 55}")
-    print("  PRESENCE DETECTION")
-    print(f"{'=' * 55}")
-    for k, v in pres_m.items():
-        if k not in ("tp", "fp", "fn", "tn"):
-            print(f"  {k:<18} {v}")
+    # Print summary — only the head we actually evaluated.
+    if pres_m:
+        print(f"\n{'=' * 55}")
+        print("  PRESENCE DETECTION")
+        print(f"{'=' * 55}")
+        for k, v in pres_m.items():
+            if k not in ("tp", "fp", "fn", "tn"):
+                print(f"  {k:<18} {v}")
 
     if type_m:
         print(f"\n{'=' * 55}")
@@ -469,10 +497,13 @@ def main() -> None:
                 f"p_split={type_cal_m['p_split']})"
             )
 
-    # Save JSON report
+    # Save JSON report — only this head's metrics. The other block stays None
+    # so a downstream reader cannot accidentally treat the unloaded head's
+    # numbers as real.
     report = {
         "save_dir": str(save_dir),
         "test_dir": args.test_dir,
+        "head": args.head,
         "include_datasets": (sorted(args.include_datasets) if args.include_datasets else None),
         "n_windows": len(test_ds),
         "presence": pres_m,
@@ -485,17 +516,18 @@ def main() -> None:
     report_path.write_text(json.dumps(report, indent=2))
     print(f"\n  Report saved: {report_path}")
 
-    # Confusion matrix plots
-    pres_plot = out_dir / "confusion_presence.png"
-    _plot_binary_confusion(
-        tn=pres_m["tn"],
-        fp=pres_m["fp"],
-        fn=pres_m["fn"],
-        tp=pres_m["tp"],
-        title="Presence Detection (test set)",
-        out_path=pres_plot,
-    )
-    print(f"  Plot saved:   {pres_plot}")
+    # Confusion plots — only the head we evaluated.
+    if pres_m:
+        pres_plot = out_dir / "confusion_presence.png"
+        _plot_binary_confusion(
+            tn=pres_m["tn"],
+            fp=pres_m["fp"],
+            fn=pres_m["fn"],
+            tp=pres_m["tp"],
+            title="Presence Detection (test set)",
+            out_path=pres_plot,
+        )
+        print(f"  Plot saved:   {pres_plot}")
 
     if type_m:
         class_names = [IDX_TO_CLASS[i] for i in range(N_TYPE_CLASSES)]

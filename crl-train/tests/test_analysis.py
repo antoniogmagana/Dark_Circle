@@ -125,16 +125,44 @@ def _write_eval(
     *,
     per_dataset: dict[str, float] | None = None,
 ) -> None:
+    """Write nested eval reports under eval/<probe>/<head>/<split>/.
+
+    Each head's eval_report.json carries only its own block — pres reports have
+    `presence` populated and `type=null`; type reports have `type` populated and
+    `presence=null`. Mirrors the runtime layout written by phase_evals().
+    """
     per = per_dataset or {"iobt": 0.65, "focal": 0.45, "m3nvc": 0.55}
     for split, f1 in per.items():
-        d = run_dir / "eval" / probe / split
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "eval_report.json").write_text(
+        # Presence head report: only the presence block is populated.
+        d_pres = run_dir / "eval" / probe / "pres" / split
+        d_pres.mkdir(parents=True, exist_ok=True)
+        (d_pres / "eval_report.json").write_text(
             json.dumps(
                 {
+                    "head": "pres",
                     "split": split,
-                    "presence": {"f1": f1 + 0.1, "balanced_accuracy": 0.7, "mcc": 0.4},
-                    "type": {"macro_f1_support_only": f1, "macro_f1": f1 - 0.05},
+                    "presence": {
+                        "f1": f1 + 0.1,
+                        "balanced_accuracy": 0.7,
+                        "mcc": 0.4,
+                    },
+                    "type": None,
+                }
+            )
+        )
+        # Type head report: only the type block is populated.
+        d_type = run_dir / "eval" / probe / "type" / split
+        d_type.mkdir(parents=True, exist_ok=True)
+        (d_type / "eval_report.json").write_text(
+            json.dumps(
+                {
+                    "head": "type",
+                    "split": split,
+                    "presence": None,
+                    "type": {
+                        "macro_f1_support_only": f1,
+                        "macro_f1": f1 - 0.05,
+                    },
                 }
             )
         )

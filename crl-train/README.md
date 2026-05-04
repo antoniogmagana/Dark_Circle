@@ -217,16 +217,18 @@ Each run writes to a `save_dir` (default: `saved_crl/runs/<frontend>/<training_m
 │   └── learnable_morlet_freqs.csv   # (only for learnable variants)
 ├── downstream/<probe_mode>__<ckpt>/
 │   ├── downstream_metrics.csv       # per-epoch probe training
-│   ├── downstream_best.pth
+│   ├── downstream_best_pres.pth     # argmax val_pres_f1 (deployed to detection node)
+│   ├── downstream_best_type.pth     # argmax val_type_f1 (deployed to classification node)
 │   └── meta.json
-└── eval/<probe_mode>__<ckpt>/<split>/
-    ├── eval_report.json             # presence + type metrics
-    └── confusion_*.png
+└── eval/<probe_mode>__<ckpt>/<head>/<split>/
+    ├── eval_report.json             # only this head's metrics
+    └── confusion_*.png              # (head ∈ {pres, type})
 ```
 
-Splits: `iobt`, `focal`, `m3nvc` (per-dataset), `full` (pooled).
+Splits: `iobt`, `focal`, `m3nvc` (per-dataset), `full` (pooled), plus per-vehicle splits like `focal__pickup2`, `m3nvc__cx30`.
 Probe modes: `linear_ztype`, `mlp_ztype`, `linear_fullz`.
-Checkpoint names: `crl_best.pth` (ELBO), `crl_best_aux_type.pth` (F1 — epoch-invariant, preferred when training uses β annealing).
+CRL checkpoint names: `crl_best.pth` (ELBO), `crl_best_aux_type.pth` (F1 — epoch-invariant, preferred when training uses β annealing).
+Probe checkpoint names: `downstream_best_pres.pth` (argmax `val_pres_f1`), `downstream_best_type.pth` (argmax `val_type_f1`). The two heads train jointly with two independent optimizers — the pres optimizer steps only on the BCE presence loss, the type optimizer steps only on the CE type loss, so the heads don't fight each other for shared LR/Adam state.
 
 ---
 

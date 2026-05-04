@@ -15,10 +15,18 @@ Run directory layout (what's expected on disk):
     │   ├── learnable_morlet_freqs.csv   # only for learnable morlet runs
     │   └── crl_best.pth / crl_best_aux_type.pth / crl_final.pth
     ├── downstream/<probe_mode>__<ckpt>/
-    │   ├── downstream_metrics.csv       # per-epoch probe training
+    │   ├── downstream_metrics.csv         # per-epoch probe training
+    │   ├── downstream_best_pres.pth       # argmax val_pres_f1
+    │   ├── downstream_best_type.pth       # argmax val_type_f1
     │   └── meta.json
-    └── eval/<probe_mode>__<ckpt>/<split>/
-        └── eval_report.json             # presence + type metrics per split
+    └── eval/<probe_mode>__<ckpt>/<head>/<split>/
+        └── eval_report.json               # only this head's metrics
+                                           # (head ∈ {pres, type})
+
+`<head>` distinguishes the two checkpoints saved per probe — the presence head
+is selected on `val_pres_f1`, the type head on `val_type_f1`, and they are
+evaluated independently in Phase 3 so a presence row never inherits weights
+from a type-best epoch and vice versa.
 
 `<split>` names:
 - 'full' — all test windows pooled.
@@ -228,9 +236,10 @@ def _best_from_ds_metrics(cols: dict) -> dict:
 
 
 def _cross_location_metrics(run_dir: Path, preferred: str = CANONICAL_PROBE) -> dict:
-    """Walk eval/<canonical-or-fallback>/<split>/eval_report.json and collect
-    per-dataset type_f1 + pres_f1. 'full' (all datasets pooled) is excluded
-    from per-dataset — that's an aggregate, not a cross-location data point."""
+    """Walk eval/<probe>/<head>/<split>/eval_report.json and collect
+    per-dataset type_f1 (from head=type) + pres_f1 (from head=pres).
+    'full' is an aggregate, not a cross-location data point — excluded from
+    per-dataset but used as the source for calibrated metrics."""
     eval_dir = run_dir / "eval"
     if not eval_dir.is_dir():
         return {"per_dataset_type_f1": {}, "per_dataset_pres_f1": {}}
@@ -246,28 +255,40 @@ def _cross_location_metrics(run_dir: Path, preferred: str = CANONICAL_PROBE) -> 
     per_type: dict[str, float] = {}
     per_pres: dict[str, float] = {}
     calibrated: dict = {}
-    for split_dir in sorted(probe_dir.iterdir()):
-        if not split_dir.is_dir():
+
+    # Each probe dir contains per-head subdirs: pres/ and type/. Each holds
+    # the per-split eval_report.json for its head only. Presence metrics live
+    # exclusively under pres/, type metrics under type/.
+    for head_name, store, want_block in (
+        ("pres", per_pres, "presence"),
+        ("type", per_type, "type"),
+    ):
+        head_dir = probe_dir / head_name
+        if not head_dir.is_dir():
             continue
-        split = split_dir.name
-        report = _read_json(split_dir / "eval_report.json")
-        if not report:
-            continue
-        # type metric: prefer macro_f1_support_only (correct for missing classes).
-        type_block = report.get("type", {})
-        f1 = type_block.get("macro_f1_support_only") or type_block.get("macro_f1")
-        if f1 is not None and split in _PER_DATASET_KEYS:
-            per_type[split] = float(f1)
-        # presence metric
-        pres_block = report.get("presence", {})
-        pres_f1 = pres_block.get("f1")
-        if pres_f1 is not None and split in _PER_DATASET_KEYS:
-            per_pres[split] = float(pres_f1)
-        # calibrated metrics — read from 'full' if present.
-        if split == "full":
-            calibrated["pres_balanced_accuracy"] = pres_block.get("balanced_accuracy")
-            calibrated["pres_mcc"] = pres_block.get("mcc")
-            calibrated["type_macro_f1_support_only"] = type_block.get("macro_f1_support_only")
+        for split_dir in sorted(head_dir.iterdir()):
+            if not split_dir.is_dir():
+                continue
+            split = split_dir.name
+            report = _read_json(split_dir / "eval_report.json")
+            if not report:
+                continue
+            block = report.get(want_block) or {}
+            if want_block == "type":
+                f1 = block.get("macro_f1_support_only") or block.get("macro_f1")
+            else:
+                f1 = block.get("f1")
+            if f1 is not None and split in _PER_DATASET_KEYS:
+                store[split] = float(f1)
+            # Calibrated diagnostics live on the 'full' split.
+            if split == "full":
+                if want_block == "presence":
+                    calibrated["pres_balanced_accuracy"] = block.get("balanced_accuracy")
+                    calibrated["pres_mcc"] = block.get("mcc")
+                else:
+                    calibrated["type_macro_f1_support_only"] = block.get(
+                        "macro_f1_support_only"
+                    )
 
     out: dict = {
         "per_dataset_type_f1": per_type,

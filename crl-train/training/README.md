@@ -136,8 +136,9 @@ Per-batch metric `.item()` calls have been hoisted out of the inner loop. Runnin
 
 1. Load a CRL checkpoint (defaults to `crl_best.pth`; user can pass `crl_best_aux_type.pth`).
 2. Freeze or partially unfreeze the backbone per `finetune_top_n` (`0` = fully frozen heads-only, `-1` = full fine-tune, `N ≥ 1` = top N transformer layers + mu/lv heads at 0.1× LR).
-3. Train `pres_heads`, `type_heads`, `prox_heads` with class-weighted losses for `ds_epochs`.
-4. Save `downstream_best.pth` by min `val_loss`.
+3. Build **two independent AdamW optimizers** — one over `pres_heads.parameters()`, one over `type_heads.parameters()`. When backbone is partially unfrozen, the backbone params join both optimizers at 0.1× LR. Each optimizer steps only on its own task's loss, so the per-head Adam moment estimates and LR schedule never couple.
+4. Per training batch: forward once, compute `pres_loss = BCE(pres_logits, det)` and `type_loss = CE(type_logits, vtype)` separately, `pres_loss.backward()` then `type_loss.backward()`, then `pres_opt.step()` and `type_opt.step()`. (When backbone is shared between optimizers, the first backward retains the autograd graph so the second can backprop through the shared subgraph too.)
+5. Save **two checkpoints** per probe — `downstream_best_pres.pth` at `argmax(val_pres_f1)` and `downstream_best_type.pth` at `argmax(val_type_f1)`. The two heads' best epochs are usually different. Phase 3 evaluates each ckpt against its own task only — never reports a presence number from the type ckpt or vice versa.
 
 The class weighting (`pres_pos_weight`, `type_class_weights`) is computed once from the training set via `compute_class_weights(train_ds)` — uniform effective prior after reweighting. This is why the `probe/recalibration.py` log-prior shift assumes `p_train = uniform`.
 

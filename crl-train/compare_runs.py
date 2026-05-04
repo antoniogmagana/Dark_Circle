@@ -4,8 +4,10 @@ compare_runs.py — leaderboard of completed CRL runs.
 
 Walks saved_crl/runs/ (or --root) recursively, reads each run's meta.json +
 crl/crl_metrics.csv + downstream/<probe>/downstream_metrics.csv +
-eval/<probe>/<split>/eval_report.json, and emits a sorted leaderboard
-as both CSV and markdown.
+eval/<probe>/<head>/<split>/eval_report.json, and emits a sorted leaderboard
+as both CSV and markdown. Presence and type metrics live under separate
+<head> subdirs so the leaderboard never mixes a pres-best epoch's numbers
+with a type-best epoch's.
 
 Usage
 -----

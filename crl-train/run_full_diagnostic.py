@@ -460,10 +460,16 @@ def phase_probes(
             if not src_ckpt.exists():
                 print(f"  [skip] {run_name}: {ckpt_name} missing in CRL dir")
                 continue
-            done_marker = out_dir / "downstream_best.pth"
+            pres_ckpt = out_dir / "downstream_best_pres.pth"
+            type_ckpt = out_dir / "downstream_best_type.pth"
             metrics_csv = out_dir / "downstream_metrics.csv"
             meta_path = out_dir / "meta.json"
-            if skip_existing and done_marker.exists() and metrics_csv.exists():
+            if (
+                skip_existing
+                and pres_ckpt.exists()
+                and type_ckpt.exists()
+                and metrics_csv.exists()
+            ):
                 print(f"  [skip] {run_name}: already complete")
                 summaries.append(_probe_summary(run_name, probe_mode, ckpt_name, out_dir))
                 continue
@@ -513,35 +519,53 @@ def phase_probes(
 
 
 def _probe_summary(run_name: str, probe_mode: str, ckpt_name: str, out_dir: Path) -> dict:
-    """Extract best-epoch metrics from downstream_metrics.csv."""
+    """Extract per-head best-epoch metrics from downstream_metrics.csv.
+
+    Presence and type heads are checkpointed independently
+    (downstream_best_pres.pth = argmax val_pres_f1; downstream_best_type.pth =
+    argmax val_type_f1). The summary returns one block per head so the report
+    writer and the leaderboard can render each on its own footing.
+    """
     import csv as _csv
 
     csv_path = out_dir / "downstream_metrics.csv"
-    best = {
+    pres = {
+        "best_epoch": -1,
         "val_pres_f1": 0.0,
         "val_pres_acc": 0.0,
+        "val_pres_loss": 0.0,
+    }
+    typ = {
+        "best_epoch": -1,
         "val_type_f1": 0.0,
         "val_type_acc": 0.0,
-        "val_loss": float("inf"),
-        "best_epoch": -1,
+        "val_type_loss": 0.0,
     }
     if csv_path.exists():
         with open(csv_path) as f:
-            for row in _csv.DictReader(f):
-                vl = float(row.get("val_loss", "inf"))
-                if vl < best["val_loss"]:
-                    best["val_loss"] = vl
-                    best["best_epoch"] = int(row["epoch"])
-                    best["val_pres_f1"] = float(row.get("val_pres_f1", 0))
-                    best["val_pres_acc"] = float(row.get("val_pres_acc", 0))
-                    best["val_type_f1"] = float(row.get("val_type_f1", 0))
-                    best["val_type_acc"] = float(row.get("val_type_acc", 0))
+            rows = list(_csv.DictReader(f))
+        if rows:
+            pr = max(rows, key=lambda r: float(r.get("val_pres_f1", 0) or 0))
+            tr = max(rows, key=lambda r: float(r.get("val_type_f1", 0) or 0))
+            pres["best_epoch"] = int(pr["epoch"])
+            pres["val_pres_f1"] = float(pr.get("val_pres_f1", 0) or 0)
+            pres["val_pres_acc"] = float(pr.get("val_pres_acc", 0) or 0)
+            pres["val_pres_loss"] = float(pr.get("val_pres_loss", 0) or 0)
+            typ["best_epoch"] = int(tr["epoch"])
+            typ["val_type_f1"] = float(tr.get("val_type_f1", 0) or 0)
+            typ["val_type_acc"] = float(tr.get("val_type_acc", 0) or 0)
+            typ["val_type_loss"] = float(tr.get("val_type_loss", 0) or 0)
+
+    def _round(d: dict) -> dict:
+        return {k: round(v, 4) if isinstance(v, float) else v for k, v in d.items()}
+
     return {
         "run_name": run_name,
         "probe_mode": probe_mode,
         "ckpt_name": ckpt_name,
         "save_dir": str(out_dir),
-        **{k: round(v, 4) if isinstance(v, float) else v for k, v in best.items()},
+        "pres": _round(pres),
+        "type": _round(typ),
     }
 
 
@@ -615,10 +639,16 @@ def phase_evals(
         )
         split_loaders.append((split_name, include, vehicle, split_ds, split_loader))
 
+    # Heads are evaluated independently — each loaded from its own checkpoint
+    # (downstream_best_pres.pth or downstream_best_type.pth). Reports are nested
+    # under eval/<run_name>/<head>/<split_name>/eval_report.json so the on-disk
+    # tree matches the deployment topology (detection node loads pres ckpt,
+    # classification node loads type ckpt) and downstream readers can pick the
+    # right artifact unambiguously.
+    HEAD_FILENAMES = {"pres": "downstream_best_pres.pth", "type": "downstream_best_type.pth"}
+
     probe_dirs = sorted(probes_root.iterdir()) if probes_root.exists() else []
     for probe_dir in probe_dirs:
-        if not (probe_dir / "downstream_best.pth").exists():
-            continue
         meta_path = probe_dir / "meta.json"
         if not meta_path.exists():
             print(f"  [warn] {probe_dir.name}: meta.json missing, skipping evals")
@@ -627,77 +657,109 @@ def phase_evals(
         meta = json.loads(meta_path.read_text())
         probe_mode = meta.get("probe_mode", "linear_ztype")
 
-        # Load the downstream-trained model once, reuse across splits.
-        model = CRLModel(cfg, sensors=sensors, probe_mode=probe_mode).to(device)
-        model.load_state_dict(
-            torch.load(
-                probe_dir / "downstream_best.pth",
-                map_location=device,
-                weights_only=True,
-            )
-        )
-        model.eval()
-
-        for split_name, include, vehicle, split_ds, loader in split_loaders:
-            out_dir = evals_root / run_name / split_name
-            out_dir.mkdir(parents=True, exist_ok=True)
-            report_path = out_dir / "eval_report.json"
-            if skip_existing and report_path.exists():
-                print(f"  [skip] {run_name}/{split_name}")
-                results.append(json.loads(report_path.read_text()))
+        for head, ckpt_filename in HEAD_FILENAMES.items():
+            ckpt_path = probe_dir / ckpt_filename
+            if not ckpt_path.exists():
+                print(f"  [warn] {run_name}/{head}: {ckpt_filename} missing, skipping")
                 continue
 
-            print(f"  ── eval: {run_name}/{split_name} " f"({len(split_ds):,} windows)")
-            outputs = run_inference(model, loader, device, cfg)
-            pres_m = binary_metrics(outputs["pres_logits"], outputs["pres_labels"])
-            type_m = (
-                multiclass_metrics(outputs["type_logits"], outputs["type_labels"], N_TYPE_CLASSES)
-                if outputs["type_logits"] is not None and outputs["type_logits"].numel() > 0
-                else None
+            # Load the head-specific checkpoint. Same model class — the only
+            # difference between the two ckpts is which epoch's weights they
+            # snapshotted.
+            model = CRLModel(cfg, sensors=sensors, probe_mode=probe_mode).to(device)
+            model.load_state_dict(
+                torch.load(ckpt_path, map_location=device, weights_only=True)
             )
+            model.eval()
 
-            report = {
-                "run_name": run_name,
-                "probe_mode": probe_mode,
-                "ckpt_name": meta.get("ckpt_name"),
-                "split": split_name,
-                "include_datasets": include,
-                "include_vehicle": vehicle,
-                "n_windows": len(split_ds),
-                "presence": pres_m,
-                "type": type_m,
-            }
-            if recalibrate:
-                report["presence_target_calibrated"] = recalibrated_binary_metrics(
-                    outputs["pres_logits"], outputs["pres_labels"]
+            for split_name, include, vehicle, split_ds, loader in split_loaders:
+                out_dir = evals_root / run_name / head / split_name
+                out_dir.mkdir(parents=True, exist_ok=True)
+                report_path = out_dir / "eval_report.json"
+                if skip_existing and report_path.exists():
+                    print(f"  [skip] {run_name}/{head}/{split_name}")
+                    results.append(json.loads(report_path.read_text()))
+                    continue
+
+                print(
+                    f"  ── eval: {run_name}/{head}/{split_name} "
+                    f"({len(split_ds):,} windows)"
                 )
-                if outputs["type_logits"] is not None and outputs["type_logits"].numel() > 0:
-                    report["type_target_calibrated"] = recalibrated_multiclass_metrics(
-                        outputs["type_logits"],
-                        outputs["type_labels"],
-                        N_TYPE_CLASSES,
+                outputs = run_inference(model, loader, device, cfg)
+
+                # Each head reports only its own task's metrics. The other
+                # block is set to None — never compute or render presence
+                # numbers from the type checkpoint or vice versa.
+                if head == "pres":
+                    pres_m = binary_metrics(
+                        outputs["pres_logits"], outputs["pres_labels"]
                     )
+                    type_m = None
                 else:
-                    report["type_target_calibrated"] = None
-            report_path.write_text(json.dumps(report, indent=2))
+                    pres_m = None
+                    type_m = (
+                        multiclass_metrics(
+                            outputs["type_logits"],
+                            outputs["type_labels"],
+                            N_TYPE_CLASSES,
+                        )
+                        if outputs["type_logits"] is not None
+                        and outputs["type_logits"].numel() > 0
+                        else None
+                    )
 
-            # Confusion plots (per split).
-            _plot_binary_confusion(
-                tn=pres_m["tn"],
-                fp=pres_m["fp"],
-                fn=pres_m["fn"],
-                tp=pres_m["tp"],
-                title=f"Presence — {run_name} / {split_name}",
-                out_path=out_dir / "confusion_presence.png",
-            )
-            if type_m:
-                _plot_confusion_matrix(
-                    cm=type_m["confusion_matrix"],
-                    class_names=[IDX_TO_CLASS[i] for i in range(N_TYPE_CLASSES)],
-                    title=f"Vehicle Type — {run_name} / {split_name}",
-                    out_path=out_dir / "confusion_type.png",
-                )
-            results.append(report)
+                report = {
+                    "run_name": run_name,
+                    "probe_mode": probe_mode,
+                    "ckpt_name": meta.get("ckpt_name"),
+                    "head": head,
+                    "split": split_name,
+                    "include_datasets": include,
+                    "include_vehicle": vehicle,
+                    "n_windows": len(split_ds),
+                    "presence": pres_m,
+                    "type": type_m,
+                }
+                if recalibrate:
+                    if head == "pres":
+                        report["presence_target_calibrated"] = (
+                            recalibrated_binary_metrics(
+                                outputs["pres_logits"], outputs["pres_labels"]
+                            )
+                        )
+                    elif (
+                        outputs["type_logits"] is not None
+                        and outputs["type_logits"].numel() > 0
+                    ):
+                        report["type_target_calibrated"] = (
+                            recalibrated_multiclass_metrics(
+                                outputs["type_logits"],
+                                outputs["type_labels"],
+                                N_TYPE_CLASSES,
+                            )
+                        )
+                    else:
+                        report["type_target_calibrated"] = None
+                report_path.write_text(json.dumps(report, indent=2))
+
+                # Confusion plots — only the head's own.
+                if head == "pres" and pres_m is not None:
+                    _plot_binary_confusion(
+                        tn=pres_m["tn"],
+                        fp=pres_m["fp"],
+                        fn=pres_m["fn"],
+                        tp=pres_m["tp"],
+                        title=f"Presence — {run_name} / {split_name}",
+                        out_path=out_dir / "confusion_presence.png",
+                    )
+                if head == "type" and type_m is not None:
+                    _plot_confusion_matrix(
+                        cm=type_m["confusion_matrix"],
+                        class_names=[IDX_TO_CLASS[i] for i in range(N_TYPE_CLASSES)],
+                        title=f"Vehicle Type — {run_name} / {split_name}",
+                        out_path=out_dir / "confusion_type.png",
+                    )
+                results.append(report)
 
     # test_ds._index is no longer mutated (per-split filtering uses
     # _FrozenIndexSensorDS snapshots instead) — kept here for callers that
@@ -805,59 +867,101 @@ def write_reports(
         )
     lines.append("")
 
-    lines.append("## Phase 2 — probes (best val by val_loss)\n")
-    lines.append("| run | probe | ckpt | best_epoch | val_pres_f1 | val_type_f1 | val_type_acc |")
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append("## Phase 2 — probes (selected by max val F1, per head)\n")
+    lines.append(
+        "Each probe trains both heads jointly with two independent optimizers "
+        "and saves two checkpoints: the presence ckpt is the epoch with max "
+        "`val_pres_f1`, the type ckpt is the epoch with max `val_type_f1`. "
+        "These epochs may differ.\n"
+    )
+    lines.append("### Presence head\n")
+    lines.append("| run | probe | ckpt | best_epoch | val_pres_f1 | val_pres_acc |")
+    lines.append("|---|---|---|---|---|---|")
     for s in probe_summaries:
+        p = s.get("pres", {})
         lines.append(
             f"| {s['run_name']} | {s['probe_mode']} | {s['ckpt_name']} | "
-            f"{s['best_epoch']} | {s['val_pres_f1']:.4f} | {s['val_type_f1']:.4f} | "
-            f"{s['val_type_acc']:.4f} |"
+            f"{p.get('best_epoch', -1)} | "
+            f"{p.get('val_pres_f1', 0):.4f} | {p.get('val_pres_acc', 0):.4f} |"
+        )
+    lines.append("")
+    lines.append("### Type head\n")
+    lines.append("| run | probe | ckpt | best_epoch | val_type_f1 | val_type_acc |")
+    lines.append("|---|---|---|---|---|---|")
+    for s in probe_summaries:
+        t = s.get("type", {})
+        lines.append(
+            f"| {s['run_name']} | {s['probe_mode']} | {s['ckpt_name']} | "
+            f"{t.get('best_epoch', -1)} | "
+            f"{t.get('val_type_f1', 0):.4f} | {t.get('val_type_acc', 0):.4f} |"
         )
     lines.append("")
 
     lines.append("## Phase 3 — test evals\n")
     lines.append(
-        "Macro F1 is averaged over all 4 classes; filtered splits (focal, iobt) "
-        "exclude some classes entirely, so `macro_f1_support_only` restricts the "
-        "average to classes with support > 0 in that split and is the fair "
-        "cross-split comparison.\n"
+        "Each eval row is from a single head's checkpoint: presence rows come "
+        "from `downstream_best_pres.pth`, type rows from `downstream_best_type.pth`. "
+        "Macro F1 is averaged over all 4 classes; filtered splits (focal, iobt, "
+        "m3nvc, per-vehicle) exclude some classes entirely, so "
+        "`macro_f1_support_only` restricts the average to classes with support > 0 "
+        "in that split and is the fair cross-split comparison.\n"
     )
-    has_calibrated = any("type_target_calibrated" in r for r in eval_reports)
-    if has_calibrated:
+    pres_evals = [r for r in eval_reports if r.get("head") == "pres"]
+    type_evals = [r for r in eval_reports if r.get("head") == "type"]
+
+    has_calibrated_pres = any("presence_target_calibrated" in r for r in pres_evals)
+    has_calibrated_type = any("type_target_calibrated" in r for r in type_evals)
+
+    lines.append("### Presence head — test pres_f1 by split\n")
+    if has_calibrated_pres:
+        lines.append("| run | split | n_windows | pres_f1 | pres_f1_cal |")
+        lines.append("|---|---|---|---|---|")
+    else:
+        lines.append("| run | split | n_windows | pres_f1 |")
+        lines.append("|---|---|---|---|")
+    for r in pres_evals:
+        pres = r.get("presence") or {}
+        if has_calibrated_pres:
+            pres_cal = r.get("presence_target_calibrated") or {}
+            lines.append(
+                f"| {r['run_name']} | {r['split']} | {r['n_windows']:,} | "
+                f"{pres.get('f1', 0):.4f} | {pres_cal.get('f1', 0):.4f} |"
+            )
+        else:
+            lines.append(
+                f"| {r['run_name']} | {r['split']} | {r['n_windows']:,} | "
+                f"{pres.get('f1', 0):.4f} |"
+            )
+    lines.append("")
+
+    lines.append("### Type head — test type macro_f1 by split\n")
+    if has_calibrated_type:
         lines.append(
-            "| run | split | n_windows | pres_f1 | type_f1 | "
-            "type_f1_support_only | pres_f1_cal | type_f1_cal | "
-            "type_f1_support_only_cal | type_acc |"
+            "| run | split | n_windows | type_macro_f1 | "
+            "type_macro_f1_support_only | type_macro_f1_cal | "
+            "type_macro_f1_support_only_cal | type_acc |"
         )
-        lines.append("|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|")
     else:
         lines.append(
-            "| run | split | n_windows | pres_f1 | type_macro_f1 | "
+            "| run | split | n_windows | type_macro_f1 | "
             "type_macro_f1_support_only | type_acc |"
         )
-        lines.append("|---|---|---|---|---|---|---|")
-
-    for r in eval_reports:
-        pres = r.get("presence") or {}
+        lines.append("|---|---|---|---|---|---|")
+    for r in type_evals:
         typ = r.get("type") or {}
         per = typ.get("per_class", {}) if typ else {}
-        # Prefer the field computed in eval.py; fall back to recomputation for
-        # old reports that don't have it.
         if typ and "macro_f1_support_only" in typ:
             macro_support_only = typ["macro_f1_support_only"]
         else:
             f1_present = [v["f1"] for v in per.values() if v.get("support", 0) > 0]
             macro_support_only = sum(f1_present) / len(f1_present) if f1_present else 0.0
-        if has_calibrated:
-            pres_cal = r.get("presence_target_calibrated") or {}
+        if has_calibrated_type:
             typ_cal = r.get("type_target_calibrated") or {}
             lines.append(
                 f"| {r['run_name']} | {r['split']} | {r['n_windows']:,} | "
-                f"{pres.get('f1', 0):.4f} | "
                 f"{typ.get('macro_f1', 0):.4f} | "
                 f"{macro_support_only:.4f} | "
-                f"{pres_cal.get('f1', 0):.4f} | "
                 f"{typ_cal.get('macro_f1', 0):.4f} | "
                 f"{typ_cal.get('macro_f1_support_only', 0):.4f} | "
                 f"{typ.get('accuracy', 0):.4f} |"
@@ -865,7 +969,6 @@ def write_reports(
         else:
             lines.append(
                 f"| {r['run_name']} | {r['split']} | {r['n_windows']:,} | "
-                f"{pres.get('f1', 0):.4f} | "
                 f"{typ.get('macro_f1', 0):.4f} | "
                 f"{macro_support_only:.4f} | "
                 f"{typ.get('accuracy', 0):.4f} |"
@@ -873,12 +976,15 @@ def write_reports(
     lines.append("")
 
     lines.append("## Per-class type F1 on test splits\n")
+    lines.append(
+        "From the type head only (`downstream_best_type.pth`).\n"
+    )
     classes = [IDX_TO_CLASS[i] for i in range(N_TYPE_CLASSES)]
     header = "| run | split | " + " | ".join(f"{c}_f1" for c in classes) + " |"
     sep = "|---|---|" + "|".join(["---"] * len(classes)) + "|"
     lines.append(header)
     lines.append(sep)
-    for r in eval_reports:
+    for r in type_evals:
         typ = r.get("type") or {}
         per = typ.get("per_class", {}) if typ else {}
         row_cells = [r["run_name"], r["split"]]
