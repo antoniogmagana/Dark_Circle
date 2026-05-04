@@ -829,6 +829,32 @@ def parity_check_fused(
 CLASS_NAMES = ["pedestrian", "light", "medium", "heavy"]
 
 
+def _find_report_json(save_dir: Path) -> Path:
+    """Walk up from save_dir looking for report.json.
+
+    The expected per-run layout is
+    ``runs/<frontend>/<mode>/<run-id>/downstream/<probe>/`` with the
+    checkpoints + meta.json in the probe dir but ``report.json`` at the
+    run root (``runs/<frontend>/<mode>/<run-id>/``). This walks parents
+    until it finds one or hits the filesystem root.
+    """
+    cur = save_dir.resolve()
+    # Cap the search depth so we never escape into ``saved_crl/`` or higher;
+    # 5 levels handles probe -> downstream -> run -> mode -> frontend.
+    for _ in range(6):
+        candidate = cur / "report.json"
+        if candidate.exists():
+            return candidate
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    raise FileNotFoundError(
+        f"report.json not found in {save_dir} or any parent directory "
+        f"(searched up to 6 levels). Needed for bundle selection metrics. "
+        f"Re-run eval to produce it."
+    )
+
+
 def _read_selection_metrics(save_dir: Path, kind: str) -> dict:
     """Pull the metric fields the bundle catalog needs from report.json.
 
@@ -837,13 +863,12 @@ def _read_selection_metrics(save_dir: Path, kind: str) -> dict:
     ``min_type_f1`` (selection floor + tie-breaker). Missing required
     fields are a hard error so a bundle can't end up in the catalog
     without provenance.
+
+    ``report.json`` is searched for from ``save_dir`` walking upward —
+    the saved-run layout puts checkpoints in a per-probe subdirectory
+    but the report at the run root.
     """
-    report_path = save_dir / "report.json"
-    if not report_path.exists():
-        raise FileNotFoundError(
-            f"report.json not found in {save_dir} — needed for bundle "
-            f"selection metrics. Re-run eval to produce it."
-        )
+    report_path = _find_report_json(save_dir)
     report = json.loads(report_path.read_text())
 
     if kind == "detect":
@@ -857,12 +882,14 @@ def _read_selection_metrics(save_dir: Path, kind: str) -> dict:
     for field in required:
         if field not in report:
             raise KeyError(
-                f"report.json in {save_dir} is missing required field "
+                f"{report_path} is missing required field "
                 f"{field!r} for kind={kind}. Available keys: "
                 f"{sorted(report.keys())}"
             )
         out[field] = float(report[field])
-    out["source_run"] = save_dir.name
+    # ``source_run`` records the run-id, not the probe subdir — the run
+    # root is where ``report.json`` lives.
+    out["source_run"] = report_path.parent.name
     return out
 
 
