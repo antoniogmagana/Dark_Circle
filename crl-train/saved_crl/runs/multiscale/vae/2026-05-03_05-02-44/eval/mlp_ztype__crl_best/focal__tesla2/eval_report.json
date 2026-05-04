@@ -1,0 +1,83 @@
+{
+  "run_name": "mlp_ztype__crl_best",
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best.pth",
+  "split": "focal__tesla2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "tesla2",
+  "n_windows": 2694,
+  "presence": {
+    "accuracy": 0.8174,
+    "precision": 0.9453,
+    "recall": 0.815,
+    "specificity": 0.8261,
+    "f1": 0.8753,
+    "balanced_accuracy": 0.8205,
+    "mcc": 0.5623,
+    "tp": 1727,
+    "fp": 100,
+    "fn": 392,
+    "tn": 475
+  },
+  "type": {
+    "accuracy": 0.0831,
+    "macro_f1": 0.0384,
+    "macro_f1_support_only": 0.1534,
+    "macro_precision": 0.25,
+    "macro_recall": 0.0208,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "medium": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "heavy": {
+        "precision": 1.0,
+        "recall": 0.0831,
+        "f1": 0.1534,
+        "support": 2119
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        322,
+        373,
+        1248,
+        176
+      ]
+    ]
+  }
+}

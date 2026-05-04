@@ -1,0 +1,83 @@
+{
+  "run_name": "mlp_ztype__crl_best_aux_type",
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "split": "m3nvc__cx30",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "cx30",
+  "n_windows": 14020,
+  "presence": {
+    "accuracy": 0.7813,
+    "precision": 0.8756,
+    "recall": 0.8246,
+    "specificity": 0.653,
+    "f1": 0.8494,
+    "balanced_accuracy": 0.7388,
+    "mcc": 0.4546,
+    "tp": 8643,
+    "fp": 1228,
+    "fn": 1838,
+    "tn": 2311
+  },
+  "type": {
+    "accuracy": 0.8317,
+    "macro_f1": 0.227,
+    "macro_f1_support_only": 0.9081,
+    "macro_precision": 0.25,
+    "macro_recall": 0.2079,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "medium": {
+        "precision": 1.0,
+        "recall": 0.8317,
+        "f1": 0.9081,
+        "support": 10481
+      },
+      "heavy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        13,
+        15,
+        8717,
+        1736
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  }
+}

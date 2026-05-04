@@ -1,0 +1,83 @@
+{
+  "run_name": "linear_ztype__crl_best",
+  "probe_mode": "linear_ztype",
+  "ckpt_name": "crl_best.pth",
+  "split": "iobt__polaris0235pm_nolineofsig",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": "polaris0235pm_nolineofsig",
+  "n_windows": 895,
+  "presence": {
+    "accuracy": 0.4078,
+    "precision": 0.9583,
+    "recall": 0.2085,
+    "specificity": 0.9742,
+    "f1": 0.3424,
+    "balanced_accuracy": 0.5914,
+    "mcc": 0.2182,
+    "tp": 138,
+    "fp": 6,
+    "fn": 524,
+    "tn": 227
+  },
+  "type": {
+    "accuracy": 0.3459,
+    "macro_f1": 0.1285,
+    "macro_f1_support_only": 0.514,
+    "macro_precision": 0.25,
+    "macro_recall": 0.0865,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 1.0,
+        "recall": 0.3459,
+        "f1": 0.514,
+        "support": 662
+      },
+      "medium": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "heavy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        2,
+        229,
+        333,
+        98
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  }
+}

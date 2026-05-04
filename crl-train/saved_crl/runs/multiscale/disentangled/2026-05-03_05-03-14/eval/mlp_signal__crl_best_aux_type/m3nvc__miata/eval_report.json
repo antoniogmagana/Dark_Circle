@@ -1,0 +1,83 @@
+{
+  "run_name": "mlp_signal__crl_best_aux_type",
+  "probe_mode": "mlp_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "split": "m3nvc__miata",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "miata",
+  "n_windows": 13441,
+  "presence": {
+    "accuracy": 0.7831,
+    "precision": 0.8158,
+    "recall": 0.9221,
+    "specificity": 0.3473,
+    "f1": 0.8657,
+    "balanced_accuracy": 0.6347,
+    "mcc": 0.3294,
+    "tp": 9396,
+    "fp": 2122,
+    "fn": 794,
+    "tn": 1129
+  },
+  "type": {
+    "accuracy": 0.8996,
+    "macro_f1": 0.2368,
+    "macro_f1_support_only": 0.9472,
+    "macro_precision": 0.25,
+    "macro_recall": 0.2249,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "medium": {
+        "precision": 1.0,
+        "recall": 0.8996,
+        "f1": 0.9472,
+        "support": 10190
+      },
+      "heavy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        5,
+        2,
+        9167,
+        1016
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  }
+}

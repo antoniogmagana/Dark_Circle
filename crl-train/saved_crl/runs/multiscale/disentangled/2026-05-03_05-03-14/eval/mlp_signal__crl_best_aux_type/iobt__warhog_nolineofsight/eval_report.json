@@ -1,0 +1,83 @@
+{
+  "run_name": "mlp_signal__crl_best_aux_type",
+  "probe_mode": "mlp_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "split": "iobt__warhog_nolineofsight",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": "warhog_nolineofsight",
+  "n_windows": 190,
+  "presence": {
+    "accuracy": 0.4211,
+    "precision": 0.7742,
+    "recall": 0.3333,
+    "specificity": 0.6957,
+    "f1": 0.466,
+    "balanced_accuracy": 0.5145,
+    "mcc": 0.0265,
+    "tp": 48,
+    "fp": 14,
+    "fn": 96,
+    "tn": 32
+  },
+  "type": {
+    "accuracy": 0.125,
+    "macro_f1": 0.0556,
+    "macro_f1_support_only": 0.2222,
+    "macro_precision": 0.25,
+    "macro_recall": 0.0312,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 1.0,
+        "recall": 0.125,
+        "f1": 0.2222,
+        "support": 144
+      },
+      "medium": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "heavy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        31,
+        18,
+        83,
+        12
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  }
+}

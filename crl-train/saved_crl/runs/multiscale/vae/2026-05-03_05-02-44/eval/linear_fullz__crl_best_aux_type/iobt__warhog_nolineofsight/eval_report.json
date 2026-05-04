@@ -1,0 +1,83 @@
+{
+  "run_name": "linear_fullz__crl_best_aux_type",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "split": "iobt__warhog_nolineofsight",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": "warhog_nolineofsight",
+  "n_windows": 190,
+  "presence": {
+    "accuracy": 0.8421,
+    "precision": 0.875,
+    "recall": 0.9236,
+    "specificity": 0.587,
+    "f1": 0.8986,
+    "balanced_accuracy": 0.7553,
+    "mcc": 0.5468,
+    "tp": 133,
+    "fp": 19,
+    "fn": 11,
+    "tn": 27
+  },
+  "type": {
+    "accuracy": 0.1042,
+    "macro_f1": 0.0472,
+    "macro_f1_support_only": 0.1887,
+    "macro_precision": 0.25,
+    "macro_recall": 0.0261,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 1.0,
+        "recall": 0.1042,
+        "f1": 0.1887,
+        "support": 144
+      },
+      "medium": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "heavy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        33,
+        15,
+        68,
+        28
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "run_name": "mlp_signal__crl_best_aux_type",
+  "probe_mode": "mlp_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "split": "focal__mustang0528",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "mustang0528",
+  "n_windows": 10643,
+  "presence": {
+    "accuracy": 0.4604,
+    "precision": 0.896,
+    "recall": 0.0986,
+    "specificity": 0.9835,
+    "f1": 0.1776,
+    "balanced_accuracy": 0.541,
+    "mcc": 0.1635,
+    "tp": 620,
+    "fp": 72,
+    "fn": 5671,
+    "tn": 4280
+  },
+  "type": {
+    "accuracy": 0.3917,
+    "macro_f1": 0.1407,
+    "macro_f1_support_only": 0.5629,
+    "macro_precision": 0.25,
+    "macro_recall": 0.0979,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "medium": {
+        "precision": 1.0,
+        "recall": 0.3917,
+        "f1": 0.5629,
+        "support": 6291
+      },
+      "heavy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        3293,
+        369,
+        2464,
+        165
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "run_name": "linear_signal__crl_best",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best.pth",
+  "split": "focal__scooter2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "scooter2",
+  "n_windows": 2762,
+  "presence": {
+    "accuracy": 0.7936,
+    "precision": 0.837,
+    "recall": 0.9054,
+    "specificity": 0.4362,
+    "f1": 0.8699,
+    "balanced_accuracy": 0.6708,
+    "mcc": 0.3822,
+    "tp": 1905,
+    "fp": 371,
+    "fn": 199,
+    "tn": 287
+  },
+  "type": {
+    "accuracy": 0.1445,
+    "macro_f1": 0.0631,
+    "macro_f1_support_only": 0.2525,
+    "macro_precision": 0.25,
+    "macro_recall": 0.0361,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 1.0,
+        "recall": 0.1445,
+        "f1": 0.2525,
+        "support": 2104
+      },
+      "medium": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "heavy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        38,
+        304,
+        1550,
+        212
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  }
+}

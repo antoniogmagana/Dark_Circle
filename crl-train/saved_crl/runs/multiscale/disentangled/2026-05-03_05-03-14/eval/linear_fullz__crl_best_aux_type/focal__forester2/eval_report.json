@@ -1,0 +1,83 @@
+{
+  "run_name": "linear_fullz__crl_best_aux_type",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "split": "focal__forester2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "forester2",
+  "n_windows": 2975,
+  "presence": {
+    "accuracy": 0.3049,
+    "precision": 0.9661,
+    "recall": 0.1722,
+    "specificity": 0.9697,
+    "f1": 0.2923,
+    "balanced_accuracy": 0.5709,
+    "mcc": 0.1486,
+    "tp": 427,
+    "fp": 15,
+    "fn": 2053,
+    "tn": 480
+  },
+  "type": {
+    "accuracy": 0.4185,
+    "macro_f1": 0.1475,
+    "macro_f1_support_only": 0.5901,
+    "macro_precision": 0.25,
+    "macro_recall": 0.1046,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "medium": {
+        "precision": 1.0,
+        "recall": 0.4185,
+        "f1": 0.5901,
+        "support": 2480
+      },
+      "heavy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        131,
+        1060,
+        1038,
+        251
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  }
+}
