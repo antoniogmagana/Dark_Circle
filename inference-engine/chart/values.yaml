@@ -32,6 +32,30 @@ images:
   pullSecrets: []
 
 # -----------------------------------------------------------------------------
+# CRL bundle selection (build-time only)
+#
+# These are *not* runtime Helm values — Kubernetes never sees them. They
+# document the build-host environment variables that scripts/build_containers.sh
+# reads when staging the inference pods' CRL artifacts. The values here are
+# for reference only; set them as shell env vars when you run the build.
+#
+# Each pod selects independently:
+#   - infer-detect carries the encoder + presence head from DETECT_BUNDLE
+#     (a directory under inference-engine/detect-bundles/).
+#   - infer-classify carries encoder + type head from CLASSIFY_BUNDLE
+#     (a directory under inference-engine/classify-bundles/).
+#
+# The two pods may use bundles from the same CRL run or different runs.
+# Defaults are the *-default symlinks in each catalog (which point at the
+# leaderboard winner per the selection rules in each catalog's README).
+# -----------------------------------------------------------------------------
+bundles:
+  # Build-time: export DETECT_BUNDLE=<name> before running scripts/build_containers.sh.
+  detect: detect-default
+  # Build-time: export CLASSIFY_BUNDLE=<name> before running scripts/build_containers.sh.
+  classify: classify-default
+
+# -----------------------------------------------------------------------------
 # ROS2 / DDS configuration
 #
 # Customer-facing knobs. Most ROS2 networks need at least ``domainId`` and

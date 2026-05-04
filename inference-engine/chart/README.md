@@ -40,6 +40,23 @@ for img in discovery ingestor infer-detect infer-classify egress fake-publisher;
 done
 ```
 
+> **Per-pod CRL bundle selection.** `infer-detect` and `infer-classify`
+> bake in their CRL bundle at build time. Each pod selects independently:
+>
+> ```bash
+> # Defaults: detect-default and classify-default symlinks.
+> bash scripts/build_containers.sh
+>
+> # Pin specific bundles:
+> DETECT_BUNDLE=multiscale-vae-<run>-v1 \
+> CLASSIFY_BUNDLE=multiscale-vae-<run>-mlp_ztype-v1 \
+>     bash scripts/build_containers.sh infer-detect infer-classify
+> ```
+>
+> Available bundles are listed in
+> [`inference-engine/detect-bundles/README.md`](../detect-bundles/README.md)
+> and [`inference-engine/classify-bundles/README.md`](../classify-bundles/README.md).
+
 If your registry is private, create a pull secret in the target namespace:
 
 ```bash

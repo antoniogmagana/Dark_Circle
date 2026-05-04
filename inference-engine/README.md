@@ -20,7 +20,7 @@ What's been exercised end-to-end:
 | Replay tool (parquet / CSV / WAV) | ✅ Verified | `scripts/replay_publisher.py` simulates a real ROS2 sensor source for testing on pre-recorded data. Format auto-detected from extension. Reports per-window precision/recall (when `present` ground-truth is in the file) and side-by-side client + cluster end-to-end latency. |
 | End-to-end on synthetic data | ✅ Verified | `fake-publisher` driving the full pipeline produces `InferenceResult` ROS2 messages. |
 | End-to-end on real recording | ✅ Pipeline verified | On `data_files/parsed/test/focal_audio_pickup2_rs3.parquet` + paired seismic: 60/60 windows traversed the full pipeline cleanly. Pipeline latency was within budget. |
-| Model accuracy | 🔄 Re-test needed | Earlier near-random predictions traced to an ingestor-side ADC scale mismatch with the CRL training contract (training uses raw ADC counts, ingestor was dividing by `2^(bits-1)`). Fixed at `src/ingestor/buffer.py` (default off; `ADC_SCALE_NORMALIZE=1` restores legacy). The default `CRL_RUN_DIR` in `scripts/build_containers.sh` now points at the leaderboard winner — `multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type` (pres_f1 0.875, type_f1 0.657, cross-location min_type_f1 0.436; capstone target is 0.70). Live re-evaluation pending after rebuilding images on the server. |
+| Model accuracy | 🔄 Re-test needed | Earlier near-random predictions traced to an ingestor-side ADC scale mismatch with the CRL training contract (training uses raw ADC counts, ingestor was dividing by `2^(bits-1)`). Fixed at `src/ingestor/buffer.py` (default off; `ADC_SCALE_NORMALIZE=1` restores legacy). After the bundle restructure landed (2026-05), the catalogs (`detect-bundles/`, `classify-bundles/`) are empty — populate them via `crl-train`'s exporter and run end-to-end against the new bundles to re-measure accuracy. |
 
 ### Required environment knobs (kind smoke test)
 
@@ -55,9 +55,11 @@ debugging:
 
 - [`chart/README.md`](chart/README.md) — Helm chart values reference,
   install steps, replay tool docs.
-- [`crl-bundles/README.md`](crl-bundles/README.md) — pre-exported CRL
-  TorchScript bundles ready to bake into the inference images.
-  `CRL_BUNDLE=<name>` selects one; default is `multiscale-default`.
+- [`detect-bundles/README.md`](detect-bundles/README.md) and
+  [`classify-bundles/README.md`](classify-bundles/README.md) — the two
+  per-pod CRL bundle catalogs, ready to bake into the inference images.
+  `DETECT_BUNDLE=<name>` and `CLASSIFY_BUNDLE=<name>` select bundles
+  independently; defaults are the `*-default` symlinks in each catalog.
 - [`scripts/install_build_host.sh`](scripts/install_build_host.sh) —
   guided Ubuntu / Debian bootstrap of the build host (docker, kubectl,
   helm, kind, poetry venv, test self-check).
@@ -393,18 +395,19 @@ are what the script verifies:
 1. **Tooling on PATH**: `docker`, `kubectl`, `helm`, `kind`, `poetry`.
    KEDA is *optional* — install it only if you want autoscaling on
    JetStream backlog depth.
-2. **A CRL inference bundle** under `crl-bundles/`. The repo ships
-   `crl-bundles/multiscale-default` as a symlink to the current
-   leaderboard winner; the build script reads it via the `CRL_BUNDLE`
-   env var (default `multiscale-default`). See
-   [crl-bundles/README.md](crl-bundles/README.md) for the catalog and
-   how to swap in a different bundle.
+2. **CRL inference bundles** under `detect-bundles/` and
+   `classify-bundles/`. Each pod is selected independently —
+   `DETECT_BUNDLE=<name>` for `infer-detect` (default `detect-default`)
+   and `CLASSIFY_BUNDLE=<name>` for `infer-classify` (default
+   `classify-default`). See [detect-bundles/README.md](detect-bundles/README.md)
+   and [classify-bundles/README.md](classify-bundles/README.md) for the
+   per-pod catalogs and selection rules.
 3. **`kubectl` context** pointing at the destination cluster.
 
 `crl-train` is **not** a build-time dependency for customers. The
-training pipeline produces a TorchScript bundle once on a dev box and
-commits it under `crl-bundles/`; from there the inference build just
-copies the artifacts. The crl-train fallback path in
+training pipeline produces TorchScript bundles once on a dev box and
+commits them under the per-pod catalogs; from there the inference
+build just copies the artifacts. The crl-train fallback path in
 `scripts/build_containers.sh` is for dev re-exports — you can ignore
 it.
 
@@ -670,30 +673,34 @@ multicast is the customer's network admin's problem (or use the
 
 ### CRL inference deployment
 
-The pipeline deploys the CRL frontend + presence head in `infer-detect`
-and the type head in `infer-classify`. Each inference image carries a
-**pre-exported TorchScript bundle** from `crl-bundles/` — a small
-directory of `.ts` files plus a `meta.json`. Customers don't need
-crl-train installed; they just pick a bundle.
+The pipeline deploys two independent CRL bundles — one per inference pod:
 
-`scripts/build_containers.sh` reads `CRL_BUNDLE` (default
-`multiscale-default`) and resolves it against `crl-bundles/`. The
-shipping leader on the **ship metric** — `min_type_f1`, worst-case
-vehicle-type macro-F1 across hold-out locations (see
-`crl-train/saved_crl/analysis/cross_location.md`):
+- **`infer-detect`** carries the (encoder + presence head) for vehicle
+  detection. The bundle is selected at build time by `DETECT_BUNDLE`
+  (default `detect-default`) and resolved against
+  [`inference-engine/detect-bundles/`](detect-bundles/README.md).
+- **`infer-classify`** carries the (encoder + type head) for vehicle
+  classification. Selected by `CLASSIFY_BUNDLE` (default
+  `classify-default`) against
+  [`inference-engine/classify-bundles/`](classify-bundles/README.md).
 
-| Bundle | Frontend | pres_f1 | type_f1 | min_type_f1 |
-|--------|----------|--------:|--------:|------------:|
-| `multiscale-vae-v3_lowfreq-mlp_ztype-aux_type-v1` | multiscale | 0.875 | 0.657 | **0.436** |
+The two pods are independent: each carries its own copy of the encoder
+it pairs with, and the classify pod re-encodes the inbound waveform
+rather than depending on the detect pod's latent.
 
-`multiscale-default` is a symlink to that bundle today. See
-[crl-bundles/README.md](crl-bundles/README.md) for the full catalog,
-naming convention, and how to swap defaults.
+Each inference image carries a self-contained TorchScript bundle —
+a small directory of `.ts` files plus a `meta.json`. Customers don't
+need `crl-train` installed; they just pick a bundle (or accept the
+default `*-default` symlinks).
 
-Override the bundle for a customer-specific build:
+`scripts/build_containers.sh` reads `DETECT_BUNDLE` / `CLASSIFY_BUNDLE`
+and resolves them against the per-pod catalogs.
+
+Override the bundles for a customer-specific build:
 
 ```bash
-CRL_BUNDLE=<bundle-name> bash scripts/build_containers.sh infer-detect infer-classify
+DETECT_BUNDLE=<detect-bundle-name> CLASSIFY_BUNDLE=<classify-bundle-name> \
+    bash scripts/build_containers.sh infer-detect infer-classify
 
 # Roll the inference pods (Helm install)
 kubectl rollout restart deploy/infer-detect deploy/infer-classify
@@ -702,44 +709,56 @@ kubectl rollout restart deploy/infer-detect deploy/infer-classify
 kubectl rollout restart deploy/infer-detect deploy/infer-classify -n default
 ```
 
-The capstone target is `type_f1 ≥ 0.70`; the current leader hits 0.657
-on the held-out test split and 0.436 cross-location, so model
-performance still has headroom to close. The pipeline-side data
-contract was a separate bug (see ingestor section) and has been
-resolved.
+The capstone targets are `pres_f1 ≥ 0.85` and `type_f1 ≥ 0.70`. The
+selection rules in each catalog README enforce floors below those
+targets so a regression isn't auto-promoted into the shipping default.
 
-The wire protocol (`DetectionResult.z_fused` vs `z_audio + z_seismic`)
-and the inference pods auto-detect mode from `meta.json` baked into the
-image. Per-sensor mode combines the two presence heads via OR; the type
-heads are averaged before argmax.
+The wire protocol carries no latent — `DetectionResult` has only
+`sensor_data + vehicle_detected + confidence`. Classify re-encodes
+from `sensor_data.acoustic_data` / `seismic_data` using its own
+bundle's window sizes.
+
+Per-sensor mode in `infer-detect` combines the two presence heads via
+OR; in `infer-classify` the two type heads are averaged before argmax.
 
 #### Producing a new bundle (dev only)
 
 When a new training run beats the current leader, re-export and commit
 the new bundle. This requires `crl-train` installed alongside
-`inference-engine`. The exporter writes directly into this repo's
-`crl-bundles/` directory when given `--bundle-name`:
+`inference-engine`. The exporter writes directly into the appropriate
+per-kind catalog when given `--bundle-name`:
 
 ```bash
 cd crl-train
+
+# Detect bundle (encoder + presence head)
 poetry run python export_for_inference.py \
     --save-dir saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \
-    --bundle-name <frontend>-<mode>-<run>-<probe>-aux_type-v<N>
+    --bundle-kind detect \
+    --bundle-name <frontend>-<mode>-<run>-v<N>
+
+# Classify bundle (encoder + type head)
+poetry run python export_for_inference.py \
+    --save-dir saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \
+    --bundle-kind classify \
+    --bundle-name <frontend>-<mode>-<run>-<probe>-v<N>
 ```
 
-To promote it as the new shipping default in the same invocation:
+To evaluate a bundle against the catalog and repoint its `*-default`
+symlink if it wins, add `--promote-default`:
 
 ```bash
 poetry run python export_for_inference.py \
-    --save-dir saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \
-    --bundle-name <frontend>-<mode>-<run>-<probe>-aux_type-v<N> \
-    --update-default-symlink
+    --save-dir <save-dir> \
+    --bundle-kind classify \
+    --bundle-name <name> \
+    --promote-default
 ```
 
-Then update the catalog table in `crl-bundles/README.md` and commit
-the new bundle directory (plus the symlink change, if you promoted).
-See [`crl-train/README.md`](../crl-train/README.md) for the full
-deployment workflow.
+After exporting, commit the new bundle directory and update the
+catalog table in the relevant README. See
+[`crl-train/README.md`](../crl-train/README.md) for the full deployment
+workflow.
 
 ---
 
