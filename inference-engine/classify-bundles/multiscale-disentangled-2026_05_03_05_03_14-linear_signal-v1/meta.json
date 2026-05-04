@@ -1,0 +1,23 @@
+{
+  "frontend_type": "multiscale",
+  "mode": "fused",
+  "sensors": [
+    "audio",
+    "seismic"
+  ],
+  "z_dim": 24,
+  "class_names": [
+    "pedestrian",
+    "light",
+    "medium",
+    "heavy"
+  ],
+  "probe_mode": "linear_signal",
+  "audio_sample_rate": 16000,
+  "audio_window_size": 16000,
+  "seismic_sample_rate": 100,
+  "seismic_window_size": 100,
+  "type_f1": 0.6702,
+  "min_type_f1": 0.4365,
+  "source_run": "2026-05-03_05-03-14"
+}
