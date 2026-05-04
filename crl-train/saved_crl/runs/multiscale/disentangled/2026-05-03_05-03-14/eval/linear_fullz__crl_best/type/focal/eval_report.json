@@ -1,0 +1,72 @@
+{
+  "run_name": "linear_fullz__crl_best",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best.pth",
+  "head": "type",
+  "split": "focal",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": null,
+  "n_windows": 32674,
+  "presence": null,
+  "type": {
+    "accuracy": 0.4552,
+    "macro_f1": 0.4354,
+    "macro_f1_support_only": 0.4354,
+    "macro_precision": 0.4393,
+    "macro_recall": 0.4331,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.4664,
+        "recall": 0.4117,
+        "f1": 0.4373,
+        "support": 6082
+      },
+      "light": {
+        "precision": 0.4782,
+        "recall": 0.4568,
+        "f1": 0.4672,
+        "support": 4317
+      },
+      "medium": {
+        "precision": 0.5027,
+        "recall": 0.5556,
+        "f1": 0.5278,
+        "support": 8771
+      },
+      "heavy": {
+        "precision": 0.3097,
+        "recall": 0.3085,
+        "f1": 0.3091,
+        "support": 4246
+      }
+    },
+    "confusion_matrix": [
+      [
+        2504,
+        491,
+        1638,
+        1449
+      ],
+      [
+        168,
+        1972,
+        1535,
+        642
+      ],
+      [
+        2347,
+        722,
+        4873,
+        829
+      ],
+      [
+        350,
+        939,
+        1647,
+        1310
+      ]
+    ]
+  }
+}

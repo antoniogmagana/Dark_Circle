@@ -103,5 +103,5 @@
   "ckpt_name": "crl_best_aux_type.pth",
   "crl_run_dir": "/home/lvc_toolkit/project-files/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/2026-05-03_05-03-14/crl",
   "seed": 42,
-  "ds_elapsed_min": 23.36
+  "ds_elapsed_min": 41.63
 }

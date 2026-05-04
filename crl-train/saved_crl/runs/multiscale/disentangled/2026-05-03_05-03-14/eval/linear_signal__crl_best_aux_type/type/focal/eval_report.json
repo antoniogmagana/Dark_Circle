@@ -1,0 +1,72 @@
+{
+  "run_name": "linear_signal__crl_best_aux_type",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "type",
+  "split": "focal",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": null,
+  "n_windows": 32674,
+  "presence": null,
+  "type": {
+    "accuracy": 0.4482,
+    "macro_f1": 0.4365,
+    "macro_f1_support_only": 0.4365,
+    "macro_precision": 0.4552,
+    "macro_recall": 0.4622,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.4378,
+        "recall": 0.5367,
+        "f1": 0.4822,
+        "support": 6082
+      },
+      "light": {
+        "precision": 0.3914,
+        "recall": 0.6493,
+        "f1": 0.4884,
+        "support": 4317
+      },
+      "medium": {
+        "precision": 0.6841,
+        "recall": 0.3565,
+        "f1": 0.4687,
+        "support": 8771
+      },
+      "heavy": {
+        "precision": 0.3075,
+        "recall": 0.3062,
+        "f1": 0.3068,
+        "support": 4246
+      }
+    },
+    "confusion_matrix": [
+      [
+        3264,
+        988,
+        396,
+        1434
+      ],
+      [
+        318,
+        2803,
+        592,
+        604
+      ],
+      [
+        3259,
+        1495,
+        3127,
+        890
+      ],
+      [
+        615,
+        1875,
+        456,
+        1300
+      ]
+    ]
+  }
+}

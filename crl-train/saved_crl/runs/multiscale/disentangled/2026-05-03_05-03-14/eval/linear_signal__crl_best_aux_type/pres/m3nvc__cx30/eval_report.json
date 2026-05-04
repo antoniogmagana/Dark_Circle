@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_signal__crl_best_aux_type",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "m3nvc__cx30",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "cx30",
+  "n_windows": 14020,
+  "presence": {
+    "accuracy": 0.7966,
+    "precision": 0.7972,
+    "recall": 0.9763,
+    "specificity": 0.2645,
+    "f1": 0.8777,
+    "balanced_accuracy": 0.6204,
+    "mcc": 0.3762,
+    "tp": 10233,
+    "fp": 2603,
+    "fn": 248,
+    "tn": 936
+  },
+  "type": null
+}

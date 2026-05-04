@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_ztype__crl_best_aux_type",
+  "probe_mode": "linear_ztype",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "iobt__warhog_nolineofsight",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": "warhog_nolineofsight",
+  "n_windows": 190,
+  "presence": {
+    "accuracy": 0.8421,
+    "precision": 0.8701,
+    "recall": 0.9306,
+    "specificity": 0.5652,
+    "f1": 0.8993,
+    "balanced_accuracy": 0.7479,
+    "mcc": 0.5419,
+    "tp": 134,
+    "fp": 20,
+    "fn": 10,
+    "tn": 26
+  },
+  "type": null
+}

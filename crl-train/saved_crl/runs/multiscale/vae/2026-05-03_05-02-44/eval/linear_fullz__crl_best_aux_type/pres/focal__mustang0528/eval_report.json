@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_fullz__crl_best_aux_type",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "focal__mustang0528",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "mustang0528",
+  "n_windows": 10643,
+  "presence": {
+    "accuracy": 0.7358,
+    "precision": 0.8949,
+    "recall": 0.6266,
+    "specificity": 0.8936,
+    "f1": 0.7371,
+    "balanced_accuracy": 0.7601,
+    "mcc": 0.5193,
+    "tp": 3942,
+    "fp": 463,
+    "fn": 2349,
+    "tn": 3889
+  },
+  "type": null
+}

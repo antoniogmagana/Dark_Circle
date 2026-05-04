@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_signal__crl_best",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "m3nvc__miata",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "miata",
+  "n_windows": 13441,
+  "presence": {
+    "accuracy": 0.7681,
+    "precision": 0.7674,
+    "recall": 0.9961,
+    "specificity": 0.0535,
+    "f1": 0.8669,
+    "balanced_accuracy": 0.5248,
+    "mcc": 0.1697,
+    "tp": 10150,
+    "fp": 3077,
+    "fn": 40,
+    "tn": 174
+  },
+  "type": null
+}

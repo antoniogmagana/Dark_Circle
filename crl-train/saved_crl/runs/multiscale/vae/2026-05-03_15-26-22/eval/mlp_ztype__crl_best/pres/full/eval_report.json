@@ -1,0 +1,24 @@
+{
+  "run_name": "mlp_ztype__crl_best",
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "full",
+  "include_datasets": null,
+  "include_vehicle": null,
+  "n_windows": 91325,
+  "presence": {
+    "accuracy": 0.8074,
+    "precision": 0.8283,
+    "recall": 0.9355,
+    "specificity": 0.432,
+    "f1": 0.8786,
+    "balanced_accuracy": 0.6837,
+    "mcc": 0.4388,
+    "tp": 63692,
+    "fp": 13202,
+    "fn": 4391,
+    "tn": 10040
+  },
+  "type": null
+}

@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_signal__crl_best_aux_type",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "focal__mustang0528",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "mustang0528",
+  "n_windows": 10643,
+  "presence": {
+    "accuracy": 0.4952,
+    "precision": 0.8425,
+    "recall": 0.1795,
+    "specificity": 0.9515,
+    "f1": 0.2959,
+    "balanced_accuracy": 0.5655,
+    "mcc": 0.1941,
+    "tp": 1129,
+    "fp": 211,
+    "fn": 5162,
+    "tn": 4141
+  },
+  "type": null
+}

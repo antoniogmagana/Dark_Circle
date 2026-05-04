@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_fullz__crl_best_aux_type",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "m3nvc__cx30",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "cx30",
+  "n_windows": 14020,
+  "presence": {
+    "accuracy": 0.7853,
+    "precision": 0.8728,
+    "recall": 0.8344,
+    "specificity": 0.64,
+    "f1": 0.8532,
+    "balanced_accuracy": 0.7372,
+    "mcc": 0.4563,
+    "tp": 8745,
+    "fp": 1274,
+    "fn": 1736,
+    "tn": 2265
+  },
+  "type": null
+}

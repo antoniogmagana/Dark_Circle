@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_fullz__crl_best_aux_type",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "iobt__silverado0315pm",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": "silverado0315pm",
+  "n_windows": 490,
+  "presence": {
+    "accuracy": 0.6633,
+    "precision": 0.9487,
+    "recall": 0.4111,
+    "specificity": 0.9727,
+    "f1": 0.5736,
+    "balanced_accuracy": 0.6919,
+    "mcc": 0.4478,
+    "tp": 111,
+    "fp": 6,
+    "fn": 159,
+    "tn": 214
+  },
+  "type": null
+}

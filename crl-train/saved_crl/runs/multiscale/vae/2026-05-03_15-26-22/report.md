@@ -13,253 +13,391 @@
 - **best val_aux_type_f1:** 0.6768 (epoch 35) → `crl_best_aux_type.pth`
 
 
-## Phase 2 — probes (best val by val_loss)
+## Phase 2 — probes (selected by max val F1, per head)
 
-| run | probe | ckpt | best_epoch | val_pres_f1 | val_type_f1 | val_type_acc |
-|---|---|---|---|---|---|---|
-| linear_ztype__crl_best | linear_ztype | crl_best.pth | 0 | 0.0000 | 0.3998 | 0.5366 |
-| linear_ztype__crl_best_aux_type | linear_ztype | crl_best_aux_type.pth | 0 | 0.5628 | 0.4589 | 0.6681 |
-| mlp_ztype__crl_best | mlp_ztype | crl_best.pth | 21 | 0.8468 | 0.4393 | 0.7052 |
-| mlp_ztype__crl_best_aux_type | mlp_ztype | crl_best_aux_type.pth | 0 | 0.5590 | 0.4389 | 0.7117 |
-| linear_fullz__crl_best | linear_fullz | crl_best.pth | 0 | 0.0000 | 0.4753 | 0.6900 |
-| linear_fullz__crl_best_aux_type | linear_fullz | crl_best_aux_type.pth | 30 | 0.8674 | 0.6406 | 0.7466 |
+Each probe trains both heads jointly with two independent optimizers and saves two checkpoints: the presence ckpt is the epoch with max `val_pres_f1`, the type ckpt is the epoch with max `val_type_f1`. These epochs may differ.
+
+### Presence head
+
+| run | probe | ckpt | best_epoch | val_pres_f1 | val_pres_acc |
+|---|---|---|---|---|---|
+| linear_ztype__crl_best | linear_ztype | crl_best.pth | 9 | 0.8714 | 0.8009 |
+| linear_ztype__crl_best_aux_type | linear_ztype | crl_best_aux_type.pth | 1 | 0.8738 | 0.8116 |
+| mlp_ztype__crl_best | mlp_ztype | crl_best.pth | 31 | 0.8714 | 0.7975 |
+| mlp_ztype__crl_best_aux_type | mlp_ztype | crl_best_aux_type.pth | 1 | 0.8742 | 0.8113 |
+| linear_fullz__crl_best | linear_fullz | crl_best.pth | 48 | 0.8713 | 0.8013 |
+| linear_fullz__crl_best_aux_type | linear_fullz | crl_best_aux_type.pth | 1 | 0.8715 | 0.8107 |
+
+### Type head
+
+| run | probe | ckpt | best_epoch | val_type_f1 | val_type_acc |
+|---|---|---|---|---|---|
+| linear_ztype__crl_best | linear_ztype | crl_best.pth | 37 | 0.4648 | 0.6892 |
+| linear_ztype__crl_best_aux_type | linear_ztype | crl_best_aux_type.pth | 32 | 0.5185 | 0.7215 |
+| mlp_ztype__crl_best | mlp_ztype | crl_best.pth | 2 | 0.5758 | 0.6722 |
+| mlp_ztype__crl_best_aux_type | mlp_ztype | crl_best_aux_type.pth | 34 | 0.5981 | 0.7433 |
+| linear_fullz__crl_best | linear_fullz | crl_best.pth | 1 | 0.5349 | 0.6911 |
+| linear_fullz__crl_best_aux_type | linear_fullz | crl_best_aux_type.pth | 16 | 0.6551 | 0.7533 |
 
 ## Phase 3 — test evals
 
-Macro F1 is averaged over all 4 classes; filtered splits (focal, iobt) exclude some classes entirely, so `macro_f1_support_only` restricts the average to classes with support > 0 in that split and is the fair cross-split comparison.
+Each eval row is from a single head's checkpoint: presence rows come from `downstream_best_pres.pth`, type rows from `downstream_best_type.pth`. Macro F1 is averaged over all 4 classes; filtered splits (focal, iobt, m3nvc, per-vehicle) exclude some classes entirely, so `macro_f1_support_only` restricts the average to classes with support > 0 in that split and is the fair cross-split comparison.
 
-| run | split | n_windows | pres_f1 | type_macro_f1 | type_macro_f1_support_only | type_acc |
-|---|---|---|---|---|---|---|
-| linear_fullz__crl_best | full | 91,325 | 0.0000 | 0.4561 | 0.4561 | 0.6674 |
-| linear_fullz__crl_best | focal | 32,674 | 0.0000 | 0.2908 | 0.2908 | 0.3934 |
-| linear_fullz__crl_best | focal__bicycle2 | 3,911 | 0.0000 | 0.1225 | 0.4898 | 0.3243 |
-| linear_fullz__crl_best | focal__forester2 | 2,975 | 0.0000 | 0.2307 | 0.9227 | 0.8565 |
-| linear_fullz__crl_best | focal__motor2 | 2,734 | 0.0000 | 0.0113 | 0.0451 | 0.0230 |
-| linear_fullz__crl_best | focal__mustang0528 | 10,643 | 0.0000 | 0.1781 | 0.7122 | 0.5530 |
-| linear_fullz__crl_best | focal__pickup2 | 2,548 | 0.0000 | 0.0868 | 0.3473 | 0.2102 |
-| linear_fullz__crl_best | focal__scooter2 | 2,762 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
-| linear_fullz__crl_best | focal__tesla2 | 2,694 | 0.0000 | 0.0591 | 0.2364 | 0.1340 |
-| linear_fullz__crl_best | focal__walk2 | 4,407 | 0.0000 | 0.1813 | 0.7251 | 0.5687 |
-| linear_fullz__crl_best | iobt | 1,575 | 0.0000 | 0.1963 | 0.3926 | 0.2258 |
-| linear_fullz__crl_best | iobt__polaris0235pm_nolineofsig | 895 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
-| linear_fullz__crl_best | iobt__silverado0315pm | 490 | 0.0000 | 0.2369 | 0.9474 | 0.9000 |
-| linear_fullz__crl_best | iobt__warhog_nolineofsight | 190 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
-| linear_fullz__crl_best | m3nvc | 57,076 | 0.0000 | 0.4012 | 0.8024 | 0.8254 |
-| linear_fullz__crl_best | m3nvc__cx30 | 14,020 | 0.0000 | 0.2129 | 0.8515 | 0.7414 |
-| linear_fullz__crl_best | m3nvc__gle350 | 15,317 | 0.0000 | 0.2280 | 0.9121 | 0.8385 |
-| linear_fullz__crl_best | m3nvc__miata | 13,441 | 0.0000 | 0.2330 | 0.9319 | 0.8725 |
-| linear_fullz__crl_best | m3nvc__mustang | 14,298 | 0.0000 | 0.2294 | 0.9176 | 0.8477 |
-| linear_fullz__crl_best_aux_type | full | 91,325 | 0.8605 | 0.5920 | 0.5920 | 0.7030 |
-| linear_fullz__crl_best_aux_type | focal | 32,674 | 0.8238 | 0.4542 | 0.4542 | 0.4676 |
-| linear_fullz__crl_best_aux_type | focal__bicycle2 | 3,911 | 0.7734 | 0.0562 | 0.2249 | 0.1267 |
-| linear_fullz__crl_best_aux_type | focal__forester2 | 2,975 | 0.9244 | 0.2122 | 0.8487 | 0.7371 |
-| linear_fullz__crl_best_aux_type | focal__motor2 | 2,734 | 0.7658 | 0.2169 | 0.8677 | 0.7664 |
-| linear_fullz__crl_best_aux_type | focal__mustang0528 | 10,643 | 0.7251 | 0.1631 | 0.6522 | 0.4839 |
-| linear_fullz__crl_best_aux_type | focal__pickup2 | 2,548 | 0.9433 | 0.1354 | 0.5417 | 0.3714 |
-| linear_fullz__crl_best_aux_type | focal__scooter2 | 2,762 | 0.9077 | 0.0500 | 0.2002 | 0.1112 |
-| linear_fullz__crl_best_aux_type | focal__tesla2 | 2,694 | 0.9070 | 0.1330 | 0.5320 | 0.3624 |
-| linear_fullz__crl_best_aux_type | focal__walk2 | 4,407 | 0.7851 | 0.1963 | 0.7850 | 0.6461 |
-| linear_fullz__crl_best_aux_type | iobt | 1,575 | 0.6892 | 0.2701 | 0.5402 | 0.4191 |
-| linear_fullz__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 895 | 0.6408 | 0.1083 | 0.4331 | 0.2764 |
-| linear_fullz__crl_best_aux_type | iobt__silverado0315pm | 490 | 0.6651 | 0.2453 | 0.9811 | 0.9630 |
-| linear_fullz__crl_best_aux_type | iobt__warhog_nolineofsight | 190 | 0.8919 | 0.0263 | 0.1053 | 0.0556 |
-| linear_fullz__crl_best_aux_type | m3nvc | 57,076 | 0.8813 | 0.4049 | 0.8097 | 0.8365 |
-| linear_fullz__crl_best_aux_type | m3nvc__cx30 | 14,020 | 0.8867 | 0.2164 | 0.8655 | 0.7629 |
-| linear_fullz__crl_best_aux_type | m3nvc__gle350 | 15,317 | 0.8902 | 0.2294 | 0.9177 | 0.8479 |
-| linear_fullz__crl_best_aux_type | m3nvc__miata | 13,441 | 0.8499 | 0.2331 | 0.9326 | 0.8737 |
-| linear_fullz__crl_best_aux_type | m3nvc__mustang | 14,298 | 0.8945 | 0.2311 | 0.9245 | 0.8596 |
-| linear_ztype__crl_best | full | 91,325 | 0.0000 | 0.3968 | 0.3968 | 0.5290 |
-| linear_ztype__crl_best | focal | 32,674 | 0.0000 | 0.2617 | 0.2617 | 0.3564 |
-| linear_ztype__crl_best | focal__bicycle2 | 3,911 | 0.0000 | 0.2220 | 0.8880 | 0.7985 |
-| linear_ztype__crl_best | focal__forester2 | 2,975 | 0.0000 | 0.1499 | 0.5997 | 0.4282 |
-| linear_ztype__crl_best | focal__motor2 | 2,734 | 0.0000 | 0.0086 | 0.0346 | 0.0176 |
-| linear_ztype__crl_best | focal__mustang0528 | 10,643 | 0.0000 | 0.0959 | 0.3838 | 0.2375 |
-| linear_ztype__crl_best | focal__pickup2 | 2,548 | 0.0000 | 0.0868 | 0.3473 | 0.2102 |
-| linear_ztype__crl_best | focal__scooter2 | 2,762 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
-| linear_ztype__crl_best | focal__tesla2 | 2,694 | 0.0000 | 0.0423 | 0.1693 | 0.0925 |
-| linear_ztype__crl_best | focal__walk2 | 4,407 | 0.0000 | 0.2327 | 0.9307 | 0.8703 |
-| linear_ztype__crl_best | iobt | 1,575 | 0.0000 | 0.1953 | 0.3907 | 0.2110 |
-| linear_ztype__crl_best | iobt__polaris0235pm_nolineofsig | 895 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
-| linear_ztype__crl_best | iobt__silverado0315pm | 490 | 0.0000 | 0.2284 | 0.9135 | 0.8407 |
-| linear_ztype__crl_best | iobt__warhog_nolineofsight | 190 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
-| linear_ztype__crl_best | m3nvc | 57,076 | 0.0000 | 0.3580 | 0.7161 | 0.6296 |
-| linear_ztype__crl_best | m3nvc__cx30 | 14,020 | 0.0000 | 0.1527 | 0.6108 | 0.4397 |
-| linear_ztype__crl_best | m3nvc__gle350 | 15,317 | 0.0000 | 0.2279 | 0.9116 | 0.8375 |
-| linear_ztype__crl_best | m3nvc__miata | 13,441 | 0.0000 | 0.1889 | 0.7557 | 0.6074 |
-| linear_ztype__crl_best | m3nvc__mustang | 14,298 | 0.0000 | 0.1892 | 0.7566 | 0.6085 |
-| linear_ztype__crl_best_aux_type | full | 91,325 | 0.5556 | 0.4528 | 0.4528 | 0.6433 |
-| linear_ztype__crl_best_aux_type | focal | 32,674 | 0.3875 | 0.3452 | 0.3452 | 0.4018 |
-| linear_ztype__crl_best_aux_type | focal__bicycle2 | 3,911 | 0.2497 | 0.0015 | 0.0062 | 0.0031 |
-| linear_ztype__crl_best_aux_type | focal__forester2 | 2,975 | 0.6273 | 0.2153 | 0.8613 | 0.7565 |
-| linear_ztype__crl_best_aux_type | focal__motor2 | 2,734 | 0.2627 | 0.1234 | 0.4935 | 0.3276 |
-| linear_ztype__crl_best_aux_type | focal__mustang0528 | 10,643 | 0.2168 | 0.1882 | 0.7528 | 0.6036 |
-| linear_ztype__crl_best_aux_type | focal__pickup2 | 2,548 | 0.6852 | 0.1647 | 0.6589 | 0.4913 |
-| linear_ztype__crl_best_aux_type | focal__scooter2 | 2,762 | 0.6167 | 0.0003 | 0.0010 | 0.0005 |
-| linear_ztype__crl_best_aux_type | focal__tesla2 | 2,694 | 0.5025 | 0.1714 | 0.6855 | 0.5215 |
-| linear_ztype__crl_best_aux_type | focal__walk2 | 4,407 | 0.1355 | 0.0979 | 0.3915 | 0.2434 |
-| linear_ztype__crl_best_aux_type | iobt | 1,575 | 0.0905 | 0.1649 | 0.3299 | 0.2649 |
-| linear_ztype__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 895 | 0.0180 | 0.0140 | 0.0558 | 0.0287 |
-| linear_ztype__crl_best_aux_type | iobt__silverado0315pm | 490 | 0.0851 | 0.2481 | 0.9925 | 0.9852 |
-| linear_ztype__crl_best_aux_type | iobt__warhog_nolineofsight | 190 | 0.3729 | 0.0000 | 0.0000 | 0.0000 |
-| linear_ztype__crl_best_aux_type | m3nvc | 57,076 | 0.6390 | 0.3810 | 0.7619 | 0.7823 |
-| linear_ztype__crl_best_aux_type | m3nvc__cx30 | 14,020 | 0.6698 | 0.1951 | 0.7802 | 0.6396 |
-| linear_ztype__crl_best_aux_type | m3nvc__gle350 | 15,317 | 0.6474 | 0.2374 | 0.9496 | 0.9041 |
-| linear_ztype__crl_best_aux_type | m3nvc__miata | 13,441 | 0.5612 | 0.2216 | 0.8864 | 0.7960 |
-| linear_ztype__crl_best_aux_type | m3nvc__mustang | 14,298 | 0.6669 | 0.2183 | 0.8734 | 0.7752 |
-| mlp_ztype__crl_best | full | 91,325 | 0.8440 | 0.4348 | 0.4348 | 0.7043 |
-| mlp_ztype__crl_best | focal | 32,674 | 0.7862 | 0.2446 | 0.2446 | 0.4145 |
-| mlp_ztype__crl_best | focal__bicycle2 | 3,911 | 0.6767 | 0.0000 | 0.0000 | 0.0000 |
-| mlp_ztype__crl_best | focal__forester2 | 2,975 | 0.8926 | 0.2476 | 0.9904 | 0.9810 |
-| mlp_ztype__crl_best | focal__motor2 | 2,734 | 0.7272 | 0.1454 | 0.5814 | 0.4099 |
-| mlp_ztype__crl_best | focal__mustang0528 | 10,643 | 0.7232 | 0.2481 | 0.9924 | 0.9849 |
-| mlp_ztype__crl_best | focal__pickup2 | 2,548 | 0.9243 | 0.0302 | 0.1210 | 0.0644 |
-| mlp_ztype__crl_best | focal__scooter2 | 2,762 | 0.8847 | 0.0007 | 0.0028 | 0.0014 |
-| mlp_ztype__crl_best | focal__tesla2 | 2,694 | 0.8583 | 0.0070 | 0.0279 | 0.0142 |
-| mlp_ztype__crl_best | focal__walk2 | 4,407 | 0.7094 | 0.0000 | 0.0000 | 0.0000 |
-| mlp_ztype__crl_best | iobt | 1,575 | 0.6561 | 0.2114 | 0.4228 | 0.1970 |
-| mlp_ztype__crl_best | iobt__polaris0235pm_nolineofsig | 895 | 0.6010 | 0.0082 | 0.0327 | 0.0166 |
-| mlp_ztype__crl_best | iobt__silverado0315pm | 490 | 0.6361 | 0.2134 | 0.8535 | 0.7444 |
-| mlp_ztype__crl_best | iobt__warhog_nolineofsight | 190 | 0.8780 | 0.0000 | 0.0000 | 0.0000 |
-| mlp_ztype__crl_best | m3nvc | 57,076 | 0.8744 | 0.4179 | 0.8357 | 0.8725 |
-| mlp_ztype__crl_best | m3nvc__cx30 | 14,020 | 0.8802 | 0.2340 | 0.9359 | 0.8796 |
-| mlp_ztype__crl_best | m3nvc__gle350 | 15,317 | 0.8881 | 0.2122 | 0.8490 | 0.7376 |
-| mlp_ztype__crl_best | m3nvc__miata | 13,441 | 0.8423 | 0.2445 | 0.9779 | 0.9567 |
-| mlp_ztype__crl_best | m3nvc__mustang | 14,298 | 0.8824 | 0.2412 | 0.9647 | 0.9318 |
-| mlp_ztype__crl_best_aux_type | full | 91,325 | 0.5519 | 0.4316 | 0.4316 | 0.7064 |
-| mlp_ztype__crl_best_aux_type | focal | 32,674 | 0.3825 | 0.2440 | 0.2440 | 0.4196 |
-| mlp_ztype__crl_best_aux_type | focal__bicycle2 | 3,911 | 0.2443 | 0.0000 | 0.0000 | 0.0000 |
-| mlp_ztype__crl_best_aux_type | focal__forester2 | 2,975 | 0.6198 | 0.2493 | 0.9972 | 0.9944 |
-| mlp_ztype__crl_best_aux_type | focal__motor2 | 2,734 | 0.2586 | 0.1539 | 0.6156 | 0.4446 |
-| mlp_ztype__crl_best_aux_type | focal__mustang0528 | 10,643 | 0.2135 | 0.2498 | 0.9993 | 0.9986 |
-| mlp_ztype__crl_best_aux_type | focal__pickup2 | 2,548 | 0.6807 | 0.0188 | 0.0751 | 0.0390 |
-| mlp_ztype__crl_best_aux_type | focal__scooter2 | 2,762 | 0.6104 | 0.0009 | 0.0038 | 0.0019 |
-| mlp_ztype__crl_best_aux_type | focal__tesla2 | 2,694 | 0.4961 | 0.0016 | 0.0066 | 0.0033 |
-| mlp_ztype__crl_best_aux_type | focal__walk2 | 4,407 | 0.1326 | 0.0000 | 0.0000 | 0.0000 |
-| mlp_ztype__crl_best_aux_type | iobt | 1,575 | 0.0888 | 0.1953 | 0.3906 | 0.1710 |
-| mlp_ztype__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 895 | 0.0150 | 0.0325 | 0.1299 | 0.0695 |
-| mlp_ztype__crl_best_aux_type | iobt__silverado0315pm | 490 | 0.0851 | 0.1691 | 0.6765 | 0.5111 |
-| mlp_ztype__crl_best_aux_type | iobt__warhog_nolineofsight | 190 | 0.3729 | 0.0000 | 0.0000 | 0.0000 |
-| mlp_ztype__crl_best_aux_type | m3nvc | 57,076 | 0.6359 | 0.4084 | 0.8168 | 0.8736 |
-| mlp_ztype__crl_best_aux_type | m3nvc__cx30 | 14,020 | 0.6669 | 0.2464 | 0.9857 | 0.9719 |
-| mlp_ztype__crl_best_aux_type | m3nvc__gle350 | 15,317 | 0.6432 | 0.1847 | 0.7387 | 0.5857 |
-| mlp_ztype__crl_best_aux_type | m3nvc__miata | 13,441 | 0.5578 | 0.2493 | 0.9974 | 0.9949 |
-| mlp_ztype__crl_best_aux_type | m3nvc__mustang | 14,298 | 0.6648 | 0.2469 | 0.9874 | 0.9752 |
+### Presence head — test pres_f1 by split
+
+| run | split | n_windows | pres_f1 |
+|---|---|---|---|
+| linear_fullz__crl_best | full | 91,325 | 0.8761 |
+| linear_fullz__crl_best | focal | 32,674 | 0.8600 |
+| linear_fullz__crl_best | focal__bicycle2 | 3,911 | 0.7996 |
+| linear_fullz__crl_best | focal__forester2 | 2,975 | 0.9333 |
+| linear_fullz__crl_best | focal__motor2 | 2,734 | 0.8488 |
+| linear_fullz__crl_best | focal__mustang0528 | 10,643 | 0.8050 |
+| linear_fullz__crl_best | focal__pickup2 | 2,548 | 0.9419 |
+| linear_fullz__crl_best | focal__scooter2 | 2,762 | 0.9082 |
+| linear_fullz__crl_best | focal__tesla2 | 2,694 | 0.9125 |
+| linear_fullz__crl_best | focal__walk2 | 4,407 | 0.8355 |
+| linear_fullz__crl_best | iobt | 1,575 | 0.7974 |
+| linear_fullz__crl_best | iobt__polaris0235pm_nolineofsig | 895 | 0.7852 |
+| linear_fullz__crl_best | iobt__silverado0315pm | 490 | 0.7752 |
+| linear_fullz__crl_best | iobt__warhog_nolineofsight | 190 | 0.8833 |
+| linear_fullz__crl_best | m3nvc | 57,076 | 0.8856 |
+| linear_fullz__crl_best | m3nvc__cx30 | 14,020 | 0.8822 |
+| linear_fullz__crl_best | m3nvc__gle350 | 15,317 | 0.8876 |
+| linear_fullz__crl_best | m3nvc__miata | 13,441 | 0.8689 |
+| linear_fullz__crl_best | m3nvc__mustang | 14,298 | 0.9021 |
+| linear_fullz__crl_best_aux_type | full | 91,325 | 0.8666 |
+| linear_fullz__crl_best_aux_type | focal | 32,674 | 0.8365 |
+| linear_fullz__crl_best_aux_type | focal__bicycle2 | 3,911 | 0.7898 |
+| linear_fullz__crl_best_aux_type | focal__forester2 | 2,975 | 0.9264 |
+| linear_fullz__crl_best_aux_type | focal__motor2 | 2,734 | 0.7923 |
+| linear_fullz__crl_best_aux_type | focal__mustang0528 | 10,643 | 0.7449 |
+| linear_fullz__crl_best_aux_type | focal__pickup2 | 2,548 | 0.9448 |
+| linear_fullz__crl_best_aux_type | focal__scooter2 | 2,762 | 0.9083 |
+| linear_fullz__crl_best_aux_type | focal__tesla2 | 2,694 | 0.9122 |
+| linear_fullz__crl_best_aux_type | focal__walk2 | 4,407 | 0.8091 |
+| linear_fullz__crl_best_aux_type | iobt | 1,575 | 0.7291 |
+| linear_fullz__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 895 | 0.6949 |
+| linear_fullz__crl_best_aux_type | iobt__silverado0315pm | 490 | 0.7016 |
+| linear_fullz__crl_best_aux_type | iobt__warhog_nolineofsight | 190 | 0.8933 |
+| linear_fullz__crl_best_aux_type | m3nvc | 57,076 | 0.8837 |
+| linear_fullz__crl_best_aux_type | m3nvc__cx30 | 14,020 | 0.8881 |
+| linear_fullz__crl_best_aux_type | m3nvc__gle350 | 15,317 | 0.8903 |
+| linear_fullz__crl_best_aux_type | m3nvc__miata | 13,441 | 0.8557 |
+| linear_fullz__crl_best_aux_type | m3nvc__mustang | 14,298 | 0.8974 |
+| linear_ztype__crl_best | full | 91,325 | 0.8766 |
+| linear_ztype__crl_best | focal | 32,674 | 0.8616 |
+| linear_ztype__crl_best | focal__bicycle2 | 3,911 | 0.8042 |
+| linear_ztype__crl_best | focal__forester2 | 2,975 | 0.9330 |
+| linear_ztype__crl_best | focal__motor2 | 2,734 | 0.8526 |
+| linear_ztype__crl_best | focal__mustang0528 | 10,643 | 0.8067 |
+| linear_ztype__crl_best | focal__pickup2 | 2,548 | 0.9425 |
+| linear_ztype__crl_best | focal__scooter2 | 2,762 | 0.9077 |
+| linear_ztype__crl_best | focal__tesla2 | 2,694 | 0.9137 |
+| linear_ztype__crl_best | focal__walk2 | 4,407 | 0.8381 |
+| linear_ztype__crl_best | iobt | 1,575 | 0.8021 |
+| linear_ztype__crl_best | iobt__polaris0235pm_nolineofsig | 895 | 0.7920 |
+| linear_ztype__crl_best | iobt__silverado0315pm | 490 | 0.7776 |
+| linear_ztype__crl_best | iobt__warhog_nolineofsight | 190 | 0.8833 |
+| linear_ztype__crl_best | m3nvc | 57,076 | 0.8855 |
+| linear_ztype__crl_best | m3nvc__cx30 | 14,020 | 0.8818 |
+| linear_ztype__crl_best | m3nvc__gle350 | 15,317 | 0.8874 |
+| linear_ztype__crl_best | m3nvc__miata | 13,441 | 0.8691 |
+| linear_ztype__crl_best | m3nvc__mustang | 14,298 | 0.9022 |
+| linear_ztype__crl_best_aux_type | full | 91,325 | 0.8704 |
+| linear_ztype__crl_best_aux_type | focal | 32,674 | 0.8454 |
+| linear_ztype__crl_best_aux_type | focal__bicycle2 | 3,911 | 0.8023 |
+| linear_ztype__crl_best_aux_type | focal__forester2 | 2,975 | 0.9293 |
+| linear_ztype__crl_best_aux_type | focal__motor2 | 2,734 | 0.8071 |
+| linear_ztype__crl_best_aux_type | focal__mustang0528 | 10,643 | 0.7597 |
+| linear_ztype__crl_best_aux_type | focal__pickup2 | 2,548 | 0.9446 |
+| linear_ztype__crl_best_aux_type | focal__scooter2 | 2,762 | 0.9099 |
+| linear_ztype__crl_best_aux_type | focal__tesla2 | 2,694 | 0.9135 |
+| linear_ztype__crl_best_aux_type | focal__walk2 | 4,407 | 0.8261 |
+| linear_ztype__crl_best_aux_type | iobt | 1,575 | 0.7512 |
+| linear_ztype__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 895 | 0.7187 |
+| linear_ztype__crl_best_aux_type | iobt__silverado0315pm | 490 | 0.7325 |
+| linear_ztype__crl_best_aux_type | iobt__warhog_nolineofsight | 190 | 0.9007 |
+| linear_ztype__crl_best_aux_type | m3nvc | 57,076 | 0.8849 |
+| linear_ztype__crl_best_aux_type | m3nvc__cx30 | 14,020 | 0.8879 |
+| linear_ztype__crl_best_aux_type | m3nvc__gle350 | 15,317 | 0.8887 |
+| linear_ztype__crl_best_aux_type | m3nvc__miata | 13,441 | 0.8605 |
+| linear_ztype__crl_best_aux_type | m3nvc__mustang | 14,298 | 0.9000 |
+| mlp_ztype__crl_best | full | 91,325 | 0.8786 |
+| mlp_ztype__crl_best | focal | 32,674 | 0.8703 |
+| mlp_ztype__crl_best | focal__bicycle2 | 3,911 | 0.8287 |
+| mlp_ztype__crl_best | focal__forester2 | 2,975 | 0.9353 |
+| mlp_ztype__crl_best | focal__motor2 | 2,734 | 0.8705 |
+| mlp_ztype__crl_best | focal__mustang0528 | 10,643 | 0.8135 |
+| mlp_ztype__crl_best | focal__pickup2 | 2,548 | 0.9423 |
+| mlp_ztype__crl_best | focal__scooter2 | 2,762 | 0.9067 |
+| mlp_ztype__crl_best | focal__tesla2 | 2,694 | 0.9225 |
+| mlp_ztype__crl_best | focal__walk2 | 4,407 | 0.8543 |
+| mlp_ztype__crl_best | iobt | 1,575 | 0.8224 |
+| mlp_ztype__crl_best | iobt__polaris0235pm_nolineofsig | 895 | 0.8198 |
+| mlp_ztype__crl_best | iobt__silverado0315pm | 490 | 0.7978 |
+| mlp_ztype__crl_best | iobt__warhog_nolineofsight | 190 | 0.8758 |
+| mlp_ztype__crl_best | m3nvc | 57,076 | 0.8840 |
+| mlp_ztype__crl_best | m3nvc__cx30 | 14,020 | 0.8793 |
+| mlp_ztype__crl_best | m3nvc__gle350 | 15,317 | 0.8837 |
+| mlp_ztype__crl_best | m3nvc__miata | 13,441 | 0.8714 |
+| mlp_ztype__crl_best | m3nvc__mustang | 14,298 | 0.9007 |
+| mlp_ztype__crl_best_aux_type | full | 91,325 | 0.8717 |
+| mlp_ztype__crl_best_aux_type | focal | 32,674 | 0.8490 |
+| mlp_ztype__crl_best_aux_type | focal__bicycle2 | 3,911 | 0.8073 |
+| mlp_ztype__crl_best_aux_type | focal__forester2 | 2,975 | 0.9308 |
+| mlp_ztype__crl_best_aux_type | focal__motor2 | 2,734 | 0.8129 |
+| mlp_ztype__crl_best_aux_type | focal__mustang0528 | 10,643 | 0.7656 |
+| mlp_ztype__crl_best_aux_type | focal__pickup2 | 2,548 | 0.9440 |
+| mlp_ztype__crl_best_aux_type | focal__scooter2 | 2,762 | 0.9092 |
+| mlp_ztype__crl_best_aux_type | focal__tesla2 | 2,694 | 0.9150 |
+| mlp_ztype__crl_best_aux_type | focal__walk2 | 4,407 | 0.8331 |
+| mlp_ztype__crl_best_aux_type | iobt | 1,575 | 0.7520 |
+| mlp_ztype__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 895 | 0.7199 |
+| mlp_ztype__crl_best_aux_type | iobt__silverado0315pm | 490 | 0.7336 |
+| mlp_ztype__crl_best_aux_type | iobt__warhog_nolineofsight | 190 | 0.9007 |
+| mlp_ztype__crl_best_aux_type | m3nvc | 57,076 | 0.8852 |
+| mlp_ztype__crl_best_aux_type | m3nvc__cx30 | 14,020 | 0.8875 |
+| mlp_ztype__crl_best_aux_type | m3nvc__gle350 | 15,317 | 0.8879 |
+| mlp_ztype__crl_best_aux_type | m3nvc__miata | 13,441 | 0.8623 |
+| mlp_ztype__crl_best_aux_type | m3nvc__mustang | 14,298 | 0.9007 |
+
+### Type head — test type macro_f1 by split
+
+| run | split | n_windows | type_macro_f1 | type_macro_f1_support_only | type_acc |
+|---|---|---|---|---|---|
+| linear_fullz__crl_best | full | 91,325 | 0.5130 | 0.5130 | 0.6768 |
+| linear_fullz__crl_best | focal | 32,674 | 0.3693 | 0.3693 | 0.4209 |
+| linear_fullz__crl_best | focal__bicycle2 | 3,911 | 0.0409 | 0.1636 | 0.0891 |
+| linear_fullz__crl_best | focal__forester2 | 2,975 | 0.2331 | 0.9322 | 0.8730 |
+| linear_fullz__crl_best | focal__motor2 | 2,734 | 0.1804 | 0.7215 | 0.5644 |
+| linear_fullz__crl_best | focal__mustang0528 | 10,643 | 0.2025 | 0.8099 | 0.6805 |
+| linear_fullz__crl_best | focal__pickup2 | 2,548 | 0.0963 | 0.3850 | 0.2384 |
+| linear_fullz__crl_best | focal__scooter2 | 2,762 | 0.0038 | 0.0151 | 0.0076 |
+| linear_fullz__crl_best | focal__tesla2 | 2,694 | 0.0829 | 0.3315 | 0.1987 |
+| linear_fullz__crl_best | focal__walk2 | 4,407 | 0.1099 | 0.4395 | 0.2816 |
+| linear_fullz__crl_best | iobt | 1,575 | 0.2133 | 0.4265 | 0.2602 |
+| linear_fullz__crl_best | iobt__polaris0235pm_nolineofsig | 895 | 0.0210 | 0.0839 | 0.0438 |
+| linear_fullz__crl_best | iobt__silverado0315pm | 490 | 0.2404 | 0.9615 | 0.9259 |
+| linear_fullz__crl_best | iobt__warhog_nolineofsight | 190 | 0.0034 | 0.0138 | 0.0069 |
+| linear_fullz__crl_best | m3nvc | 57,076 | 0.3992 | 0.7984 | 0.8246 |
+| linear_fullz__crl_best | m3nvc__cx30 | 14,020 | 0.2109 | 0.8437 | 0.7297 |
+| linear_fullz__crl_best | m3nvc__gle350 | 15,317 | 0.2298 | 0.9194 | 0.8508 |
+| linear_fullz__crl_best | m3nvc__miata | 13,441 | 0.2330 | 0.9320 | 0.8727 |
+| linear_fullz__crl_best | m3nvc__mustang | 14,298 | 0.2286 | 0.9143 | 0.8422 |
+| linear_fullz__crl_best_aux_type | full | 91,325 | 0.6068 | 0.6068 | 0.7078 |
+| linear_fullz__crl_best_aux_type | focal | 32,674 | 0.4572 | 0.4572 | 0.4742 |
+| linear_fullz__crl_best_aux_type | focal__bicycle2 | 3,911 | 0.0912 | 0.3649 | 0.2232 |
+| linear_fullz__crl_best_aux_type | focal__forester2 | 2,975 | 0.2052 | 0.8210 | 0.6964 |
+| linear_fullz__crl_best_aux_type | focal__motor2 | 2,734 | 0.2198 | 0.8792 | 0.7845 |
+| linear_fullz__crl_best_aux_type | focal__mustang0528 | 10,643 | 0.1557 | 0.6227 | 0.4521 |
+| linear_fullz__crl_best_aux_type | focal__pickup2 | 2,548 | 0.1195 | 0.4780 | 0.3141 |
+| linear_fullz__crl_best_aux_type | focal__scooter2 | 2,762 | 0.0727 | 0.2908 | 0.1702 |
+| linear_fullz__crl_best_aux_type | focal__tesla2 | 2,694 | 0.1080 | 0.4321 | 0.2756 |
+| linear_fullz__crl_best_aux_type | focal__walk2 | 4,407 | 0.2135 | 0.8542 | 0.7455 |
+| linear_fullz__crl_best_aux_type | iobt | 1,575 | 0.2831 | 0.5662 | 0.4303 |
+| linear_fullz__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 895 | 0.1151 | 0.4605 | 0.2991 |
+| linear_fullz__crl_best_aux_type | iobt__silverado0315pm | 490 | 0.2429 | 0.9714 | 0.9444 |
+| linear_fullz__crl_best_aux_type | iobt__warhog_nolineofsight | 190 | 0.0325 | 0.1299 | 0.0694 |
+| linear_fullz__crl_best_aux_type | m3nvc | 57,076 | 0.4067 | 0.8134 | 0.8402 |
+| linear_fullz__crl_best_aux_type | m3nvc__cx30 | 14,020 | 0.2181 | 0.8725 | 0.7738 |
+| linear_fullz__crl_best_aux_type | m3nvc__gle350 | 15,317 | 0.2285 | 0.9141 | 0.8419 |
+| linear_fullz__crl_best_aux_type | m3nvc__miata | 13,441 | 0.2338 | 0.9353 | 0.8785 |
+| linear_fullz__crl_best_aux_type | m3nvc__mustang | 14,298 | 0.2321 | 0.9282 | 0.8660 |
+| linear_ztype__crl_best | full | 91,325 | 0.4544 | 0.4544 | 0.6880 |
+| linear_ztype__crl_best | focal | 32,674 | 0.2907 | 0.2907 | 0.4221 |
+| linear_ztype__crl_best | focal__bicycle2 | 3,911 | 0.0000 | 0.0000 | 0.0000 |
+| linear_ztype__crl_best | focal__forester2 | 2,975 | 0.2391 | 0.9564 | 0.9165 |
+| linear_ztype__crl_best | focal__motor2 | 2,734 | 0.1892 | 0.7567 | 0.6087 |
+| linear_ztype__crl_best | focal__mustang0528 | 10,643 | 0.2397 | 0.9589 | 0.9210 |
+| linear_ztype__crl_best | focal__pickup2 | 2,548 | 0.0605 | 0.2421 | 0.1378 |
+| linear_ztype__crl_best | focal__scooter2 | 2,762 | 0.0082 | 0.0327 | 0.0166 |
+| linear_ztype__crl_best | focal__tesla2 | 2,694 | 0.0312 | 0.1248 | 0.0665 |
+| linear_ztype__crl_best | focal__walk2 | 4,407 | 0.0000 | 0.0000 | 0.0000 |
+| linear_ztype__crl_best | iobt | 1,575 | 0.2273 | 0.4545 | 0.2528 |
+| linear_ztype__crl_best | iobt__polaris0235pm_nolineofsig | 895 | 0.0244 | 0.0977 | 0.0514 |
+| linear_ztype__crl_best | iobt__silverado0315pm | 490 | 0.2337 | 0.9349 | 0.8778 |
+| linear_ztype__crl_best | iobt__warhog_nolineofsight | 190 | 0.0034 | 0.0138 | 0.0069 |
+| linear_ztype__crl_best | m3nvc | 57,076 | 0.4062 | 0.8124 | 0.8416 |
+| linear_ztype__crl_best | m3nvc__cx30 | 14,020 | 0.2178 | 0.8711 | 0.7717 |
+| linear_ztype__crl_best | m3nvc__gle350 | 15,317 | 0.2261 | 0.9044 | 0.8254 |
+| linear_ztype__crl_best | m3nvc__miata | 13,441 | 0.2372 | 0.9487 | 0.9025 |
+| linear_ztype__crl_best | m3nvc__mustang | 14,298 | 0.2325 | 0.9299 | 0.8690 |
+| linear_ztype__crl_best_aux_type | full | 91,325 | 0.5050 | 0.5050 | 0.7051 |
+| linear_ztype__crl_best_aux_type | focal | 32,674 | 0.3545 | 0.3545 | 0.4517 |
+| linear_ztype__crl_best_aux_type | focal__bicycle2 | 3,911 | 0.0000 | 0.0000 | 0.0000 |
+| linear_ztype__crl_best_aux_type | focal__forester2 | 2,975 | 0.2273 | 0.9092 | 0.8335 |
+| linear_ztype__crl_best_aux_type | focal__motor2 | 2,734 | 0.2115 | 0.8459 | 0.7329 |
+| linear_ztype__crl_best_aux_type | focal__mustang0528 | 10,643 | 0.2344 | 0.9377 | 0.8827 |
+| linear_ztype__crl_best_aux_type | focal__pickup2 | 2,548 | 0.0875 | 0.3499 | 0.2120 |
+| linear_ztype__crl_best_aux_type | focal__scooter2 | 2,762 | 0.0452 | 0.1807 | 0.0993 |
+| linear_ztype__crl_best_aux_type | focal__tesla2 | 2,694 | 0.0707 | 0.2828 | 0.1647 |
+| linear_ztype__crl_best_aux_type | focal__walk2 | 4,407 | 0.0427 | 0.1708 | 0.0934 |
+| linear_ztype__crl_best_aux_type | iobt | 1,575 | 0.2833 | 0.5667 | 0.3857 |
+| linear_ztype__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 895 | 0.0968 | 0.3873 | 0.2402 |
+| linear_ztype__crl_best_aux_type | iobt__silverado0315pm | 490 | 0.2419 | 0.9675 | 0.9370 |
+| linear_ztype__crl_best_aux_type | iobt__warhog_nolineofsight | 190 | 0.0102 | 0.0408 | 0.0208 |
+| linear_ztype__crl_best_aux_type | m3nvc | 57,076 | 0.4105 | 0.8210 | 0.8491 |
+| linear_ztype__crl_best_aux_type | m3nvc__cx30 | 14,020 | 0.2207 | 0.8827 | 0.7901 |
+| linear_ztype__crl_best_aux_type | m3nvc__gle350 | 15,317 | 0.2274 | 0.9095 | 0.8340 |
+| linear_ztype__crl_best_aux_type | m3nvc__miata | 13,441 | 0.2367 | 0.9468 | 0.8990 |
+| linear_ztype__crl_best_aux_type | m3nvc__mustang | 14,298 | 0.2334 | 0.9334 | 0.8751 |
+| mlp_ztype__crl_best | full | 91,325 | 0.5482 | 0.5482 | 0.6464 |
+| mlp_ztype__crl_best | focal | 32,674 | 0.3604 | 0.3604 | 0.3814 |
+| mlp_ztype__crl_best | focal__bicycle2 | 3,911 | 0.1409 | 0.5637 | 0.3925 |
+| mlp_ztype__crl_best | focal__forester2 | 2,975 | 0.1136 | 0.4543 | 0.2940 |
+| mlp_ztype__crl_best | focal__motor2 | 2,734 | 0.2332 | 0.9327 | 0.8739 |
+| mlp_ztype__crl_best | focal__mustang0528 | 10,643 | 0.1158 | 0.4634 | 0.3015 |
+| mlp_ztype__crl_best | focal__pickup2 | 2,548 | 0.0742 | 0.2970 | 0.1744 |
+| mlp_ztype__crl_best | focal__scooter2 | 2,762 | 0.1758 | 0.7032 | 0.5423 |
+| mlp_ztype__crl_best | focal__tesla2 | 2,694 | 0.0556 | 0.2223 | 0.1251 |
+| mlp_ztype__crl_best | focal__walk2 | 4,407 | 0.1555 | 0.6222 | 0.4516 |
+| mlp_ztype__crl_best | iobt | 1,575 | 0.3079 | 0.6157 | 0.4284 |
+| mlp_ztype__crl_best | iobt__polaris0235pm_nolineofsig | 895 | 0.1110 | 0.4442 | 0.2855 |
+| mlp_ztype__crl_best | iobt__silverado0315pm | 490 | 0.2389 | 0.9555 | 0.9148 |
+| mlp_ztype__crl_best | iobt__warhog_nolineofsight | 190 | 0.0740 | 0.2959 | 0.1736 |
+| mlp_ztype__crl_best | m3nvc | 57,076 | 0.3931 | 0.7862 | 0.7941 |
+| mlp_ztype__crl_best | m3nvc__cx30 | 14,020 | 0.2041 | 0.8166 | 0.6901 |
+| mlp_ztype__crl_best | m3nvc__gle350 | 15,317 | 0.2299 | 0.9198 | 0.8514 |
+| mlp_ztype__crl_best | m3nvc__miata | 13,441 | 0.2252 | 0.9007 | 0.8193 |
+| mlp_ztype__crl_best | m3nvc__mustang | 14,298 | 0.2235 | 0.8938 | 0.8080 |
+| mlp_ztype__crl_best_aux_type | full | 91,325 | 0.5749 | 0.5749 | 0.7180 |
+| mlp_ztype__crl_best_aux_type | focal | 32,674 | 0.4112 | 0.4112 | 0.4728 |
+| mlp_ztype__crl_best_aux_type | focal__bicycle2 | 3,911 | 0.0100 | 0.0402 | 0.0205 |
+| mlp_ztype__crl_best_aux_type | focal__forester2 | 2,975 | 0.2300 | 0.9201 | 0.8520 |
+| mlp_ztype__crl_best_aux_type | focal__motor2 | 2,734 | 0.2110 | 0.8441 | 0.7302 |
+| mlp_ztype__crl_best_aux_type | focal__mustang0528 | 10,643 | 0.2190 | 0.8762 | 0.7797 |
+| mlp_ztype__crl_best_aux_type | focal__pickup2 | 2,548 | 0.0773 | 0.3092 | 0.1829 |
+| mlp_ztype__crl_best_aux_type | focal__scooter2 | 2,762 | 0.0398 | 0.1592 | 0.0865 |
+| mlp_ztype__crl_best_aux_type | focal__tesla2 | 2,694 | 0.0543 | 0.2171 | 0.1218 |
+| mlp_ztype__crl_best_aux_type | focal__walk2 | 4,407 | 0.1538 | 0.6154 | 0.4444 |
+| mlp_ztype__crl_best_aux_type | iobt | 1,575 | 0.2899 | 0.5797 | 0.3829 |
+| mlp_ztype__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 895 | 0.0959 | 0.3834 | 0.2372 |
+| mlp_ztype__crl_best_aux_type | iobt__silverado0315pm | 490 | 0.2414 | 0.9655 | 0.9333 |
+| mlp_ztype__crl_best_aux_type | iobt__warhog_nolineofsight | 190 | 0.0102 | 0.0408 | 0.0208 |
+| mlp_ztype__crl_best_aux_type | m3nvc | 57,076 | 0.4144 | 0.8288 | 0.8580 |
+| mlp_ztype__crl_best_aux_type | m3nvc__cx30 | 14,020 | 0.2243 | 0.8974 | 0.8139 |
+| mlp_ztype__crl_best_aux_type | m3nvc__gle350 | 15,317 | 0.2253 | 0.9012 | 0.8201 |
+| mlp_ztype__crl_best_aux_type | m3nvc__miata | 13,441 | 0.2387 | 0.9549 | 0.9136 |
+| mlp_ztype__crl_best_aux_type | m3nvc__mustang | 14,298 | 0.2352 | 0.9410 | 0.8886 |
 
 ## Per-class type F1 on test splits
 
+From the type head only (`downstream_best_type.pth`).
+
 | run | split | pedestrian_f1 | light_f1 | medium_f1 | heavy_f1 |
 |---|---|---|---|---|---|
-| linear_fullz__crl_best | full | 0.410 | 0.020 | 0.768 | 0.627 |
-| linear_fullz__crl_best | focal | 0.425 | 0.023 | 0.506 | 0.208 |
-| linear_fullz__crl_best | focal__bicycle2 | 0.490 | 0.000 | 0.000 | 0.000 |
-| linear_fullz__crl_best | focal__forester2 | 0.000 | 0.000 | 0.923 | 0.000 |
-| linear_fullz__crl_best | focal__motor2 | 0.000 | 0.045 | 0.000 | 0.000 |
-| linear_fullz__crl_best | focal__mustang0528 | 0.000 | 0.000 | 0.712 | 0.000 |
-| linear_fullz__crl_best | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.347 |
-| linear_fullz__crl_best | focal__scooter2 | 0.000 | 0.000 | 0.000 | 0.000 |
-| linear_fullz__crl_best | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.236 |
-| linear_fullz__crl_best | focal__walk2 | 0.725 | 0.000 | 0.000 | 0.000 |
-| linear_fullz__crl_best | iobt | 0.000 | 0.000 | 0.000 | 0.785 |
-| linear_fullz__crl_best | iobt__polaris0235pm_nolineofsig | 0.000 | 0.000 | 0.000 | 0.000 |
-| linear_fullz__crl_best | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.947 |
-| linear_fullz__crl_best | iobt__warhog_nolineofsight | 0.000 | 0.000 | 0.000 | 0.000 |
-| linear_fullz__crl_best | m3nvc | 0.000 | 0.000 | 0.873 | 0.731 |
-| linear_fullz__crl_best | m3nvc__cx30 | 0.000 | 0.000 | 0.852 | 0.000 |
-| linear_fullz__crl_best | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.912 |
+| linear_fullz__crl_best | full | 0.282 | 0.391 | 0.769 | 0.610 |
+| linear_fullz__crl_best | focal | 0.284 | 0.437 | 0.537 | 0.219 |
+| linear_fullz__crl_best | focal__bicycle2 | 0.164 | 0.000 | 0.000 | 0.000 |
+| linear_fullz__crl_best | focal__forester2 | 0.000 | 0.000 | 0.932 | 0.000 |
+| linear_fullz__crl_best | focal__motor2 | 0.000 | 0.722 | 0.000 | 0.000 |
+| linear_fullz__crl_best | focal__mustang0528 | 0.000 | 0.000 | 0.810 | 0.000 |
+| linear_fullz__crl_best | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.385 |
+| linear_fullz__crl_best | focal__scooter2 | 0.000 | 0.015 | 0.000 | 0.000 |
+| linear_fullz__crl_best | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.332 |
+| linear_fullz__crl_best | focal__walk2 | 0.440 | 0.000 | 0.000 | 0.000 |
+| linear_fullz__crl_best | iobt | 0.000 | 0.072 | 0.000 | 0.781 |
+| linear_fullz__crl_best | iobt__polaris0235pm_nolineofsig | 0.000 | 0.084 | 0.000 | 0.000 |
+| linear_fullz__crl_best | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.962 |
+| linear_fullz__crl_best | iobt__warhog_nolineofsight | 0.000 | 0.014 | 0.000 | 0.000 |
+| linear_fullz__crl_best | m3nvc | 0.000 | 0.000 | 0.872 | 0.725 |
+| linear_fullz__crl_best | m3nvc__cx30 | 0.000 | 0.000 | 0.844 | 0.000 |
+| linear_fullz__crl_best | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.919 |
 | linear_fullz__crl_best | m3nvc__miata | 0.000 | 0.000 | 0.932 | 0.000 |
-| linear_fullz__crl_best | m3nvc__mustang | 0.000 | 0.000 | 0.918 | 0.000 |
-| linear_fullz__crl_best_aux_type | full | 0.456 | 0.481 | 0.794 | 0.638 |
-| linear_fullz__crl_best_aux_type | focal | 0.458 | 0.494 | 0.527 | 0.338 |
-| linear_fullz__crl_best_aux_type | focal__bicycle2 | 0.225 | 0.000 | 0.000 | 0.000 |
-| linear_fullz__crl_best_aux_type | focal__forester2 | 0.000 | 0.000 | 0.849 | 0.000 |
-| linear_fullz__crl_best_aux_type | focal__motor2 | 0.000 | 0.868 | 0.000 | 0.000 |
-| linear_fullz__crl_best_aux_type | focal__mustang0528 | 0.000 | 0.000 | 0.652 | 0.000 |
-| linear_fullz__crl_best_aux_type | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.542 |
-| linear_fullz__crl_best_aux_type | focal__scooter2 | 0.000 | 0.200 | 0.000 | 0.000 |
-| linear_fullz__crl_best_aux_type | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.532 |
-| linear_fullz__crl_best_aux_type | focal__walk2 | 0.785 | 0.000 | 0.000 | 0.000 |
-| linear_fullz__crl_best_aux_type | iobt | 0.000 | 0.382 | 0.000 | 0.698 |
-| linear_fullz__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 0.000 | 0.433 | 0.000 | 0.000 |
-| linear_fullz__crl_best_aux_type | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.981 |
-| linear_fullz__crl_best_aux_type | iobt__warhog_nolineofsight | 0.000 | 0.105 | 0.000 | 0.000 |
-| linear_fullz__crl_best_aux_type | m3nvc | 0.000 | 0.000 | 0.881 | 0.738 |
-| linear_fullz__crl_best_aux_type | m3nvc__cx30 | 0.000 | 0.000 | 0.866 | 0.000 |
-| linear_fullz__crl_best_aux_type | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.918 |
-| linear_fullz__crl_best_aux_type | m3nvc__miata | 0.000 | 0.000 | 0.933 | 0.000 |
-| linear_fullz__crl_best_aux_type | m3nvc__mustang | 0.000 | 0.000 | 0.924 | 0.000 |
-| linear_ztype__crl_best | full | 0.322 | 0.015 | 0.615 | 0.635 |
-| linear_ztype__crl_best | focal | 0.482 | 0.018 | 0.338 | 0.209 |
-| linear_ztype__crl_best | focal__bicycle2 | 0.888 | 0.000 | 0.000 | 0.000 |
-| linear_ztype__crl_best | focal__forester2 | 0.000 | 0.000 | 0.600 | 0.000 |
-| linear_ztype__crl_best | focal__motor2 | 0.000 | 0.035 | 0.000 | 0.000 |
-| linear_ztype__crl_best | focal__mustang0528 | 0.000 | 0.000 | 0.384 | 0.000 |
-| linear_ztype__crl_best | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.347 |
-| linear_ztype__crl_best | focal__scooter2 | 0.000 | 0.000 | 0.000 | 0.000 |
-| linear_ztype__crl_best | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.169 |
-| linear_ztype__crl_best | focal__walk2 | 0.931 | 0.000 | 0.000 | 0.000 |
-| linear_ztype__crl_best | iobt | 0.000 | 0.000 | 0.000 | 0.781 |
-| linear_ztype__crl_best | iobt__polaris0235pm_nolineofsig | 0.000 | 0.000 | 0.000 | 0.000 |
-| linear_ztype__crl_best | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.913 |
-| linear_ztype__crl_best | iobt__warhog_nolineofsight | 0.000 | 0.000 | 0.000 | 0.000 |
-| linear_ztype__crl_best | m3nvc | 0.000 | 0.000 | 0.703 | 0.729 |
-| linear_ztype__crl_best | m3nvc__cx30 | 0.000 | 0.000 | 0.611 | 0.000 |
-| linear_ztype__crl_best | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.912 |
-| linear_ztype__crl_best | m3nvc__miata | 0.000 | 0.000 | 0.756 | 0.000 |
-| linear_ztype__crl_best | m3nvc__mustang | 0.000 | 0.000 | 0.757 | 0.000 |
-| linear_ztype__crl_best_aux_type | full | 0.227 | 0.254 | 0.750 | 0.580 |
-| linear_ztype__crl_best_aux_type | focal | 0.227 | 0.288 | 0.545 | 0.321 |
-| linear_ztype__crl_best_aux_type | focal__bicycle2 | 0.006 | 0.000 | 0.000 | 0.000 |
-| linear_ztype__crl_best_aux_type | focal__forester2 | 0.000 | 0.000 | 0.861 | 0.000 |
-| linear_ztype__crl_best_aux_type | focal__motor2 | 0.000 | 0.493 | 0.000 | 0.000 |
-| linear_ztype__crl_best_aux_type | focal__mustang0528 | 0.000 | 0.000 | 0.753 | 0.000 |
-| linear_ztype__crl_best_aux_type | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.659 |
-| linear_ztype__crl_best_aux_type | focal__scooter2 | 0.000 | 0.001 | 0.000 | 0.000 |
-| linear_ztype__crl_best_aux_type | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.685 |
-| linear_ztype__crl_best_aux_type | focal__walk2 | 0.392 | 0.000 | 0.000 | 0.000 |
-| linear_ztype__crl_best_aux_type | iobt | 0.000 | 0.046 | 0.000 | 0.614 |
-| linear_ztype__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 0.000 | 0.056 | 0.000 | 0.000 |
-| linear_ztype__crl_best_aux_type | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.993 |
-| linear_ztype__crl_best_aux_type | iobt__warhog_nolineofsight | 0.000 | 0.000 | 0.000 | 0.000 |
-| linear_ztype__crl_best_aux_type | m3nvc | 0.000 | 0.000 | 0.832 | 0.692 |
-| linear_ztype__crl_best_aux_type | m3nvc__cx30 | 0.000 | 0.000 | 0.780 | 0.000 |
-| linear_ztype__crl_best_aux_type | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.950 |
-| linear_ztype__crl_best_aux_type | m3nvc__miata | 0.000 | 0.000 | 0.886 | 0.000 |
-| linear_ztype__crl_best_aux_type | m3nvc__mustang | 0.000 | 0.000 | 0.873 | 0.000 |
-| mlp_ztype__crl_best | full | 0.000 | 0.304 | 0.792 | 0.643 |
-| mlp_ztype__crl_best | focal | 0.000 | 0.347 | 0.561 | 0.070 |
-| mlp_ztype__crl_best | focal__bicycle2 | 0.000 | 0.000 | 0.000 | 0.000 |
-| mlp_ztype__crl_best | focal__forester2 | 0.000 | 0.000 | 0.990 | 0.000 |
-| mlp_ztype__crl_best | focal__motor2 | 0.000 | 0.581 | 0.000 | 0.000 |
-| mlp_ztype__crl_best | focal__mustang0528 | 0.000 | 0.000 | 0.992 | 0.000 |
-| mlp_ztype__crl_best | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.121 |
-| mlp_ztype__crl_best | focal__scooter2 | 0.000 | 0.003 | 0.000 | 0.000 |
-| mlp_ztype__crl_best | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.028 |
-| mlp_ztype__crl_best | focal__walk2 | 0.000 | 0.000 | 0.000 | 0.000 |
-| mlp_ztype__crl_best | iobt | 0.000 | 0.027 | 0.000 | 0.819 |
-| mlp_ztype__crl_best | iobt__polaris0235pm_nolineofsig | 0.000 | 0.033 | 0.000 | 0.000 |
-| mlp_ztype__crl_best | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.854 |
-| mlp_ztype__crl_best | iobt__warhog_nolineofsight | 0.000 | 0.000 | 0.000 | 0.000 |
-| mlp_ztype__crl_best | m3nvc | 0.000 | 0.000 | 0.913 | 0.758 |
-| mlp_ztype__crl_best | m3nvc__cx30 | 0.000 | 0.000 | 0.936 | 0.000 |
-| mlp_ztype__crl_best | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.849 |
-| mlp_ztype__crl_best | m3nvc__miata | 0.000 | 0.000 | 0.978 | 0.000 |
-| mlp_ztype__crl_best | m3nvc__mustang | 0.000 | 0.000 | 0.965 | 0.000 |
-| mlp_ztype__crl_best_aux_type | full | 0.000 | 0.335 | 0.800 | 0.592 |
-| mlp_ztype__crl_best_aux_type | focal | 0.000 | 0.371 | 0.564 | 0.041 |
-| mlp_ztype__crl_best_aux_type | focal__bicycle2 | 0.000 | 0.000 | 0.000 | 0.000 |
-| mlp_ztype__crl_best_aux_type | focal__forester2 | 0.000 | 0.000 | 0.997 | 0.000 |
-| mlp_ztype__crl_best_aux_type | focal__motor2 | 0.000 | 0.616 | 0.000 | 0.000 |
-| mlp_ztype__crl_best_aux_type | focal__mustang0528 | 0.000 | 0.000 | 0.999 | 0.000 |
-| mlp_ztype__crl_best_aux_type | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.075 |
-| mlp_ztype__crl_best_aux_type | focal__scooter2 | 0.000 | 0.004 | 0.000 | 0.000 |
-| mlp_ztype__crl_best_aux_type | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.007 |
-| mlp_ztype__crl_best_aux_type | focal__walk2 | 0.000 | 0.000 | 0.000 | 0.000 |
-| mlp_ztype__crl_best_aux_type | iobt | 0.000 | 0.108 | 0.000 | 0.673 |
-| mlp_ztype__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 0.000 | 0.130 | 0.000 | 0.000 |
-| mlp_ztype__crl_best_aux_type | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.676 |
-| mlp_ztype__crl_best_aux_type | iobt__warhog_nolineofsight | 0.000 | 0.000 | 0.000 | 0.000 |
-| mlp_ztype__crl_best_aux_type | m3nvc | 0.000 | 0.000 | 0.919 | 0.715 |
-| mlp_ztype__crl_best_aux_type | m3nvc__cx30 | 0.000 | 0.000 | 0.986 | 0.000 |
-| mlp_ztype__crl_best_aux_type | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.739 |
-| mlp_ztype__crl_best_aux_type | m3nvc__miata | 0.000 | 0.000 | 0.997 | 0.000 |
-| mlp_ztype__crl_best_aux_type | m3nvc__mustang | 0.000 | 0.000 | 0.987 | 0.000 |
+| linear_fullz__crl_best | m3nvc__mustang | 0.000 | 0.000 | 0.914 | 0.000 |
+| linear_fullz__crl_best_aux_type | full | 0.500 | 0.484 | 0.796 | 0.647 |
+| linear_fullz__crl_best_aux_type | focal | 0.505 | 0.494 | 0.513 | 0.317 |
+| linear_fullz__crl_best_aux_type | focal__bicycle2 | 0.365 | 0.000 | 0.000 | 0.000 |
+| linear_fullz__crl_best_aux_type | focal__forester2 | 0.000 | 0.000 | 0.821 | 0.000 |
+| linear_fullz__crl_best_aux_type | focal__motor2 | 0.000 | 0.879 | 0.000 | 0.000 |
+| linear_fullz__crl_best_aux_type | focal__mustang0528 | 0.000 | 0.000 | 0.623 | 0.000 |
+| linear_fullz__crl_best_aux_type | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.478 |
+| linear_fullz__crl_best_aux_type | focal__scooter2 | 0.000 | 0.291 | 0.000 | 0.000 |
+| linear_fullz__crl_best_aux_type | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.432 |
+| linear_fullz__crl_best_aux_type | focal__walk2 | 0.854 | 0.000 | 0.000 | 0.000 |
+| linear_fullz__crl_best_aux_type | iobt | 0.000 | 0.409 | 0.000 | 0.723 |
+| linear_fullz__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 0.000 | 0.461 | 0.000 | 0.000 |
+| linear_fullz__crl_best_aux_type | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.971 |
+| linear_fullz__crl_best_aux_type | iobt__warhog_nolineofsight | 0.000 | 0.130 | 0.000 | 0.000 |
+| linear_fullz__crl_best_aux_type | m3nvc | 0.000 | 0.000 | 0.885 | 0.742 |
+| linear_fullz__crl_best_aux_type | m3nvc__cx30 | 0.000 | 0.000 | 0.873 | 0.000 |
+| linear_fullz__crl_best_aux_type | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.914 |
+| linear_fullz__crl_best_aux_type | m3nvc__miata | 0.000 | 0.000 | 0.935 | 0.000 |
+| linear_fullz__crl_best_aux_type | m3nvc__mustang | 0.000 | 0.000 | 0.928 | 0.000 |
+| linear_ztype__crl_best | full | 0.000 | 0.411 | 0.777 | 0.630 |
+| linear_ztype__crl_best | focal | 0.000 | 0.456 | 0.564 | 0.143 |
+| linear_ztype__crl_best | focal__bicycle2 | 0.000 | 0.000 | 0.000 | 0.000 |
+| linear_ztype__crl_best | focal__forester2 | 0.000 | 0.000 | 0.956 | 0.000 |
+| linear_ztype__crl_best | focal__motor2 | 0.000 | 0.757 | 0.000 | 0.000 |
+| linear_ztype__crl_best | focal__mustang0528 | 0.000 | 0.000 | 0.959 | 0.000 |
+| linear_ztype__crl_best | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.242 |
+| linear_ztype__crl_best | focal__scooter2 | 0.000 | 0.033 | 0.000 | 0.000 |
+| linear_ztype__crl_best | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.125 |
+| linear_ztype__crl_best | focal__walk2 | 0.000 | 0.000 | 0.000 | 0.000 |
+| linear_ztype__crl_best | iobt | 0.000 | 0.083 | 0.000 | 0.826 |
+| linear_ztype__crl_best | iobt__polaris0235pm_nolineofsig | 0.000 | 0.098 | 0.000 | 0.000 |
+| linear_ztype__crl_best | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.935 |
+| linear_ztype__crl_best | iobt__warhog_nolineofsight | 0.000 | 0.014 | 0.000 | 0.000 |
+| linear_ztype__crl_best | m3nvc | 0.000 | 0.000 | 0.886 | 0.738 |
+| linear_ztype__crl_best | m3nvc__cx30 | 0.000 | 0.000 | 0.871 | 0.000 |
+| linear_ztype__crl_best | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.904 |
+| linear_ztype__crl_best | m3nvc__miata | 0.000 | 0.000 | 0.949 | 0.000 |
+| linear_ztype__crl_best | m3nvc__mustang | 0.000 | 0.000 | 0.930 | 0.000 |
+| linear_ztype__crl_best_aux_type | full | 0.099 | 0.483 | 0.797 | 0.642 |
+| linear_ztype__crl_best_aux_type | focal | 0.099 | 0.503 | 0.589 | 0.227 |
+| linear_ztype__crl_best_aux_type | focal__bicycle2 | 0.000 | 0.000 | 0.000 | 0.000 |
+| linear_ztype__crl_best_aux_type | focal__forester2 | 0.000 | 0.000 | 0.909 | 0.000 |
+| linear_ztype__crl_best_aux_type | focal__motor2 | 0.000 | 0.846 | 0.000 | 0.000 |
+| linear_ztype__crl_best_aux_type | focal__mustang0528 | 0.000 | 0.000 | 0.938 | 0.000 |
+| linear_ztype__crl_best_aux_type | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.350 |
+| linear_ztype__crl_best_aux_type | focal__scooter2 | 0.000 | 0.181 | 0.000 | 0.000 |
+| linear_ztype__crl_best_aux_type | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.283 |
+| linear_ztype__crl_best_aux_type | focal__walk2 | 0.171 | 0.000 | 0.000 | 0.000 |
+| linear_ztype__crl_best_aux_type | iobt | 0.000 | 0.334 | 0.000 | 0.799 |
+| linear_ztype__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 0.000 | 0.387 | 0.000 | 0.000 |
+| linear_ztype__crl_best_aux_type | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.968 |
+| linear_ztype__crl_best_aux_type | iobt__warhog_nolineofsight | 0.000 | 0.041 | 0.000 | 0.000 |
+| linear_ztype__crl_best_aux_type | m3nvc | 0.000 | 0.000 | 0.892 | 0.750 |
+| linear_ztype__crl_best_aux_type | m3nvc__cx30 | 0.000 | 0.000 | 0.883 | 0.000 |
+| linear_ztype__crl_best_aux_type | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.909 |
+| linear_ztype__crl_best_aux_type | m3nvc__miata | 0.000 | 0.000 | 0.947 | 0.000 |
+| linear_ztype__crl_best_aux_type | m3nvc__mustang | 0.000 | 0.000 | 0.933 | 0.000 |
+| mlp_ztype__crl_best | full | 0.361 | 0.470 | 0.762 | 0.600 |
+| mlp_ztype__crl_best | focal | 0.407 | 0.475 | 0.401 | 0.158 |
+| mlp_ztype__crl_best | focal__bicycle2 | 0.564 | 0.000 | 0.000 | 0.000 |
+| mlp_ztype__crl_best | focal__forester2 | 0.000 | 0.000 | 0.454 | 0.000 |
+| mlp_ztype__crl_best | focal__motor2 | 0.000 | 0.933 | 0.000 | 0.000 |
+| mlp_ztype__crl_best | focal__mustang0528 | 0.000 | 0.000 | 0.463 | 0.000 |
+| mlp_ztype__crl_best | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.297 |
+| mlp_ztype__crl_best | focal__scooter2 | 0.000 | 0.703 | 0.000 | 0.000 |
+| mlp_ztype__crl_best | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.222 |
+| mlp_ztype__crl_best | focal__walk2 | 0.622 | 0.000 | 0.000 | 0.000 |
+| mlp_ztype__crl_best | iobt | 0.000 | 0.418 | 0.000 | 0.814 |
+| mlp_ztype__crl_best | iobt__polaris0235pm_nolineofsig | 0.000 | 0.444 | 0.000 | 0.000 |
+| mlp_ztype__crl_best | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.956 |
+| mlp_ztype__crl_best | iobt__warhog_nolineofsight | 0.000 | 0.296 | 0.000 | 0.000 |
+| mlp_ztype__crl_best | m3nvc | 0.000 | 0.000 | 0.848 | 0.724 |
+| mlp_ztype__crl_best | m3nvc__cx30 | 0.000 | 0.000 | 0.817 | 0.000 |
+| mlp_ztype__crl_best | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.920 |
+| mlp_ztype__crl_best | m3nvc__miata | 0.000 | 0.000 | 0.901 | 0.000 |
+| mlp_ztype__crl_best | m3nvc__mustang | 0.000 | 0.000 | 0.894 | 0.000 |
+| mlp_ztype__crl_best_aux_type | full | 0.367 | 0.481 | 0.800 | 0.652 |
+| mlp_ztype__crl_best_aux_type | focal | 0.367 | 0.502 | 0.571 | 0.205 |
+| mlp_ztype__crl_best_aux_type | focal__bicycle2 | 0.040 | 0.000 | 0.000 | 0.000 |
+| mlp_ztype__crl_best_aux_type | focal__forester2 | 0.000 | 0.000 | 0.920 | 0.000 |
+| mlp_ztype__crl_best_aux_type | focal__motor2 | 0.000 | 0.844 | 0.000 | 0.000 |
+| mlp_ztype__crl_best_aux_type | focal__mustang0528 | 0.000 | 0.000 | 0.876 | 0.000 |
+| mlp_ztype__crl_best_aux_type | focal__pickup2 | 0.000 | 0.000 | 0.000 | 0.309 |
+| mlp_ztype__crl_best_aux_type | focal__scooter2 | 0.000 | 0.159 | 0.000 | 0.000 |
+| mlp_ztype__crl_best_aux_type | focal__tesla2 | 0.000 | 0.000 | 0.000 | 0.217 |
+| mlp_ztype__crl_best_aux_type | focal__walk2 | 0.615 | 0.000 | 0.000 | 0.000 |
+| mlp_ztype__crl_best_aux_type | iobt | 0.000 | 0.331 | 0.000 | 0.829 |
+| mlp_ztype__crl_best_aux_type | iobt__polaris0235pm_nolineofsig | 0.000 | 0.383 | 0.000 | 0.000 |
+| mlp_ztype__crl_best_aux_type | iobt__silverado0315pm | 0.000 | 0.000 | 0.000 | 0.966 |
+| mlp_ztype__crl_best_aux_type | iobt__warhog_nolineofsight | 0.000 | 0.041 | 0.000 | 0.000 |
+| mlp_ztype__crl_best_aux_type | m3nvc | 0.000 | 0.000 | 0.900 | 0.758 |
+| mlp_ztype__crl_best_aux_type | m3nvc__cx30 | 0.000 | 0.000 | 0.897 | 0.000 |
+| mlp_ztype__crl_best_aux_type | m3nvc__gle350 | 0.000 | 0.000 | 0.000 | 0.901 |
+| mlp_ztype__crl_best_aux_type | m3nvc__miata | 0.000 | 0.000 | 0.955 | 0.000 |
+| mlp_ztype__crl_best_aux_type | m3nvc__mustang | 0.000 | 0.000 | 0.941 | 0.000 |

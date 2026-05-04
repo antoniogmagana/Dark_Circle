@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_fullz__crl_best_aux_type",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "focal__pickup2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "pickup2",
+  "n_windows": 2548,
+  "presence": {
+    "accuracy": 0.905,
+    "precision": 0.9176,
+    "recall": 0.9737,
+    "specificity": 0.5582,
+    "f1": 0.9448,
+    "balanced_accuracy": 0.7659,
+    "mcc": 0.621,
+    "tp": 2071,
+    "fp": 186,
+    "fn": 56,
+    "tn": 235
+  },
+  "type": null
+}

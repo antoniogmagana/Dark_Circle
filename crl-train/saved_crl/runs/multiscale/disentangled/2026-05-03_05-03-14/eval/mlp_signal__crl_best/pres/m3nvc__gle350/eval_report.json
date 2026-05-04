@@ -1,0 +1,26 @@
+{
+  "run_name": "mlp_signal__crl_best",
+  "probe_mode": "mlp_signal",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "m3nvc__gle350",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "gle350",
+  "n_windows": 15317,
+  "presence": {
+    "accuracy": 0.7887,
+    "precision": 0.7899,
+    "recall": 0.9884,
+    "specificity": 0.1203,
+    "f1": 0.8781,
+    "balanced_accuracy": 0.5544,
+    "mcc": 0.2436,
+    "tp": 11656,
+    "fp": 3100,
+    "fn": 137,
+    "tn": 424
+  },
+  "type": null
+}

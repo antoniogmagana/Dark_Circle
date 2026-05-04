@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_fullz__crl_best",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "focal__tesla2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "tesla2",
+  "n_windows": 2694,
+  "presence": {
+    "accuracy": 0.7509,
+    "precision": 0.8905,
+    "recall": 0.7791,
+    "specificity": 0.647,
+    "f1": 0.8311,
+    "balanced_accuracy": 0.713,
+    "mcc": 0.3769,
+    "tp": 1651,
+    "fp": 203,
+    "fn": 468,
+    "tn": 372
+  },
+  "type": null
+}

@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_signal__crl_best_aux_type",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "iobt__polaris0235pm_nolineofsig",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": "polaris0235pm_nolineofsig",
+  "n_windows": 895,
+  "presence": {
+    "accuracy": 0.3955,
+    "precision": 0.6764,
+    "recall": 0.3505,
+    "specificity": 0.5236,
+    "f1": 0.4617,
+    "balanced_accuracy": 0.437,
+    "mcc": -0.1137,
+    "tp": 232,
+    "fp": 111,
+    "fn": 430,
+    "tn": 122
+  },
+  "type": null
+}

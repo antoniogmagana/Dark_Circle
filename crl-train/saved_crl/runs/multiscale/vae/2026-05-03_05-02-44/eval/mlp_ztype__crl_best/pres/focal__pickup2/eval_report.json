@@ -1,0 +1,26 @@
+{
+  "run_name": "mlp_ztype__crl_best",
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "focal__pickup2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "pickup2",
+  "n_windows": 2548,
+  "presence": {
+    "accuracy": 0.8999,
+    "precision": 0.9255,
+    "recall": 0.9572,
+    "specificity": 0.6105,
+    "f1": 0.9411,
+    "balanced_accuracy": 0.7838,
+    "mcc": 0.6139,
+    "tp": 2036,
+    "fp": 164,
+    "fn": 91,
+    "tn": 257
+  },
+  "type": null
+}

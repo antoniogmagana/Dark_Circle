@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_signal__crl_best_aux_type",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "iobt__warhog_nolineofsight",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": "warhog_nolineofsight",
+  "n_windows": 190,
+  "presence": {
+    "accuracy": 0.4579,
+    "precision": 0.7303,
+    "recall": 0.4514,
+    "specificity": 0.4783,
+    "f1": 0.5579,
+    "balanced_accuracy": 0.4648,
+    "mcc": -0.0604,
+    "tp": 65,
+    "fp": 24,
+    "fn": 79,
+    "tn": 22
+  },
+  "type": null
+}

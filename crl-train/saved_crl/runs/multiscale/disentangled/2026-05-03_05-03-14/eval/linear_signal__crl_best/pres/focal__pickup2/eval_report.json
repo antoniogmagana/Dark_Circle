@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_signal__crl_best",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "focal__pickup2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "pickup2",
+  "n_windows": 2548,
+  "presence": {
+    "accuracy": 0.8367,
+    "precision": 0.876,
+    "recall": 0.937,
+    "specificity": 0.3302,
+    "f1": 0.9055,
+    "balanced_accuracy": 0.6336,
+    "mcc": 0.3208,
+    "tp": 1993,
+    "fp": 282,
+    "fn": 134,
+    "tn": 139
+  },
+  "type": null
+}

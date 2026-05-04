@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_ztype__crl_best_aux_type",
+  "probe_mode": "linear_ztype",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "focal__forester2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "forester2",
+  "n_windows": 2975,
+  "presence": {
+    "accuracy": 0.881,
+    "precision": 0.9202,
+    "recall": 0.9387,
+    "specificity": 0.5919,
+    "f1": 0.9293,
+    "balanced_accuracy": 0.7653,
+    "mcc": 0.5541,
+    "tp": 2328,
+    "fp": 202,
+    "fn": 152,
+    "tn": 293
+  },
+  "type": null
+}

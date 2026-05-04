@@ -1,0 +1,26 @@
+{
+  "run_name": "mlp_signal__crl_best_aux_type",
+  "probe_mode": "mlp_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "m3nvc__mustang",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "mustang",
+  "n_windows": 14298,
+  "presence": {
+    "accuracy": 0.7876,
+    "precision": 0.7863,
+    "recall": 0.9984,
+    "specificity": 0.0479,
+    "f1": 0.8797,
+    "balanced_accuracy": 0.5232,
+    "mcc": 0.1775,
+    "tp": 11109,
+    "fp": 3019,
+    "fn": 18,
+    "tn": 152
+  },
+  "type": null
+}

@@ -1,0 +1,26 @@
+{
+  "run_name": "mlp_signal__crl_best_aux_type",
+  "probe_mode": "mlp_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "focal__scooter2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "scooter2",
+  "n_windows": 2762,
+  "presence": {
+    "accuracy": 0.7002,
+    "precision": 0.8654,
+    "recall": 0.7182,
+    "specificity": 0.6429,
+    "f1": 0.7849,
+    "balanced_accuracy": 0.6805,
+    "mcc": 0.3189,
+    "tp": 1511,
+    "fp": 235,
+    "fn": 593,
+    "tn": 423
+  },
+  "type": null
+}

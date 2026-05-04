@@ -1,0 +1,26 @@
+{
+  "run_name": "mlp_ztype__crl_best_aux_type",
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "iobt",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": null,
+  "n_windows": 1575,
+  "presence": {
+    "accuracy": 0.701,
+    "precision": 0.8676,
+    "recall": 0.6636,
+    "specificity": 0.7816,
+    "f1": 0.752,
+    "balanced_accuracy": 0.7226,
+    "mcc": 0.4146,
+    "tp": 714,
+    "fp": 109,
+    "fn": 362,
+    "tn": 390
+  },
+  "type": null
+}

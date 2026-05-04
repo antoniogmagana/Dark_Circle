@@ -1,0 +1,26 @@
+{
+  "run_name": "mlp_signal__crl_best_aux_type",
+  "probe_mode": "mlp_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "focal__bicycle2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "bicycle2",
+  "n_windows": 3911,
+  "presence": {
+    "accuracy": 0.5139,
+    "precision": 0.882,
+    "recall": 0.3041,
+    "specificity": 0.9211,
+    "f1": 0.4523,
+    "balanced_accuracy": 0.6126,
+    "mcc": 0.2545,
+    "tp": 785,
+    "fp": 105,
+    "fn": 1796,
+    "tn": 1225
+  },
+  "type": null
+}

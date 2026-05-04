@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_ztype__crl_best_aux_type",
+  "probe_mode": "linear_ztype",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "focal__tesla2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "tesla2",
+  "n_windows": 2694,
+  "presence": {
+    "accuracy": 0.8155,
+    "precision": 0.9521,
+    "recall": 0.806,
+    "specificity": 0.8504,
+    "f1": 0.873,
+    "balanced_accuracy": 0.8282,
+    "mcc": 0.5703,
+    "tp": 1708,
+    "fp": 86,
+    "fn": 411,
+    "tn": 489
+  },
+  "type": null
+}

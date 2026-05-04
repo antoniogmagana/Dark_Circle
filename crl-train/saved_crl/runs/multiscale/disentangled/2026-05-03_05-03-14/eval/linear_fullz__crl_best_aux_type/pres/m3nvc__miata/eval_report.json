@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_fullz__crl_best_aux_type",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "m3nvc__miata",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "miata",
+  "n_windows": 13441,
+  "presence": {
+    "accuracy": 0.7778,
+    "precision": 0.7805,
+    "recall": 0.9834,
+    "specificity": 0.1332,
+    "f1": 0.8703,
+    "balanced_accuracy": 0.5583,
+    "mcc": 0.2414,
+    "tp": 10021,
+    "fp": 2818,
+    "fn": 169,
+    "tn": 433
+  },
+  "type": null
+}

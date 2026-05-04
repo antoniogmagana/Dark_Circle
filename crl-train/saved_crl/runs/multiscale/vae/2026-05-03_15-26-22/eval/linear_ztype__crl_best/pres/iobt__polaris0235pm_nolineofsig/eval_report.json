@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_ztype__crl_best",
+  "probe_mode": "linear_ztype",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "iobt__polaris0235pm_nolineofsig",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": "polaris0235pm_nolineofsig",
+  "n_windows": 895,
+  "presence": {
+    "accuracy": 0.6972,
+    "precision": 0.805,
+    "recall": 0.7795,
+    "specificity": 0.4635,
+    "f1": 0.792,
+    "balanced_accuracy": 0.6215,
+    "mcc": 0.2365,
+    "tp": 516,
+    "fp": 125,
+    "fn": 146,
+    "tn": 108
+  },
+  "type": null
+}

@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_signal__crl_best_aux_type",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "iobt",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": null,
+  "n_windows": 1575,
+  "presence": {
+    "accuracy": 0.5117,
+    "precision": 0.7106,
+    "recall": 0.4814,
+    "specificity": 0.5772,
+    "f1": 0.574,
+    "balanced_accuracy": 0.5293,
+    "mcc": 0.0546,
+    "tp": 518,
+    "fp": 211,
+    "fn": 558,
+    "tn": 288
+  },
+  "type": null
+}

@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_signal__crl_best",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "focal__forester2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "forester2",
+  "n_windows": 2975,
+  "presence": {
+    "accuracy": 0.8608,
+    "precision": 0.8789,
+    "recall": 0.9661,
+    "specificity": 0.3333,
+    "f1": 0.9205,
+    "balanced_accuracy": 0.6497,
+    "mcc": 0.4027,
+    "tp": 2396,
+    "fp": 330,
+    "fn": 84,
+    "tn": 165
+  },
+  "type": null
+}

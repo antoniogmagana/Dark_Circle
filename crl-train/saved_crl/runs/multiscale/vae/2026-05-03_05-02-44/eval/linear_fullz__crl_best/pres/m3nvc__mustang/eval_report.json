@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_fullz__crl_best",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "m3nvc__mustang",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "mustang",
+  "n_windows": 14298,
+  "presence": {
+    "accuracy": 0.8171,
+    "precision": 0.9069,
+    "recall": 0.8525,
+    "specificity": 0.6928,
+    "f1": 0.8789,
+    "balanced_accuracy": 0.7727,
+    "mcc": 0.5113,
+    "tp": 9486,
+    "fp": 974,
+    "fn": 1641,
+    "tn": 2197
+  },
+  "type": null
+}

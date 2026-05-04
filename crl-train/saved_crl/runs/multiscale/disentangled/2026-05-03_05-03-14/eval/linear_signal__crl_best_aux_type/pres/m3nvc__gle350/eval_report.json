@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_signal__crl_best_aux_type",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "m3nvc__gle350",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "gle350",
+  "n_windows": 15317,
+  "presence": {
+    "accuracy": 0.7896,
+    "precision": 0.7918,
+    "recall": 0.986,
+    "specificity": 0.1322,
+    "f1": 0.8783,
+    "balanced_accuracy": 0.5591,
+    "mcc": 0.2504,
+    "tp": 11628,
+    "fp": 3058,
+    "fn": 165,
+    "tn": 466
+  },
+  "type": null
+}

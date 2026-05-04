@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_fullz__crl_best",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "focal__motor2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "motor2",
+  "n_windows": 2734,
+  "presence": {
+    "accuracy": 0.6928,
+    "precision": 0.9449,
+    "recall": 0.6588,
+    "specificity": 0.8369,
+    "f1": 0.7764,
+    "balanced_accuracy": 0.7478,
+    "mcc": 0.3926,
+    "tp": 1458,
+    "fp": 85,
+    "fn": 755,
+    "tn": 436
+  },
+  "type": null
+}

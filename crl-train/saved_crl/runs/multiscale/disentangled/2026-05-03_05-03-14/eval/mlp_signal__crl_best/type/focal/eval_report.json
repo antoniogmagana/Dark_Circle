@@ -1,0 +1,72 @@
+{
+  "run_name": "mlp_signal__crl_best",
+  "probe_mode": "mlp_signal",
+  "ckpt_name": "crl_best.pth",
+  "head": "type",
+  "split": "focal",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": null,
+  "n_windows": 32674,
+  "presence": null,
+  "type": {
+    "accuracy": 0.4204,
+    "macro_f1": 0.4014,
+    "macro_f1_support_only": 0.4014,
+    "macro_precision": 0.4037,
+    "macro_recall": 0.4216,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.42,
+        "recall": 0.5243,
+        "f1": 0.4664,
+        "support": 6082
+      },
+      "light": {
+        "precision": 0.3912,
+        "recall": 0.5886,
+        "f1": 0.47,
+        "support": 4317
+      },
+      "medium": {
+        "precision": 0.5037,
+        "recall": 0.371,
+        "f1": 0.4273,
+        "support": 8771
+      },
+      "heavy": {
+        "precision": 0.3,
+        "recall": 0.2025,
+        "f1": 0.2418,
+        "support": 4246
+      }
+    },
+    "confusion_matrix": [
+      [
+        3189,
+        939,
+        896,
+        1058
+      ],
+      [
+        321,
+        2541,
+        1102,
+        353
+      ],
+      [
+        3496,
+        1425,
+        3254,
+        596
+      ],
+      [
+        587,
+        1591,
+        1208,
+        860
+      ]
+    ]
+  }
+}

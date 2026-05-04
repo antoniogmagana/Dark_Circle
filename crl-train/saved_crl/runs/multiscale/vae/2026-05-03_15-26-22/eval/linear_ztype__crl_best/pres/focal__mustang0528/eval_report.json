@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_ztype__crl_best",
+  "probe_mode": "linear_ztype",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "focal__mustang0528",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "mustang0528",
+  "n_windows": 10643,
+  "presence": {
+    "accuracy": 0.7736,
+    "precision": 0.8143,
+    "recall": 0.7992,
+    "specificity": 0.7364,
+    "f1": 0.8067,
+    "balanced_accuracy": 0.7678,
+    "mcc": 0.5336,
+    "tp": 5028,
+    "fp": 1147,
+    "fn": 1263,
+    "tn": 3205
+  },
+  "type": null
+}

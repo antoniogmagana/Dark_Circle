@@ -103,5 +103,5 @@
   "ckpt_name": "crl_best.pth",
   "crl_run_dir": "/home/lvc_toolkit/project-files/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/2026-05-03_05-02-44/crl",
   "seed": 42,
-  "ds_elapsed_min": 45.12
+  "ds_elapsed_min": 42.24
 }

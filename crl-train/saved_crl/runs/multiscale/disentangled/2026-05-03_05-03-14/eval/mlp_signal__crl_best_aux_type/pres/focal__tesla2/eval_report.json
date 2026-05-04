@@ -1,0 +1,26 @@
+{
+  "run_name": "mlp_signal__crl_best_aux_type",
+  "probe_mode": "mlp_signal",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "focal__tesla2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "tesla2",
+  "n_windows": 2694,
+  "presence": {
+    "accuracy": 0.5457,
+    "precision": 0.921,
+    "recall": 0.462,
+    "specificity": 0.8539,
+    "f1": 0.6153,
+    "balanced_accuracy": 0.658,
+    "mcc": 0.2648,
+    "tp": 979,
+    "fp": 84,
+    "fn": 1140,
+    "tn": 491
+  },
+  "type": null
+}

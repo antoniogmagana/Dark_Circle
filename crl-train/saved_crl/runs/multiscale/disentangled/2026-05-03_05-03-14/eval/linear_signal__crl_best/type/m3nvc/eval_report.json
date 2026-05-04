@@ -1,0 +1,72 @@
+{
+  "run_name": "linear_signal__crl_best",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best.pth",
+  "head": "type",
+  "split": "m3nvc",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": null,
+  "n_windows": 57076,
+  "presence": null,
+  "type": {
+    "accuracy": 0.8585,
+    "macro_f1": 0.4045,
+    "macro_f1_support_only": 0.8091,
+    "macro_precision": 0.4181,
+    "macro_recall": 0.3955,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "medium": {
+        "precision": 0.8768,
+        "recall": 0.9381,
+        "f1": 0.9064,
+        "support": 31798
+      },
+      "heavy": {
+        "precision": 0.7956,
+        "recall": 0.6438,
+        "f1": 0.7117,
+        "support": 11793
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        6,
+        12,
+        29830,
+        1950
+      ],
+      [
+        0,
+        8,
+        4193,
+        7592
+      ]
+    ]
+  }
+}

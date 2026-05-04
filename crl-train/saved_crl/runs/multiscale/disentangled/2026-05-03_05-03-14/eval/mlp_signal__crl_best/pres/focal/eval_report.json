@@ -1,0 +1,26 @@
+{
+  "run_name": "mlp_signal__crl_best",
+  "probe_mode": "mlp_signal",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "focal",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": null,
+  "n_windows": 32674,
+  "presence": {
+    "accuracy": 0.6911,
+    "precision": 0.8571,
+    "recall": 0.6827,
+    "specificity": 0.7121,
+    "f1": 0.7601,
+    "balanced_accuracy": 0.6974,
+    "mcc": 0.3595,
+    "tp": 15987,
+    "fp": 2665,
+    "fn": 7429,
+    "tn": 6593
+  },
+  "type": null
+}

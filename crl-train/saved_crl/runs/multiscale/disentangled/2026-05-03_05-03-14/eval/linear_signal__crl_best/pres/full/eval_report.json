@@ -1,0 +1,24 @@
+{
+  "run_name": "linear_signal__crl_best",
+  "probe_mode": "linear_signal",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "full",
+  "include_datasets": null,
+  "include_vehicle": null,
+  "n_windows": 91325,
+  "presence": {
+    "accuracy": 0.7553,
+    "precision": 0.796,
+    "recall": 0.9033,
+    "specificity": 0.3219,
+    "f1": 0.8463,
+    "balanced_accuracy": 0.6126,
+    "mcc": 0.2717,
+    "tp": 61498,
+    "fp": 15760,
+    "fn": 6585,
+    "tn": 7482
+  },
+  "type": null
+}

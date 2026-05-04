@@ -1,0 +1,26 @@
+{
+  "run_name": "mlp_signal__crl_best",
+  "probe_mode": "mlp_signal",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "iobt__warhog_nolineofsight",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": "warhog_nolineofsight",
+  "n_windows": 190,
+  "presence": {
+    "accuracy": 0.7105,
+    "precision": 0.7697,
+    "recall": 0.8819,
+    "specificity": 0.1739,
+    "f1": 0.822,
+    "balanced_accuracy": 0.5279,
+    "mcc": 0.0708,
+    "tp": 127,
+    "fp": 38,
+    "fn": 17,
+    "tn": 8
+  },
+  "type": null
+}

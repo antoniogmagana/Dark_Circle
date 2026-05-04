@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_ztype__crl_best_aux_type",
+  "probe_mode": "linear_ztype",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "focal__motor2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "motor2",
+  "n_windows": 2734,
+  "presence": {
+    "accuracy": 0.6686,
+    "precision": 0.9498,
+    "recall": 0.6236,
+    "specificity": 0.8599,
+    "f1": 0.7529,
+    "balanced_accuracy": 0.7417,
+    "mcc": 0.3805,
+    "tp": 1380,
+    "fp": 73,
+    "fn": 833,
+    "tn": 448
+  },
+  "type": null
+}

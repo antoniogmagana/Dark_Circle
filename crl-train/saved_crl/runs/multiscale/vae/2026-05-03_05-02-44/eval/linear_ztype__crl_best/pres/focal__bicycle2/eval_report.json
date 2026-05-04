@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_ztype__crl_best",
+  "probe_mode": "linear_ztype",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "focal__bicycle2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "bicycle2",
+  "n_windows": 3911,
+  "presence": {
+    "accuracy": 0.732,
+    "precision": 0.9368,
+    "recall": 0.637,
+    "specificity": 0.9165,
+    "f1": 0.7583,
+    "balanced_accuracy": 0.7768,
+    "mcc": 0.5272,
+    "tp": 1644,
+    "fp": 111,
+    "fn": 937,
+    "tn": 1219
+  },
+  "type": null
+}

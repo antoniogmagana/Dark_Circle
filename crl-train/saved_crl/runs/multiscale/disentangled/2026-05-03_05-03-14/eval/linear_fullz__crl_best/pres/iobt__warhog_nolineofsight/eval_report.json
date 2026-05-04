@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_fullz__crl_best",
+  "probe_mode": "linear_fullz",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "iobt__warhog_nolineofsight",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": "warhog_nolineofsight",
+  "n_windows": 190,
+  "presence": {
+    "accuracy": 0.6632,
+    "precision": 0.7564,
+    "recall": 0.8194,
+    "specificity": 0.1739,
+    "f1": 0.7867,
+    "balanced_accuracy": 0.4967,
+    "mcc": -0.0074,
+    "tp": 118,
+    "fp": 38,
+    "fn": 26,
+    "tn": 8
+  },
+  "type": null
+}

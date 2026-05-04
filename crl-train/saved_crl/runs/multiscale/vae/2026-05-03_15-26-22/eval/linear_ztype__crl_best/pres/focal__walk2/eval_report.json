@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_ztype__crl_best",
+  "probe_mode": "linear_ztype",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "focal__walk2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "walk2",
+  "n_windows": 4407,
+  "presence": {
+    "accuracy": 0.759,
+    "precision": 0.8989,
+    "recall": 0.7849,
+    "specificity": 0.6589,
+    "f1": 0.8381,
+    "balanced_accuracy": 0.7219,
+    "mcc": 0.3891,
+    "tp": 2748,
+    "fp": 309,
+    "fn": 753,
+    "tn": 597
+  },
+  "type": null
+}
