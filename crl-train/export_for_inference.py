@@ -67,6 +67,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+from crl_vehicle import analysis
 from crl_vehicle.config import CRLConfig
 from training.trainer import CRLModel
 
@@ -829,67 +830,125 @@ def parity_check_fused(
 CLASS_NAMES = ["pedestrian", "light", "medium", "heavy"]
 
 
-def _find_report_json(save_dir: Path) -> Path:
-    """Walk up from save_dir looking for report.json.
+def _find_run_root(save_dir: Path) -> Path:
+    """Walk up from ``save_dir`` looking for the run root.
 
     The expected per-run layout is
     ``runs/<frontend>/<mode>/<run-id>/downstream/<probe>/`` with the
-    checkpoints + meta.json in the probe dir but ``report.json`` at the
-    run root (``runs/<frontend>/<mode>/<run-id>/``). This walks parents
-    until it finds one or hits the filesystem root.
+    checkpoints + meta.json in the probe dir, while the run root holds
+    the downstream/, eval/, and crl/ subtrees that
+    ``crl_vehicle.analysis`` needs to compute selection metrics. We
+    detect the run root by the presence of a ``downstream/`` child.
     """
     cur = save_dir.resolve()
-    # Cap the search depth so we never escape into ``saved_crl/`` or higher;
-    # 5 levels handles probe -> downstream -> run -> mode -> frontend.
+    # Probe dir -> downstream -> run -> mode -> frontend; cap at 6 levels.
     for _ in range(6):
-        candidate = cur / "report.json"
-        if candidate.exists():
-            return candidate
+        if (cur / "downstream").is_dir():
+            return cur
         if cur.parent == cur:
             break
         cur = cur.parent
     raise FileNotFoundError(
-        f"report.json not found in {save_dir} or any parent directory "
-        f"(searched up to 6 levels). Needed for bundle selection metrics. "
-        f"Re-run eval to produce it."
+        f"run root not found from {save_dir} (searched up to 6 levels for "
+        f"a parent dir containing downstream/). Needed to compute bundle "
+        f"selection metrics."
     )
 
 
+def _min_or_none(values: dict[str, float]) -> float | None:
+    if not values:
+        return None
+    return float(min(values.values()))
+
+
 def _read_selection_metrics(save_dir: Path, kind: str) -> dict:
-    """Pull the metric fields the bundle catalog needs from report.json.
+    """Compute the selection metrics the bundle catalog needs.
 
-    detect bundles need ``pres_f1`` (selection) + ``min_pres_f1``
-    (tie-breaker). classify bundles need ``type_f1`` (selection) +
-    ``min_type_f1`` (selection floor + tie-breaker). Missing required
-    fields are a hard error so a bundle can't end up in the catalog
-    without provenance.
+    Detect bundles use the run-level (canonical-probe) presence metrics:
+    detect doesn't ship a probe, so per-bundle ranking is per-run. The
+    canonical probe is whatever ``crl_vehicle.analysis.CANONICAL_PROBE``
+    points at (``linear_ztype__crl_best`` today).
 
-    ``report.json`` is searched for from ``save_dir`` walking upward —
-    the saved-run layout puts checkpoints in a per-probe subdirectory
-    but the report at the run root.
+    Classify bundles use the *bundle's own* probe — ``save_dir`` is the
+    probe directory the exporter was invoked against, so we use its
+    basename as the probe name and read its downstream metrics + per-
+    dataset eval directly. This lets two probes of the same run
+    (``mlp_ztype`` vs ``linear_fullz``) compete as separate classify
+    bundles.
+
+    Missing required fields are a hard error so a bundle can't end up
+    in the catalog without provenance. ``min_*`` (cross-location) is
+    treated as required: per the design spec it's the ship-metric
+    tie-breaker (and on classify, the promotion floor).
     """
-    report_path = _find_report_json(save_dir)
-    report = json.loads(report_path.read_text())
+    # Resolve the run root by walking up from the probe dir.
+    run_root = _find_run_root(save_dir)
 
+    # Pick which probe to read metrics from.
     if kind == "detect":
-        required = ("pres_f1", "min_pres_f1")
+        probe_name = analysis.CANONICAL_PROBE
     elif kind == "classify":
-        required = ("type_f1", "min_type_f1")
+        # ``save_dir`` IS the probe dir; its name is the probe id.
+        probe_name = save_dir.name
     else:
         raise ValueError(f"unknown bundle kind: {kind!r}")
 
+    # Pull val-split (downstream-loop) metrics from this probe's CSV.
+    probe_dir = run_root / "downstream" / probe_name
+    if not probe_dir.is_dir():
+        raise FileNotFoundError(
+            f"probe directory not found: {probe_dir}. "
+            f"For kind={kind}, expected probe={probe_name!r} under "
+            f"{run_root / 'downstream'}/."
+        )
+    ds_csv = probe_dir / "downstream_metrics.csv"
+    if not ds_csv.exists():
+        raise FileNotFoundError(
+            f"{ds_csv} not found — needed to read val_pres_f1 / val_type_f1."
+        )
+    cols = analysis._read_csv_columns(ds_csv)
+    best = analysis._best_from_ds_metrics(cols)
+
+    # Pull cross-location per-dataset F1s from eval/<probe>/<head>/<split>/.
+    cl = analysis._cross_location_metrics(run_root, preferred=probe_name)
+    per_pres = cl.get("per_dataset_pres_f1") or {}
+    per_type = cl.get("per_dataset_type_f1") or {}
+
     out: dict = {}
-    for field in required:
-        if field not in report:
+    if kind == "detect":
+        pres_f1 = best.get("val_pres_f1")
+        min_pres_f1 = _min_or_none(per_pres)
+        if pres_f1 is None:
             raise KeyError(
-                f"{report_path} is missing required field "
-                f"{field!r} for kind={kind}. Available keys: "
-                f"{sorted(report.keys())}"
+                f"val_pres_f1 missing from {ds_csv}. Re-run downstream "
+                f"training to produce it."
             )
-        out[field] = float(report[field])
-    # ``source_run`` records the run-id, not the probe subdir — the run
-    # root is where ``report.json`` lives.
-    out["source_run"] = report_path.parent.name
+        if min_pres_f1 is None:
+            raise KeyError(
+                f"no per-dataset presence F1s under "
+                f"{run_root / 'eval' / probe_name / 'pres'}/. Re-run "
+                f"run_full_diagnostic.py to produce per-location eval reports."
+            )
+        out["pres_f1"] = float(pres_f1)
+        out["min_pres_f1"] = float(min_pres_f1)
+    else:  # classify
+        type_f1 = best.get("val_type_f1")
+        min_type_f1 = _min_or_none(per_type)
+        if type_f1 is None:
+            raise KeyError(
+                f"val_type_f1 missing from {ds_csv}. Re-run downstream "
+                f"training to produce it."
+            )
+        if min_type_f1 is None:
+            raise KeyError(
+                f"no per-dataset type F1s under "
+                f"{run_root / 'eval' / probe_name / 'type'}/. Re-run "
+                f"run_full_diagnostic.py to produce per-location eval reports."
+            )
+        out["type_f1"] = float(type_f1)
+        out["min_type_f1"] = float(min_type_f1)
+
+    out["source_run"] = run_root.name
     return out
 
 
