@@ -134,16 +134,13 @@ class InferDetectNode:
         loop = asyncio.get_event_loop()
 
         if self.mode == "fused":
-            detected, prob, z = await loop.run_in_executor(
+            detected, prob, _z = await loop.run_in_executor(
                 None, self._infer_fused, x_audio, x_seismic
             )
-            result.z_fused.extend(z.tolist())
         else:
-            detected, prob, z_audio, z_seismic = await loop.run_in_executor(
+            detected, prob, _z_audio, _z_seismic = await loop.run_in_executor(
                 None, self._infer_per_sensor, x_audio, x_seismic
             )
-            result.z_audio.extend(z_audio.tolist())
-            result.z_seismic.extend(z_seismic.tolist())
 
         result.vehicle_detected = bool(detected)
         result.confidence = float(prob)
