@@ -12,48 +12,56 @@ Two checkpoints are required (the heads are checkpointed independently):
 Presence-side parameters (encoder + pres_heads + aux_pres_heads) are taken from
 the pres ckpt; type-side parameters (type_heads + aux_type_heads) are taken
 from the type ckpt. The encoder is shared across both heads at inference time,
-so the source for it is configurable via --encoder-from (default: pres). For
-runs trained with a frozen backbone, both checkpoints have bit-identical
-encoder state and the choice is irrelevant.
+so the source for it is configurable via --encoder-from (default: pres).
+
+Bundle kinds (--bundle-kind):
+  * detect   -> encoder_*.ts + meta.json (no type head). Catalog: detect-bundles/.
+              meta.json adds: pres_f1, min_pres_f1, source_run.
+  * classify -> encoder_*.ts + type_head_*.ts + meta.json. Catalog: classify-bundles/.
+              meta.json adds: class_names, probe_mode, type_f1, min_type_f1, source_run.
+
+A single saved CRL run produces one detect bundle and one classify bundle via
+two separate invocations.
 
 Output layout (in --out-dir):
 
   Per-sensor mode (frontend_type ∈ {morlet, morlet_per_sensor, morlet_learnable}):
     encoder_audio.ts        # (x_audio[B,1,16000])    -> (z[B,d_z], pres_logit[B,1])
     encoder_seismic.ts      # (x_seismic[B,1,100])    -> (z[B,d_z], pres_logit[B,1])
-    type_head_audio.ts      # (z[B,d_z])              -> type_logits[B,4]
-    type_head_seismic.ts    # (z[B,d_z])              -> type_logits[B,4]
+    type_head_audio.ts      # classify only — (z[B,d_z]) -> type_logits[B,4]
+    type_head_seismic.ts    # classify only
     meta.json
 
   Fused mode (frontend_type ∈ {multiscale, morlet_fused, morlet_learnable_fused}):
     encoder_fused.ts        # (x_audio[B,1,16000], x_seismic[B,1,100]) -> (z, pres_logit)
-    type_head_fused.ts      # (z[B,d_z]) -> type_logits[B,4]
+    type_head_fused.ts      # classify only
     meta.json
 
 CLI:
-    # Customer-facing path: write directly into the inference-engine
-    # bundle catalog (assumes crl-train and inference-engine are
-    # siblings under one parent dir).
+    # Produce a detect bundle, evaluate against the catalog, promote if winner.
     python export_for_inference.py \\
-        --save-dir saved_crl/runs/multiscale/vae/<run>/downstream/<probe> \\
-        --bundle-name multiscale-vae-<run>-<probe>-aux_type-v2
+        --save-dir saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \\
+        --bundle-kind detect \\
+        --bundle-name <frontend>-<mode>-<run>-v1 \\
+        --promote-default
 
-    # Promote the new bundle as the shipping default in the same run:
+    # Produce a classify bundle from the same (or a different) run.
     python export_for_inference.py \\
-        --save-dir saved_crl/runs/multiscale/vae/<run>/downstream/<probe> \\
-        --bundle-name multiscale-vae-<run>-<probe>-aux_type-v2 \\
-        --update-default-symlink
+        --save-dir saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \\
+        --bundle-kind classify \\
+        --bundle-name <frontend>-<mode>-<run>-<probe>-v1 \\
+        --promote-default
 
-    # Escape hatch: explicit out-dir for one-off exports outside the
-    # bundle catalog (e.g. ad-hoc evaluation).
+    # Escape hatch: explicit out-dir for one-off exports outside the catalog.
     python export_for_inference.py --save-dir saved_crl/runs/<run> \\
-        --out-dir /tmp/scratch-bundle
+        --bundle-kind detect --out-dir /tmp/scratch-bundle
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 
@@ -65,18 +73,40 @@ from training.trainer import CRLModel
 PER_SENSOR_FRONTENDS = {"morlet", "morlet_per_sensor", "morlet_learnable"}
 FUSED_FRONTENDS = {"multiscale", "morlet_fused", "morlet_learnable_fused"}
 
-# Default location of the inference-engine bundle catalog, relative to
+# Default locations of the inference-engine bundle catalogs, relative to
 # the parent of this repo. Customers and dev both place crl-train and
-# inference-engine as siblings under one parent dir.
-_DEFAULT_BUNDLES_PARENT = Path(__file__).resolve().parent.parent / "inference-engine" / "crl-bundles"
+# inference-engine as siblings under one parent dir. There are two
+# catalogs now — one per pod kind.
+_INFERENCE_ENGINE = Path(__file__).resolve().parent.parent / "inference-engine"
+_DEFAULT_DETECT_BUNDLES_PARENT = _INFERENCE_ENGINE / "detect-bundles"
+_DEFAULT_CLASSIFY_BUNDLES_PARENT = _INFERENCE_ENGINE / "classify-bundles"
 
-# Bundle names follow the convention documented in
-# inference-engine/crl-bundles/README.md:
-#   <frontend>-<training-mode>-<run-id>-<probe>-[aux_type-]v<N>
+# Bundle names follow the convention documented in each catalog's README:
+#   detect:   <frontend>-<training-mode>-<run-id>-v<N>
+#   classify: <frontend>-<training-mode>-<run-id>-<probe>-v<N>
 # We don't enforce the full grammar — just that it ends in -v<N> so a
 # version exists, and that there's no path separator (so a typo can't
-# write outside crl-bundles/).
+# write outside the catalog dir).
 _BUNDLE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*-v\d+$")
+
+# Tie band for default-symlink promotion. Two runs are considered tied
+# iff |primary_a - primary_b| < _TIE_EPSILON; tie-breaker fires inside
+# the band only.
+_TIE_EPSILON = 0.01
+
+# Floors for *-default symlink promotion. Floors gate ONLY auto-promotion;
+# bundles below the floor still exist on disk and can be selected
+# explicitly via DETECT_BUNDLE / CLASSIFY_BUNDLE.
+_PROMOTION_FLOOR = {
+    "detect": ("pres_f1", 0.80),
+    "classify": ("min_type_f1", 0.40),
+}
+
+# (primary_metric, tiebreaker_metric) per kind.
+_RANKING_METRICS = {
+    "detect": ("pres_f1", "min_pres_f1"),
+    "classify": ("type_f1", "min_type_f1"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -799,34 +829,176 @@ def parity_check_fused(
 CLASS_NAMES = ["pedestrian", "light", "medium", "heavy"]
 
 
+def _read_selection_metrics(save_dir: Path, kind: str) -> dict:
+    """Pull the metric fields the bundle catalog needs from report.json.
+
+    detect bundles need ``pres_f1`` (selection) + ``min_pres_f1``
+    (tie-breaker). classify bundles need ``type_f1`` (selection) +
+    ``min_type_f1`` (selection floor + tie-breaker). Missing required
+    fields are a hard error so a bundle can't end up in the catalog
+    without provenance.
+    """
+    report_path = save_dir / "report.json"
+    if not report_path.exists():
+        raise FileNotFoundError(
+            f"report.json not found in {save_dir} — needed for bundle "
+            f"selection metrics. Re-run eval to produce it."
+        )
+    report = json.loads(report_path.read_text())
+
+    if kind == "detect":
+        required = ("pres_f1", "min_pres_f1")
+    elif kind == "classify":
+        required = ("type_f1", "min_type_f1")
+    else:
+        raise ValueError(f"unknown bundle kind: {kind!r}")
+
+    out: dict = {}
+    for field in required:
+        if field not in report:
+            raise KeyError(
+                f"report.json in {save_dir} is missing required field "
+                f"{field!r} for kind={kind}. Available keys: "
+                f"{sorted(report.keys())}"
+            )
+        out[field] = float(report[field])
+    out["source_run"] = save_dir.name
+    return out
+
+
 def build_deployment_meta(
     cfg: CRLConfig,
     sensors: list[str],
     mode: str,
     presence_threshold: dict | float,
     probe_mode: str,
+    kind: str,
+    selection_metrics: dict,
 ) -> dict:
     """Subset of training meta.json that the inference pods need.
 
     Inference pods only need: which mode, which sensors, what shapes the
-    encoder expects, the threshold, the class names, and a couple of sanity-
-    check values. Anything training-only (loss weights, optimizer hparams,
-    dataset config) is omitted.
+    encoder expects, the threshold (detect-only), the class names
+    (classify-only), the probe (classify-only), the latent dim, and the
+    selection metrics for catalog ranking.
     """
     meta: dict = {
         "frontend_type": cfg.frontend_type,
         "mode": mode,  # "per_sensor" | "fused"
         "sensors": sensors,
-        "probe_mode": probe_mode,
-        "class_names": CLASS_NAMES,
-        "presence_threshold": presence_threshold,
         "z_dim": cfg.d_z,
     }
+    if kind == "detect":
+        meta["presence_threshold"] = presence_threshold
+    elif kind == "classify":
+        meta["class_names"] = CLASS_NAMES
+        meta["probe_mode"] = probe_mode
+    else:
+        raise ValueError(f"unknown bundle kind: {kind!r}")
+
     for sensor in sensors:
         mc = cfg.modality_cfg(sensor)
         meta[f"{sensor}_sample_rate"] = mc.sample_rate
         meta[f"{sensor}_window_size"] = mc.window_size
+
+    meta.update(selection_metrics)
     return meta
+
+
+# ---------------------------------------------------------------------------
+# Default-symlink promotion
+# ---------------------------------------------------------------------------
+
+
+def _list_catalog(bundles_dir: Path) -> list[Path]:
+    """Return every bundle subdir in bundles_dir, ignoring symlinks
+    (the *-default symlink itself is one of those) and non-dirs."""
+    out: list[Path] = []
+    for child in sorted(bundles_dir.iterdir()):
+        if child.is_dir() and not child.is_symlink():
+            out.append(child)
+    return out
+
+
+def _rank_bundles(catalog: list[Path], kind: str) -> list[tuple[Path, dict]]:
+    """Rank catalog by (primary, tiebreaker) descending. Bundles missing
+    metrics are skipped with a warning."""
+    primary, tiebreaker = _RANKING_METRICS[kind]
+    scored: list[tuple[float, float, str, Path, dict]] = []
+    for bundle in catalog:
+        meta_path = bundle / "meta.json"
+        if not meta_path.exists():
+            print(f"  skipping {bundle.name}: no meta.json", flush=True)
+            continue
+        meta = json.loads(meta_path.read_text())
+        if primary not in meta or tiebreaker not in meta:
+            print(
+                f"  skipping {bundle.name}: missing {primary!r} or {tiebreaker!r}",
+                flush=True,
+            )
+            continue
+        scored.append((float(meta[primary]), float(meta[tiebreaker]), bundle.name, bundle, meta))
+    # Sort by (primary desc, tiebreaker desc, name asc). The name-asc
+    # last component makes ties deterministic.
+    scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
+    return [(b, m) for _, _, _, b, m in scored]
+
+
+def _promote_default(bundles_dir: Path, kind: str) -> None:
+    """Re-evaluate the catalog and repoint <kind>-default at the winner
+    if any bundle clears the floor. Exits non-zero if no candidate is
+    eligible — the just-written bundle still exists on disk and can be
+    selected explicitly via DETECT_BUNDLE / CLASSIFY_BUNDLE.
+    """
+    floor_metric, floor_value = _PROMOTION_FLOOR[kind]
+    primary, _tiebreaker = _RANKING_METRICS[kind]
+    link_name = f"{kind}-default"
+    link_path = bundles_dir / link_name
+
+    catalog = _list_catalog(bundles_dir)
+    if not catalog:
+        print(f"  no bundles in {bundles_dir}; cannot promote {link_name}", flush=True)
+        raise SystemExit(1)
+
+    ranked = _rank_bundles(catalog, kind)
+    if not ranked:
+        print(f"  no bundles with valid metrics in {bundles_dir}", flush=True)
+        raise SystemExit(1)
+
+    eligible = [(b, m) for b, m in ranked if m.get(floor_metric, 0.0) >= floor_value]
+    if not eligible:
+        best_bundle, best_meta = ranked[0]
+        print(
+            f"  no eligible bundle for {link_name} "
+            f"(highest {floor_metric}={best_meta.get(floor_metric, 0.0):.3f}, "
+            f"floor={floor_value:.2f})",
+            flush=True,
+        )
+        raise SystemExit(1)
+
+    winner_bundle, winner_meta = eligible[0]
+    target = winner_bundle.name
+
+    current_target: str | None = None
+    if link_path.is_symlink():
+        current_target = os.readlink(link_path)
+
+    if current_target == target:
+        print(
+            f"  {link_name} already points at {target} "
+            f"({primary}={winner_meta[primary]:.3f}); no change",
+            flush=True,
+        )
+        return
+
+    if link_path.exists() or link_path.is_symlink():
+        link_path.unlink()
+    link_path.symlink_to(target)
+    print(
+        f"  repointed {link_path} -> {target} "
+        f"({primary}={winner_meta[primary]:.3f})",
+        flush=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -841,7 +1013,19 @@ def parse_args() -> argparse.Namespace:
         required=True,
         type=Path,
         help="Saved-run directory (contains meta.json + downstream_best_pres.pth "
-        "+ downstream_best_type.pth).",
+        "+ downstream_best_type.pth + report.json).",
+    )
+    ap.add_argument(
+        "--bundle-kind",
+        choices=["detect", "classify"],
+        required=True,
+        help=(
+            "Which kind of bundle to write. "
+            "'detect' = encoder + presence-only meta (deployed to infer-detect). "
+            "'classify' = encoder + type head + classify meta (deployed to "
+            "infer-classify). A single saved run produces one bundle per kind "
+            "via two separate invocations."
+        ),
     )
 
     target_group = ap.add_mutually_exclusive_group(required=True)
@@ -849,11 +1033,12 @@ def parse_args() -> argparse.Namespace:
         "--bundle-name",
         type=str,
         help=(
-            "Name of a bundle directory under inference-engine/crl-bundles/. "
-            "Resolved relative to ../inference-engine/crl-bundles/ unless "
-            "--bundles-dir is set. Convention: "
-            "<frontend>-<training-mode>-<run-id>-<probe>-[aux_type-]v<N>. "
-            "Example: multiscale-vae-v3_lowfreq-mlp_ztype-aux_type-v2"
+            "Name of a bundle directory under the per-kind catalog "
+            "(detect-bundles/ or classify-bundles/, picked by --bundle-kind). "
+            "Convention: "
+            "  detect:   <frontend>-<training-mode>-<run-id>-v<N>. "
+            "  classify: <frontend>-<training-mode>-<run-id>-<probe>-v<N>. "
+            "Example: multiscale-vae-v3_lowfreq-mlp_ztype-v2"
         ),
     )
     target_group.add_argument(
@@ -867,19 +1052,20 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--bundles-dir",
         type=Path,
-        default=_DEFAULT_BUNDLES_PARENT,
+        default=None,
         help=(
-            f"Parent directory holding bundle subdirs. "
-            f"Default: {_DEFAULT_BUNDLES_PARENT}"
+            "Parent directory holding bundle subdirs. Defaults to "
+            "<inference-engine>/<kind>-bundles/ per --bundle-kind."
         ),
     )
     ap.add_argument(
-        "--update-default-symlink",
+        "--promote-default",
         action="store_true",
         help=(
-            "After a successful --bundle-name export, repoint "
-            "<bundles-dir>/multiscale-default at the new bundle. "
-            "Only valid with --bundle-name."
+            "After a successful --bundle-name export, walk the catalog for "
+            "this --bundle-kind, apply the selection rules, and repoint "
+            "<kind>-default at the winner if it changed. Only valid with "
+            "--bundle-name."
         ),
     )
     ap.add_argument(
@@ -918,13 +1104,20 @@ def parse_args() -> argparse.Namespace:
 
     args = ap.parse_args()
 
+    # Resolve --bundles-dir per kind if not supplied.
+    if args.bundles_dir is None:
+        if args.bundle_kind == "detect":
+            args.bundles_dir = _DEFAULT_DETECT_BUNDLES_PARENT
+        else:
+            args.bundles_dir = _DEFAULT_CLASSIFY_BUNDLES_PARENT
+
     # Resolve --bundle-name to a concrete out_dir, with validation.
     if args.bundle_name is not None:
         if not _BUNDLE_NAME_RE.match(args.bundle_name):
             ap.error(
                 f"--bundle-name {args.bundle_name!r} doesn't match the convention "
-                f"<name>-v<N>. See inference-engine/crl-bundles/README.md for the "
-                f"full naming guide."
+                f"<name>-v<N>. See inference-engine/{args.bundle_kind}-bundles/"
+                f"README.md for the full naming guide."
             )
         if not args.bundles_dir.is_dir():
             ap.error(
@@ -934,8 +1127,8 @@ def parse_args() -> argparse.Namespace:
             )
         args.out_dir = args.bundles_dir / args.bundle_name
 
-    if args.update_default_symlink and args.bundle_name is None:
-        ap.error("--update-default-symlink requires --bundle-name")
+    if args.promote_default and args.bundle_name is None:
+        ap.error("--promote-default requires --bundle-name")
 
     return args
 
@@ -967,11 +1160,16 @@ def main() -> None:
             print(f"\nExporting per-sensor [{sensor}] (window={mc.window_size})")
             enc_eager, type_eager = build_per_sensor_wrappers(model, sensor, type_slice)
             enc_path = args.out_dir / f"encoder_{sensor}.ts"
-            type_path = args.out_dir / f"type_head_{sensor}.ts"
             scripted_enc = script_and_save(enc_eager, enc_path)
-            scripted_type = script_and_save(type_eager, type_path)
-            print(f"  wrote {enc_path.name} and {type_path.name}")
-            if not args.skip_parity:
+            print(f"  wrote {enc_path.name}")
+
+            scripted_type = None
+            if args.bundle_kind == "classify":
+                type_path = args.out_dir / f"type_head_{sensor}.ts"
+                scripted_type = script_and_save(type_eager, type_path)
+                print(f"  wrote {type_path.name}")
+
+            if not args.skip_parity and scripted_type is not None:
                 parity_check_per_sensor(
                     enc_eager,
                     type_eager,
@@ -988,11 +1186,16 @@ def main() -> None:
         print("\nExporting fused encoder (audio + seismic)")
         enc_eager, type_eager = build_fused_wrappers(model, type_slice)
         enc_path = args.out_dir / "encoder_fused.ts"
-        type_path = args.out_dir / "type_head_fused.ts"
         scripted_enc = script_and_save(enc_eager, enc_path)
-        scripted_type = script_and_save(type_eager, type_path)
-        print(f"  wrote {enc_path.name} and {type_path.name}")
-        if not args.skip_parity:
+        print(f"  wrote {enc_path.name}")
+
+        scripted_type = None
+        if args.bundle_kind == "classify":
+            type_path = args.out_dir / "type_head_fused.ts"
+            scripted_type = script_and_save(type_eager, type_path)
+            print(f"  wrote {type_path.name}")
+
+        if not args.skip_parity and scripted_type is not None:
             audio_window = cfg.modality_cfg("audio").window_size
             seismic_window = cfg.modality_cfg("seismic").window_size
             parity_check_fused(
@@ -1012,37 +1215,31 @@ def main() -> None:
             f"fused {sorted(FUSED_FRONTENDS)}."
         )
 
+    selection_metrics = _read_selection_metrics(args.save_dir, args.bundle_kind)
+
     deploy_meta = build_deployment_meta(
         cfg=cfg,
         sensors=sensors,
         mode=mode,
         presence_threshold=presence_threshold,
         probe_mode=probe_mode,
+        kind=args.bundle_kind,
+        selection_metrics=selection_metrics,
     )
     meta_path = args.out_dir / "meta.json"
     meta_path.write_text(json.dumps(deploy_meta, indent=2) + "\n")
     print(f"\nWrote {meta_path}")
     print(f"Done. {args.out_dir}/ ready for inference-engine deploy.")
 
-    if args.update_default_symlink:
-        # Repoint <bundles-dir>/multiscale-default at the new bundle.
-        # Use a relative target so the symlink survives a repo move.
-        link_path = args.bundles_dir / "multiscale-default"
-        target = args.bundle_name
-        if link_path.exists() or link_path.is_symlink():
-            link_path.unlink()
-        link_path.symlink_to(target)
-        print(f"Repointed {link_path} -> {target}")
-        print(
-            "Remember to update the catalog table in "
-            "inference-engine/crl-bundles/README.md and commit."
-        )
+    if args.promote_default:
+        _promote_default(args.bundles_dir, args.bundle_kind)
     elif args.bundle_name is not None:
+        link_name = f"{args.bundle_kind}-default"
         print(
-            f"\nTo make this the new shipping default, re-run with "
-            f"--update-default-symlink, or manually:\n"
+            f"\nTo evaluate this against the catalog and promote if it wins, "
+            f"re-run with --promote-default. Or manually:\n"
             f"  ln -sfn {args.bundle_name} "
-            f"{args.bundles_dir}/multiscale-default"
+            f"{args.bundles_dir}/{link_name}"
         )
 
 

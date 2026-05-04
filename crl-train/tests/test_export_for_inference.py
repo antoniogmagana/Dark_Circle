@@ -160,7 +160,7 @@ def test_fused_multiscale_export_parity(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_deployment_meta_per_sensor_includes_dict_threshold() -> None:
+def test_detect_meta_per_sensor_includes_dict_threshold() -> None:
     cfg = _small_morlet_per_sensor_cfg(use_phase=False)
     meta = build_deployment_meta(
         cfg=cfg,
@@ -168,20 +168,27 @@ def test_deployment_meta_per_sensor_includes_dict_threshold() -> None:
         mode="per_sensor",
         presence_threshold={"audio": 0.4, "seismic": 0.6},
         probe_mode="linear_ztype",
+        kind="detect",
+        selection_metrics={"pres_f1": 0.85, "min_pres_f1": 0.72, "source_run": "abc"},
     )
     assert meta["mode"] == "per_sensor"
     assert meta["frontend_type"] == "morlet_per_sensor"
     assert meta["sensors"] == ["audio", "seismic"]
-    assert meta["class_names"] == ["pedestrian", "light", "medium", "heavy"]
+    # Detect bundles do NOT carry class_names / probe_mode.
+    assert "class_names" not in meta
+    assert "probe_mode" not in meta
     assert meta["presence_threshold"] == {"audio": 0.4, "seismic": 0.6}
     assert meta["audio_sample_rate"] == 16000
     assert meta["audio_window_size"] == 16000
     assert meta["seismic_sample_rate"] == 100
     assert meta["seismic_window_size"] == 100
     assert meta["z_dim"] == cfg.d_z
+    assert meta["pres_f1"] == 0.85
+    assert meta["min_pres_f1"] == 0.72
+    assert meta["source_run"] == "abc"
 
 
-def test_deployment_meta_fused_includes_scalar_threshold() -> None:
+def test_classify_meta_fused_includes_class_names_and_metrics() -> None:
     cfg = _small_multiscale_cfg()
     meta = build_deployment_meta(
         cfg=cfg,
@@ -189,10 +196,18 @@ def test_deployment_meta_fused_includes_scalar_threshold() -> None:
         mode="fused",
         presence_threshold=0.55,
         probe_mode="linear_ztype",
+        kind="classify",
+        selection_metrics={"type_f1": 0.66, "min_type_f1": 0.44, "source_run": "xyz"},
     )
     assert meta["mode"] == "fused"
     assert meta["frontend_type"] == "multiscale"
-    assert meta["presence_threshold"] == 0.55
+    # Classify bundles do NOT carry the presence threshold.
+    assert "presence_threshold" not in meta
+    assert meta["class_names"] == ["pedestrian", "light", "medium", "heavy"]
+    assert meta["probe_mode"] == "linear_ztype"
+    assert meta["type_f1"] == 0.66
+    assert meta["min_type_f1"] == 0.44
+    assert meta["source_run"] == "xyz"
 
 
 # ---------------------------------------------------------------------------
