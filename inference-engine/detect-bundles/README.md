@@ -98,15 +98,11 @@ poetry run python export_for_inference.py \
 After exporting, commit the bundle directory and (if you promoted)
 the symlink change. Update the catalog table below by hand.
 
-## Bootstrap
-
-This catalog is empty after the restructure landed. Populate it by
-running the exporter against saved CRL runs you want to evaluate.
-The first `--promote-default` invocation will set `detect-default` if
-any bundle clears the floor.
-
 ## Current bundles
 
 | Bundle | Frontend | pres_f1 | min_pres_f1 | source_run | Notes |
 |--------|----------|--------:|------------:|------------|-------|
-| _(empty — populate via the exporter)_ |  |  |  |  |  |
+| `multiscale-vae-2026_05_03_15_26_22-v1` | multiscale | **0.871** | **0.802** | `2026-05-03_15-26-22` | Current `detect-default`. d_z=32. |
+| `multiscale-vae-2026_05_03_05_02_44-v1` | multiscale | 0.863 | 0.592 | `2026-05-03_05-02-44` | d_z=24. Below leader on min_pres_f1. |
+
+`detect-default` → `multiscale-vae-2026_05_03_15_26_22-v1`

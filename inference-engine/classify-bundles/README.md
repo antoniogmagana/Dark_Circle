@@ -88,13 +88,19 @@ poetry run python export_for_inference.py \
 After exporting, commit the bundle directory and (if you promoted)
 the symlink change. Update the catalog table below.
 
-## Bootstrap
-
-This catalog is empty after the restructure landed. Populate it by
-running the exporter against saved CRL runs.
-
 ## Current bundles
 
-| Bundle | Frontend | type_f1 | min_type_f1 | source_run | Notes |
-|--------|----------|--------:|------------:|------------|-------|
-| _(empty — populate via the exporter)_ |  |  |  |  |  |
+| Bundle | Frontend | Probe | type_f1 | min_type_f1 | source_run | Notes |
+|--------|----------|-------|--------:|------------:|------------|-------|
+| `multiscale-disentangled-2026_05_03_05_03_14-linear_signal-v1` | multiscale | `linear_signal` | 0.670 | **0.437** | `2026-05-03_05-03-14` | Current `classify-default`. d_z=24. Wins inside the ε=0.01 tie band on tie-breaker `min_type_f1`. |
+| `multiscale-disentangled-2026_05_03_05_03_14-linear_fullz-v1`  | multiscale | `linear_fullz`  | 0.670 | 0.434 | `2026-05-03_05-03-14` | Inside the tie band on `type_f1`; second on `min_type_f1`. |
+| `multiscale-disentangled-2026_05_03_05_03_14-mlp_signal-v1`    | multiscale | `mlp_signal`    | 0.673 | 0.422 | `2026-05-03_05-03-14` | Highest headline `type_f1` but inside the ε=0.01 tie band, so the tie-breaker decides. Lowest on `min_type_f1`. |
+
+`classify-default` → `multiscale-disentangled-2026_05_03_05_03_14-linear_signal-v1`
+
+> All three bundles share `source_run=2026-05-03_05-03-14` and fall
+> inside the ε=0.01 tie band on the primary metric `type_f1` (0.6729 /
+> 0.6704 / 0.6702). Per the selection rules above, the tie-breaker
+> `min_type_f1` decides → `linear_signal-v1` wins. The result is
+> reproducible by running `--promote-default` against any bundle in
+> the catalog.
