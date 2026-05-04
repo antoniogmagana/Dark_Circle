@@ -1007,8 +1007,19 @@ def _list_catalog(bundles_dir: Path) -> list[Path]:
 
 
 def _rank_bundles(catalog: list[Path], kind: str) -> list[tuple[Path, dict]]:
-    """Rank catalog by (primary, tiebreaker) descending. Bundles missing
-    metrics are skipped with a warning."""
+    """Rank catalog with the spec's ε-tie-band semantics.
+
+    Two bundles are tied iff ``|primary_a - primary_b| < _TIE_EPSILON``
+    (i.e., 0.01). Inside the band the tiebreaker fires; outside it the
+    primary alone decides.
+
+    Concretely: walk bundles in primary-descending order, building tie
+    groups whose primary values are all within ε of the group's first
+    member. Within each group sort by tiebreaker descending (then name
+    ascending for determinism). Concatenate groups top-down.
+
+    Bundles missing metrics are skipped with a warning.
+    """
     primary, tiebreaker = _RANKING_METRICS[kind]
     scored: list[tuple[float, float, str, Path, dict]] = []
     for bundle in catalog:
@@ -1024,10 +1035,27 @@ def _rank_bundles(catalog: list[Path], kind: str) -> list[tuple[Path, dict]]:
             )
             continue
         scored.append((float(meta[primary]), float(meta[tiebreaker]), bundle.name, bundle, meta))
-    # Sort by (primary desc, tiebreaker desc, name asc). The name-asc
-    # last component makes ties deterministic.
-    scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
-    return [(b, m) for _, _, _, b, m in scored]
+
+    # Outer pass: sort by primary descending so we walk top-down.
+    scored.sort(key=lambda t: (-t[0], t[2]))
+
+    # Bin by ε around each group's anchor (the highest-primary unbinned
+    # bundle). Within a bin, sort by (tiebreaker desc, name asc).
+    out: list[tuple[Path, dict]] = []
+    i = 0
+    while i < len(scored):
+        anchor_primary = scored[i][0]
+        bin_end = i
+        while (
+            bin_end < len(scored)
+            and (anchor_primary - scored[bin_end][0]) < _TIE_EPSILON
+        ):
+            bin_end += 1
+        group = scored[i:bin_end]
+        group.sort(key=lambda t: (-t[1], t[2]))
+        out.extend((b, m) for _, _, _, b, m in group)
+        i = bin_end
+    return out
 
 
 def _promote_default(bundles_dir: Path, kind: str) -> None:
