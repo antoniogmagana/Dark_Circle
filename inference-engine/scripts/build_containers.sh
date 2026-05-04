@@ -21,9 +21,10 @@
 #   REGISTRY=registry.example.com/dark-circle TAG=v0.1.0 PUSH=1 \
 #       scripts/build_containers.sh
 #
-#   # Build only, skip both kind load and push (CI / customer hand-off)
-#   REGISTRY=registry.example.com/dark-circle TAG=v0.1.0 \
-#       scripts/build_containers.sh
+#   # Pick specific bundles for the inference pods
+#   DETECT_BUNDLE=multiscale-vae-<run>-v1 \
+#   CLASSIFY_BUNDLE=multiscale-vae-<run>-mlp_ztype-v1 \
+#       scripts/build_containers.sh infer-detect infer-classify
 #
 # Behavior:
 #   - kind load: auto-runs when ``kind`` is on PATH AND the cluster
@@ -32,6 +33,21 @@
 #   - docker push: only runs when ``PUSH=1`` is set. Caller is responsible
 #     for ``docker login`` against the target registry beforehand.
 set -eo pipefail
+
+# Hard error on the retired single-bundle env var. Silent fallthrough
+# during the restructure would be a footgun.
+if [ -n "${CRL_BUNDLE:-}" ]; then
+    echo "ERROR: CRL_BUNDLE is no longer supported." >&2
+    echo "Use DETECT_BUNDLE and CLASSIFY_BUNDLE instead." >&2
+    echo "  DETECT_BUNDLE=<name>   selects from inference-engine/detect-bundles/" >&2
+    echo "  CLASSIFY_BUNDLE=<name> selects from inference-engine/classify-bundles/" >&2
+    exit 1
+fi
+if [ -n "${CRL_RUN_DIR:-}" ]; then
+    echo "ERROR: CRL_RUN_DIR is no longer supported." >&2
+    echo "Use DETECT_RUN_DIR and CLASSIFY_RUN_DIR instead (dev fallback path)." >&2
+    exit 1
+fi
 
 REGISTRY="${REGISTRY:-inference-engine}"
 TAG="${TAG:-dev}"
@@ -42,51 +58,58 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
 cd "$ROOT"
 
-# Source of the CRL TorchScript bundle for the inference images. Two
-# resolution paths, in order:
-#
-#   1. CRL_BUNDLE: name of a pre-exported bundle directory under
-#      crl-bundles/. Customer path. No crl-train install needed.
-#      Default is "multiscale-default", a symlink to whichever bundle
-#      is currently the shipping leader (see crl-bundles/README.md).
-#
-#   2. CRL_RUN_DIR + CRL_TRAIN_PYTHON: re-export from a saved run.
-#      Dev path — requires crl-train to be installed alongside.
-#      Used when CRL_BUNDLE doesn't resolve to an existing directory.
-#
-# Override CRL_FORCE_EXPORT=1 to redo the staging even if the cached
-# bundle in build/crl-export/ already matches.
-CRL_BUNDLE="${CRL_BUNDLE:-multiscale-default}"
-CRL_RUN_DIR="${CRL_RUN_DIR:-crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type}"
+# Per-pod bundle selectors. Each pod is staged independently.
+DETECT_BUNDLE="${DETECT_BUNDLE:-detect-default}"
+CLASSIFY_BUNDLE="${CLASSIFY_BUNDLE:-classify-default}"
+
+# Dev re-export fallback. Used when <KIND>_BUNDLE doesn't resolve to a
+# bundle dir AND crl-train is installed alongside.
+DETECT_RUN_DIR="${DETECT_RUN_DIR:-}"
+CLASSIFY_RUN_DIR="${CLASSIFY_RUN_DIR:-}"
 CRL_TRAIN_PYTHON="${CRL_TRAIN_PYTHON:-$REPO_ROOT/crl-train/.venv/bin/python}"
 
-# Stage the CRL TorchScript artifacts into build/crl-export/ so the
-# infer-detect / infer-classify Dockerfiles can COPY them. Resolution
-# order: pre-bundled (crl-bundles/$CRL_BUNDLE) first, then re-export
-# from $CRL_RUN_DIR if crl-train is available.
-stage_crl_export() {
-    local out="$ROOT/build/crl-export"
-    local bundle_path="$ROOT/crl-bundles/$CRL_BUNDLE"
-    local stamp="$out/.bundle_id"
+# stage_bundle <kind>
+#
+# kind = "detect" or "classify". Stages the corresponding bundle into
+# build/<kind>-export/ so the matching Dockerfile can COPY it. Resolution
+# order: pre-bundled (<kind>-bundles/$<KIND>_BUNDLE) first, then re-export
+# from $<KIND>_RUN_DIR via crl-train.
+stage_bundle() {
+    local kind="$1"
+    local bundle_name run_dir bundle_path out stamp resolved bundle_id
+
+    case "$kind" in
+        detect)
+            bundle_name="$DETECT_BUNDLE"
+            run_dir="$DETECT_RUN_DIR"
+            ;;
+        classify)
+            bundle_name="$CLASSIFY_BUNDLE"
+            run_dir="$CLASSIFY_RUN_DIR"
+            ;;
+        *)
+            echo "stage_bundle: unknown kind '$kind' (expected detect or classify)" >&2
+            return 1
+            ;;
+    esac
+
+    bundle_path="$ROOT/${kind}-bundles/$bundle_name"
+    out="$ROOT/build/${kind}-export"
+    stamp="$out/.bundle_id"
 
     # ---- Path 1: pre-bundled artifact ---------------------------------
     if [ -d "$bundle_path" ]; then
-        # Resolve symlinks so the stamp records the underlying bundle,
-        # not the alias. This keeps the skip-if-same check robust when a
-        # symlink target changes.
-        local resolved
         resolved="$(cd "$bundle_path" && pwd -P)"
-        local bundle_id
         bundle_id="$(basename "$resolved")"
 
         if [ -f "$stamp" ] && \
            [ "$(cat "$stamp" 2>/dev/null)" = "$bundle_id" ] && \
            [ -z "${CRL_FORCE_EXPORT:-}" ]; then
-            echo "=== CRL bundle '$bundle_id' already staged at $out (set CRL_FORCE_EXPORT=1 to redo) ==="
+            echo "=== ${kind} bundle '$bundle_id' already staged at $out (set CRL_FORCE_EXPORT=1 to redo) ==="
             return 0
         fi
 
-        echo "=== copying CRL bundle '$bundle_id' -> build/crl-export ==="
+        echo "=== copying ${kind} bundle '$bundle_id' -> build/${kind}-export ==="
         rm -rf "$out"
         mkdir -p "$out"
         cp -RL "$bundle_path"/. "$out"/
@@ -95,45 +118,49 @@ stage_crl_export() {
     fi
 
     # ---- Path 2: re-export from a crl-train saved run -----------------
-    if [ ! -d "$REPO_ROOT/$CRL_RUN_DIR" ]; then
-        echo "CRL bundle '$CRL_BUNDLE' not found at $bundle_path" >&2
-        echo "and CRL_RUN_DIR not found at $REPO_ROOT/$CRL_RUN_DIR" >&2
+    local kind_upper
+    kind_upper="$(echo "$kind" | tr '[:lower:]' '[:upper:]')"
+    if [ -z "$run_dir" ] || [ ! -d "$REPO_ROOT/$run_dir" ]; then
+        echo "${kind} bundle '$bundle_name' not found at $bundle_path" >&2
+        if [ -z "$run_dir" ]; then
+            echo "and ${kind_upper}_RUN_DIR is not set." >&2
+        else
+            echo "and ${kind_upper}_RUN_DIR not found at $REPO_ROOT/$run_dir" >&2
+        fi
         echo "" >&2
-        echo "Set CRL_BUNDLE to one of the directories under crl-bundles/," >&2
-        echo "or install crl-train and point CRL_RUN_DIR at a saved run." >&2
+        echo "Set ${kind_upper}_BUNDLE to a directory under ${kind}-bundles/," >&2
+        echo "or install crl-train and point ${kind_upper}_RUN_DIR at a saved run." >&2
         exit 1
     fi
     if [ ! -x "$CRL_TRAIN_PYTHON" ]; then
-        echo "CRL bundle '$CRL_BUNDLE' not found at $bundle_path" >&2
+        echo "${kind} bundle '$bundle_name' not found at $bundle_path" >&2
         echo "and CRL_TRAIN_PYTHON not executable: $CRL_TRAIN_PYTHON" >&2
         echo "" >&2
-        echo "Customer path: set CRL_BUNDLE to a bundle under crl-bundles/." >&2
+        echo "Customer path: set ${kind_upper}_BUNDLE to a bundle under ${kind}-bundles/." >&2
         echo "Dev path:      cd $REPO_ROOT/crl-train && poetry install" >&2
         exit 1
     fi
 
-    local run_id
-    run_id="run:$(basename "$CRL_RUN_DIR")"
+    local run_id="run:$kind:$(basename "$run_dir")"
     if [ -f "$stamp" ] && \
        [ "$(cat "$stamp" 2>/dev/null)" = "$run_id" ] && \
        [ -z "${CRL_FORCE_EXPORT:-}" ]; then
-        echo "=== CRL re-export for '$run_id' already staged (set CRL_FORCE_EXPORT=1 to redo) ==="
+        echo "=== ${kind} re-export for '$run_id' already staged (set CRL_FORCE_EXPORT=1 to redo) ==="
         return 0
     fi
 
     rm -rf "$out"
     mkdir -p "$out"
-    echo "=== re-exporting CRL run $CRL_RUN_DIR -> build/crl-export ==="
+    echo "=== re-exporting ${kind} from $run_dir -> build/${kind}-export ==="
     (cd "$REPO_ROOT/crl-train" && \
         "$CRL_TRAIN_PYTHON" export_for_inference.py \
-            --save-dir "$REPO_ROOT/$CRL_RUN_DIR" \
+            --save-dir "$REPO_ROOT/$run_dir" \
+            --bundle-kind "$kind" \
             --out-dir "$out")
     printf "%s\n" "$run_id" > "$stamp"
 }
 
 # Image short-name -> Dockerfile path lookup.
-# Plain function instead of an associative array, since macOS still ships
-# bash 3.2 which has no `declare -A`.
 dockerfile_for() {
     case "$1" in
         discovery)      echo "src/discovery/Dockerfile" ;;
@@ -160,18 +187,22 @@ for name in $TARGETS; do
         exit 1
     }
 
-    # Stage the CRL TorchScript export for the inference images. Both
-    # infer-detect and infer-classify consume the same bundle; the export
-    # only runs once per build_containers.sh invocation.
+    # Per-pod bundle staging + label build-arg.
+    build_args=()
     case "$name" in
-        infer-detect|infer-classify)
-            stage_crl_export
+        infer-detect)
+            stage_bundle detect
+            build_args+=(--build-arg "DETECT_BUNDLE_LABEL=$DETECT_BUNDLE")
+            ;;
+        infer-classify)
+            stage_bundle classify
+            build_args+=(--build-arg "CLASSIFY_BUNDLE_LABEL=$CLASSIFY_BUNDLE")
             ;;
     esac
 
     image="${REGISTRY}/${name}:${TAG}"
     echo "=== building $image ==="
-    docker build -f "$dockerfile" -t "$image" .
+    docker build "${build_args[@]}" -f "$dockerfile" -t "$image" .
 done
 
 if command -v kind >/dev/null 2>&1; then
