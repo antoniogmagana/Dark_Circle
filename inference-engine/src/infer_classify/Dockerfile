@@ -20,9 +20,12 @@ RUN pip install --no-cache-dir /inference-protos
 # Source for the classification node
 COPY src/infer_classify/main.py .
 
-# CRL TorchScript bundle (type_head_*.ts + meta.json). Staged into
-# build/crl-export/ by scripts/build_containers.sh.
-COPY build/crl-export /app/model
+# CRL TorchScript bundle (encoder_*.ts + type_head_*.ts + meta.json).
+# Staged into build/classify-export/ by scripts/build_containers.sh from
+# the bundle named by CLASSIFY_BUNDLE (default: classify-default).
+ARG CLASSIFY_BUNDLE_LABEL=unknown
+LABEL com.darkcircle.classify_bundle=$CLASSIFY_BUNDLE_LABEL
+COPY build/classify-export /app/model
 
 ENV PYTHONUNBUFFERED=1
 CMD ["python3", "main.py"]

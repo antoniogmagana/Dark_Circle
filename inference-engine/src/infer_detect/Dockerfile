@@ -21,9 +21,12 @@ RUN pip install --no-cache-dir /inference-protos
 COPY src/infer_detect/main.py .
 
 # CRL TorchScript bundle (encoder_*.ts + meta.json). Staged into
-# build/crl-export/ by scripts/build_containers.sh from a saved CRL run.
+# build/detect-export/ by scripts/build_containers.sh from the bundle
+# named by DETECT_BUNDLE (default: detect-default).
 # Override at runtime by mounting a different directory at /app/model.
-COPY build/crl-export /app/model
+ARG DETECT_BUNDLE_LABEL=unknown
+LABEL com.darkcircle.detect_bundle=$DETECT_BUNDLE_LABEL
+COPY build/detect-export /app/model
 
 ENV PYTHONUNBUFFERED=1
 CMD ["python3", "main.py"]
