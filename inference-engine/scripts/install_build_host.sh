@@ -11,8 +11,9 @@
 #   - `poetry run pytest tests/ -v` passes as a self-check
 #
 # What this does NOT do:
-#   - Touch crl-train. Customers should select a pre-built bundle from
-#     crl-bundles/ via the CRL_BUNDLE env var (see crl-bundles/README.md).
+#   - Touch crl-train. Customers should select pre-built bundles from
+#     detect-bundles/ and classify-bundles/ via the DETECT_BUNDLE and
+#     CLASSIFY_BUNDLE env vars (see each catalog's README.md).
 #   - Configure kubectl context, GPU drivers, or registry auth.
 #
 # Idempotent: re-running with everything already installed exits clean

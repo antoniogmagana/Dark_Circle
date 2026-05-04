@@ -4,8 +4,9 @@
 # Replica count is owned by k8s/keda/scaledobject-infer-detect.yaml.
 #
 # Model artifacts (TorchScript) are baked into the image during
-# ``docker build`` from build/crl-export/, populated by
-# scripts/build_containers.sh from a saved CRL run.
+# ``docker build`` from build/detect-export/, populated by
+# scripts/build_containers.sh from the bundle named by DETECT_BUNDLE
+# (default: detect-default).
 apiVersion: apps/v1
 kind: Deployment
 metadata:

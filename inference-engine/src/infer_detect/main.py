@@ -7,9 +7,10 @@ Loads either an ``encoder_fused.ts`` (fused mode) or a pair of
 ``meta.json`` written alongside the TorchScript artifacts by
 ``crl-train/export_for_inference.py``.
 
-For each ``sensor.data`` window we publish a ``DetectionResult`` whose
-``z_fused`` (or ``z_audio`` + ``z_seismic``) field carries the latent so
-the classification node can apply the type head without re-encoding.
+For each ``sensor.data`` window we publish a ``DetectionResult`` carrying
+the original ``sensor_data`` plus ``vehicle_detected`` and ``confidence``.
+The latent stays inside this pod — the classification node has its own
+encoder bundle and re-encodes the raw waveform from ``sensor_data``.
 """
 
 import asyncio

@@ -1,11 +1,15 @@
 # Inference — Classification Node
 # Subscribes to JetStream detection.result via the ``infer-classify``
-# durable consumer (queue group), runs the type head only on positives,
-# publishes EgressPayload to classification.result. Replica count is
-# owned by k8s/keda/scaledobject-infer-classify.yaml.
+# durable consumer (queue group). On positive detections, re-encodes the
+# raw waveform from sensor_data and runs the type head; publishes
+# EgressPayload to classification.result. Replica count is owned by
+# k8s/keda/scaledobject-infer-classify.yaml.
 #
 # Model artifacts are baked into the image during ``docker build`` from
-# build/crl-export/, same bundle as infer-detect.
+# build/classify-export/, populated by scripts/build_containers.sh from
+# the bundle named by CLASSIFY_BUNDLE (default: classify-default).
+# Classify selects independently of infer-detect; the bundles may come
+# from the same CRL run or different runs.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
