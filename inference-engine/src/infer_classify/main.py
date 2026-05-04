@@ -1,14 +1,14 @@
 """
 Classification node — CRL TorchScript edition.
 
-Loads either ``type_head_fused.ts`` (fused mode) or both
-``type_head_audio.ts`` + ``type_head_seismic.ts`` (per-sensor mode) from
-``MODEL_DIR``. Reads the latent ``z`` from the inbound ``DetectionResult``
-(no encoder runs here) and produces an ``EgressPayload`` with the predicted
-``vehicle_class`` and confidence.
+Loads (encoder + type head) for either fused or per_sensor mode from
+``MODEL_DIR``. On a positive ``DetectionResult`` the pod re-encodes the
+inbound raw waveform — the detect pod no longer ships a latent on the
+wire — and applies the type head to produce ``vehicle_class`` and
+``classification_confidence``.
 
-For per-sensor mode we average the two heads' softmax probabilities before
-argmax — gives a smooth fused decision without re-encoding.
+For per-sensor mode we average the two heads' softmax probabilities
+before argmax — gives a smooth fused decision without re-encoding.
 """
 
 import asyncio
@@ -23,9 +23,6 @@ from inference_protos import inference_pb2
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/model"))
 
-# Constrain PyTorch's intra-op thread pool to the container's CPU budget.
-# See infer_detect/main.py for the full rationale; without this PyTorch
-# spawns one thread per host CPU and thrashes against the cgroup limit.
 _TORCH_THREADS = int(os.environ.get("TORCH_NUM_THREADS", "2"))
 torch.set_num_threads(_TORCH_THREADS)
 
@@ -35,14 +32,21 @@ def _load_artifacts(model_dir: Path):
     mode = meta["mode"]
 
     device = torch.device("cpu")
+    encoders: dict[str, torch.jit.ScriptModule] = {}
     heads: dict[str, torch.jit.ScriptModule] = {}
 
     if mode == "fused":
+        encoders["fused"] = torch.jit.load(
+            str(model_dir / "encoder_fused.ts"), map_location=device
+        ).eval()
         heads["fused"] = torch.jit.load(
             str(model_dir / "type_head_fused.ts"), map_location=device
         ).eval()
     elif mode == "per_sensor":
         for sensor in meta["sensors"]:
+            encoders[sensor] = torch.jit.load(
+                str(model_dir / f"encoder_{sensor}.ts"), map_location=device
+            ).eval()
             heads[sensor] = torch.jit.load(
                 str(model_dir / f"type_head_{sensor}.ts"), map_location=device
             ).eval()
@@ -51,37 +55,41 @@ def _load_artifacts(model_dir: Path):
 
     print(
         f"[infer_classify] loaded mode={mode} sensors={meta['sensors']} "
-        f"classes={meta['class_names']}",
+        f"classes={meta['class_names']} z_dim={meta['z_dim']}",
         flush=True,
     )
-    return heads, meta, device
+    return encoders, heads, meta, device
 
 
-def _z_to_tensor(values, z_dim: int) -> torch.Tensor:
+def _to_tensor(values, expected_len: int) -> torch.Tensor:
+    """Pack a flat list/array into shape (1, 1, expected_len) float32."""
     t = torch.as_tensor(list(values), dtype=torch.float32)
-    if t.numel() != z_dim:
-        raise ValueError(f"expected z of length {z_dim}, got {t.numel()}")
-    return t.view(1, z_dim)
+    if t.numel() != expected_len:
+        raise ValueError(f"expected {expected_len} samples, got {t.numel()}")
+    return t.view(1, 1, expected_len)
 
 
 class InferClassifyNode:
-    def __init__(self, nc, heads, meta, device):
+    def __init__(self, nc, encoders, heads, meta, device):
         self.nc = nc
         self.js = nc.jetstream()
+        self.encoders = encoders
         self.heads = heads
         self.meta = meta
         self.mode = meta["mode"]
         self.class_names = meta["class_names"]
-        self.z_dim = int(meta["z_dim"])
         self.device = device
 
-    def _infer_fused(self, z: torch.Tensor):
+    def _infer_fused(self, x_audio: torch.Tensor, x_seismic: torch.Tensor):
         with torch.inference_mode():
+            z, _pres_logit = self.encoders["fused"](x_audio, x_seismic)
             logits = self.heads["fused"](z)
         return F.softmax(logits, dim=1)[0]
 
-    def _infer_per_sensor(self, z_audio: torch.Tensor, z_seismic: torch.Tensor):
+    def _infer_per_sensor(self, x_audio: torch.Tensor, x_seismic: torch.Tensor):
         with torch.inference_mode():
+            z_audio, _pres_audio = self.encoders["audio"](x_audio)
+            z_seismic, _pres_seismic = self.encoders["seismic"](x_seismic)
             logits_audio = self.heads["audio"](z_audio)
             logits_seismic = self.heads["seismic"](z_seismic)
         probs_audio = F.softmax(logits_audio, dim=1)[0]
@@ -97,28 +105,30 @@ class InferClassifyNode:
 
         sd = detection.sensor_data
 
-        loop = asyncio.get_event_loop()
+        if not sd.HasField("acoustic_data") or not sd.HasField("seismic_data"):
+            print(
+                f"[infer_classify] {sd.sensor_id}: missing audio or seismic, skipping",
+                flush=True,
+            )
+            return
 
         try:
-            if self.mode == "fused":
-                if not detection.z_fused:
-                    print("[infer_classify] missing z_fused; skipping", flush=True)
-                    return
-                z = _z_to_tensor(detection.z_fused, self.z_dim)
-                probs = await loop.run_in_executor(None, self._infer_fused, z)
-            else:
-                if not detection.z_audio or not detection.z_seismic:
-                    print(
-                        "[infer_classify] missing z_audio or z_seismic; skipping",
-                        flush=True,
-                    )
-                    return
-                z_audio = _z_to_tensor(detection.z_audio, self.z_dim)
-                z_seismic = _z_to_tensor(detection.z_seismic, self.z_dim)
-                probs = await loop.run_in_executor(None, self._infer_per_sensor, z_audio, z_seismic)
+            x_audio = _to_tensor(sd.acoustic_data.data, self.meta["audio_window_size"])
+            x_seismic = _to_tensor(sd.seismic_data.data, self.meta["seismic_window_size"])
         except ValueError as exc:
-            print(f"[infer_classify] z shape error: {exc}", flush=True)
+            print(f"[infer_classify] shape mismatch: {exc}", flush=True)
             return
+
+        loop = asyncio.get_event_loop()
+
+        if self.mode == "fused":
+            probs = await loop.run_in_executor(
+                None, self._infer_fused, x_audio, x_seismic
+            )
+        else:
+            probs = await loop.run_in_executor(
+                None, self._infer_per_sensor, x_audio, x_seismic
+            )
 
         class_idx = int(torch.argmax(probs).item())
         confidence = float(probs[class_idx].item())
@@ -139,13 +149,11 @@ async def main_async():
     if "NATS_URL" not in os.environ:
         raise OSError("Required environment variable 'NATS_URL' is not set")
 
-    heads, meta, device = _load_artifacts(MODEL_DIR)
+    encoders, heads, meta, device = _load_artifacts(MODEL_DIR)
 
     nc = await nats.connect(os.environ["NATS_URL"])
-    node = InferClassifyNode(nc, heads, meta, device)
+    node = InferClassifyNode(nc, encoders, heads, meta, device)
     js = nc.jetstream()
-    # Bind to the pre-created ``infer-classify`` durable consumer
-    # (jetstream-init Job sets it up with deliver_group="infer-classify").
     info = await js.consumer_info("DETECTION_RESULT", "infer-classify")
     await js.subscribe_bind(
         stream="DETECTION_RESULT",
