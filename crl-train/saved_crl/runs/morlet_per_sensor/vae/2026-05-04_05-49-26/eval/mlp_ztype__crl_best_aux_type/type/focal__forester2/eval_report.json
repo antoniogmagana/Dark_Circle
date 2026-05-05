@@ -1,0 +1,72 @@
+{
+  "run_name": "mlp_ztype__crl_best_aux_type",
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "type",
+  "split": "focal__forester2",
+  "include_datasets": [
+    "focal"
+  ],
+  "include_vehicle": "forester2",
+  "n_windows": 2975,
+  "presence": null,
+  "type": {
+    "accuracy": 0.0448,
+    "macro_f1": 0.0214,
+    "macro_f1_support_only": 0.0857,
+    "macro_precision": 0.25,
+    "macro_recall": 0.0112,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "medium": {
+        "precision": 1.0,
+        "recall": 0.0448,
+        "f1": 0.0857,
+        "support": 4960
+      },
+      "heavy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1879,
+        2662,
+        222,
+        197
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  }
+}

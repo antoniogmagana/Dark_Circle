@@ -1,0 +1,26 @@
+{
+  "run_name": "mlp_ztype__crl_best",
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "m3nvc__miata",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "miata",
+  "n_windows": 13441,
+  "presence": {
+    "accuracy": 0.6306,
+    "precision": 0.8756,
+    "recall": 0.5977,
+    "specificity": 0.7338,
+    "f1": 0.7104,
+    "balanced_accuracy": 0.6657,
+    "mcc": 0.2841,
+    "tp": 12181,
+    "fp": 1731,
+    "fn": 8199,
+    "tn": 4771
+  },
+  "type": null
+}

@@ -1,0 +1,26 @@
+{
+  "run_name": "linear_ztype__crl_best_aux_type",
+  "probe_mode": "linear_ztype",
+  "ckpt_name": "crl_best_aux_type.pth",
+  "head": "pres",
+  "split": "m3nvc__mustang",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "include_vehicle": "mustang",
+  "n_windows": 14298,
+  "presence": {
+    "accuracy": 0.7444,
+    "precision": 0.8775,
+    "recall": 0.7804,
+    "specificity": 0.6178,
+    "f1": 0.8261,
+    "balanced_accuracy": 0.6991,
+    "mcc": 0.3584,
+    "tp": 17368,
+    "fp": 2424,
+    "fn": 4886,
+    "tn": 3918
+  },
+  "type": null
+}

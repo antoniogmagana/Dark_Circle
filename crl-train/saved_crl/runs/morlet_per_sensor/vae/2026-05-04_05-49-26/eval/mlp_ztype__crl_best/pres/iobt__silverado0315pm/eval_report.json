@@ -1,0 +1,26 @@
+{
+  "run_name": "mlp_ztype__crl_best",
+  "probe_mode": "mlp_ztype",
+  "ckpt_name": "crl_best.pth",
+  "head": "pres",
+  "split": "iobt__silverado0315pm",
+  "include_datasets": [
+    "iobt"
+  ],
+  "include_vehicle": "silverado0315pm",
+  "n_windows": 490,
+  "presence": {
+    "accuracy": 0.6429,
+    "precision": 0.615,
+    "recall": 0.9407,
+    "specificity": 0.2773,
+    "f1": 0.7438,
+    "balanced_accuracy": 0.609,
+    "mcc": 0.298,
+    "tp": 508,
+    "fp": 318,
+    "fn": 32,
+    "tn": 122
+  },
+  "type": null
+}
