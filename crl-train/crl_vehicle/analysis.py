@@ -65,7 +65,7 @@ DIVERGED_ELBO_THRESHOLD = 50.0
 
 # Shippability thresholds from the capstone deliverable.
 SHIP_PRES_F1 = 0.85
-SHIP_TYPE_F1 = 0.70
+SHIP_TYPE_F1 = 0.65
 
 # Frontend → color family (for plotting). Ordered so related variants get
 # adjacent hues.

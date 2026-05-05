@@ -1,14 +1,3 @@
-name,frontend_type,focal,iobt,min_type_f1,worst_dataset
-framework_smoke,multiscale,0.0203,0.6771,0.0203,focal
-2026-04-24_18-57,morlet_fused,0.2402,0.7042,0.2402,focal
-2026-04-25_10-06,morlet_per_sensor,0.2535,0.3473,0.2535,focal
-phase_v1_diag,morlet_per_sensor,0.3568,0.5124,0.3568,focal
-2026-04-24_16-17,multiscale,0.1708,0.5159,0.1708,focal
-2026-04-25_09-41,multiscale,0.2409,0.6575,0.2409,focal
-v3_lowfreq,multiscale,0.4294,0.5911,0.4294,focal
-2026-04-24_16-31,multiscale,0.2181,0.5845,0.2181,focal
-2026-04-28_23-12-59,multiscale,0.3359,0.6361,0.3359,focal
-2026-04-29_13-26-17,multiscale,0.4018,0.5334,0.4018,focal
-filesplit_v2,multiscale,0.2309,0.6760,0.2309,focal
-v2,multiscale,0.4071,0.5293,0.4071,focal
-v3_lowfreq,multiscale,0.4364,0.5920,0.4364,focal
+name,frontend_type,focal,iobt,m3nvc,min_type_f1,worst_dataset
+2026-05-03_05-03-14,multiscale,0.4354,0.5864,0.8195,0.4354,focal
+2026-05-03_05-02-44,multiscale,0.4554,0.5759,0.7870,0.4554,focal

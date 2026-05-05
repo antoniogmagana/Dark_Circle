@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-plot_run.py — diagnostic plots for a single CRL run.
+plot_run.py — diagnostic plots for a single CRL run (poster-styled).
 
 Generates up to four PNG+PDF figures per run:
 
@@ -28,6 +28,15 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from crl_vehicle import analysis as A
+from crl_vehicle import plotting as P
+
+
+# Train/val color pair used across the per-run panels. Distinct from the
+# top-5 palette in plot_aggregate.py — these plots are single-run, so we
+# only need two contrasting colors.
+TRAIN_COLOR = "#1f77b4"
+VAL_COLOR = "#ff7f0e"
+
 
 # --------------------------------------------------------------------------
 # Individual figures
@@ -44,21 +53,25 @@ def plot_training_curves(ts: dict, out: Path, run_name: str) -> None:
         ("train_aux_type_f1", "val_aux_type_f1", "Aux type F1"),
         (None, "val_ref_elbo", "Val ref_ELBO"),
     ]
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharex=True)
+    fig, axes = plt.subplots(2, 3, figsize=(20, 10), sharex=True)
     for ax, (train_k, val_k, title) in zip(axes.flat, panels, strict=False):
         epochs = ts.get("epoch", [])
         if train_k and ts.get(train_k):
-            ax.plot(epochs[: len(ts[train_k])], ts[train_k], label="train", color="#1f77b4")
+            ax.plot(epochs[: len(ts[train_k])], ts[train_k], label="train", color=TRAIN_COLOR)
         if val_k and ts.get(val_k):
-            ax.plot(epochs[: len(ts[val_k])], ts[val_k], label="val", color="#ff7f0e")
+            ax.plot(epochs[: len(ts[val_k])], ts[val_k], label="val", color=VAL_COLOR)
         ax.set_title(title)
         ax.set_xlabel("epoch")
         ax.grid(alpha=0.3)
-        if train_k or val_k:
-            ax.legend(fontsize=8, loc="best")
+    # One shared legend outside the panel grid, since every panel has the
+    # same train/val pair.
+    handles = [
+        plt.Line2D([0], [0], color=TRAIN_COLOR, label="train"),
+        plt.Line2D([0], [0], color=VAL_COLOR, label="val"),
+    ]
+    fig.legend(handles=handles, loc="center right", bbox_to_anchor=(1.0, 0.5))
     fig.suptitle(f"{run_name} — training curves")
-    fig.tight_layout()
-    _save(fig, out)
+    P.poster_save(fig, out)
 
 
 def plot_beta_schedule(ts: dict, out: Path, run_name: str) -> None:
@@ -66,14 +79,13 @@ def plot_beta_schedule(ts: dict, out: Path, run_name: str) -> None:
     betas = ts.get("beta", [])
     if not epochs or not betas:
         return
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(epochs[: len(betas)], betas, color="#2ca02c", marker="o", markersize=3)
+    fig, ax = plt.subplots(figsize=(12, 5))
+    ax.plot(epochs[: len(betas)], betas, color="#2ca02c", marker="o", markersize=6)
     ax.set_xlabel("epoch")
     ax.set_ylabel("beta")
     ax.set_title(f"{run_name} — beta schedule")
     ax.grid(alpha=0.3)
-    fig.tight_layout()
-    _save(fig, out)
+    P.poster_save(fig, out)
 
 
 def plot_morlet_freq_drift(run_dir: Path, out: Path, run_name: str) -> None:
@@ -83,20 +95,21 @@ def plot_morlet_freq_drift(run_dir: Path, out: Path, run_name: str) -> None:
     if history is None:
         return
     n_sensors = len(history)
-    fig, axes = plt.subplots(1, n_sensors, figsize=(6 * n_sensors, 5), squeeze=False)
+    fig, axes = plt.subplots(1, n_sensors, figsize=(7 * n_sensors, 6), squeeze=False)
     for ax, (sensor, filters) in zip(axes[0], history.items(), strict=False):
         cmap = plt.get_cmap("viridis")
         for idx, freqs in sorted(filters.items()):
             color = cmap(idx / max(len(filters) - 1, 1))
-            ax.plot(freqs, color=color, alpha=0.7, linewidth=0.8)
+            # Per-filter lines stay thinner than poster default — there can
+            # be 32+ of them and 2pt would render as a solid block.
+            ax.plot(freqs, color=color, alpha=0.7, linewidth=1.0)
         ax.set_yscale("log")
         ax.set_title(f"{sensor} — learned center frequencies")
         ax.set_xlabel("epoch")
         ax.set_ylabel("freq (Hz)")
         ax.grid(alpha=0.3, which="both")
     fig.suptitle(f"{run_name} — learnable Morlet frequency drift")
-    fig.tight_layout()
-    _save(fig, out)
+    P.poster_save(fig, out)
 
 
 def plot_downstream_curves(run_dir: Path, out: Path, run_name: str) -> None:
@@ -108,36 +121,23 @@ def plot_downstream_curves(run_dir: Path, out: Path, run_name: str) -> None:
         ("train_type_f1", "val_type_f1", "Type F1"),
         ("train_loss", "val_loss", "Loss"),
     ]
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharex=True)
+    fig, axes = plt.subplots(1, 3, figsize=(20, 5), sharex=True)
     for ax, (train_k, val_k, title) in zip(axes, panels, strict=False):
         epochs = ts.get("epoch", [])
         if ts.get(train_k):
-            ax.plot(epochs[: len(ts[train_k])], ts[train_k], label="train", color="#1f77b4")
+            ax.plot(epochs[: len(ts[train_k])], ts[train_k], label="train", color=TRAIN_COLOR)
         if ts.get(val_k):
-            ax.plot(epochs[: len(ts[val_k])], ts[val_k], label="val", color="#ff7f0e")
+            ax.plot(epochs[: len(ts[val_k])], ts[val_k], label="val", color=VAL_COLOR)
         ax.set_title(title)
         ax.set_xlabel("epoch")
         ax.grid(alpha=0.3)
-        ax.legend(fontsize=8, loc="best")
+    handles = [
+        plt.Line2D([0], [0], color=TRAIN_COLOR, label="train"),
+        plt.Line2D([0], [0], color=VAL_COLOR, label="val"),
+    ]
+    fig.legend(handles=handles, loc="center right", bbox_to_anchor=(1.0, 0.5))
     fig.suptitle(f"{run_name} — downstream probe")
-    fig.tight_layout()
-    _save(fig, out)
-
-
-# --------------------------------------------------------------------------
-# Shared save utility
-# --------------------------------------------------------------------------
-
-
-def _save(fig, out_stem: Path) -> None:
-    """Save to PNG + PDF, reporting both."""
-    out_stem.parent.mkdir(parents=True, exist_ok=True)
-    png = out_stem.with_suffix(".png")
-    pdf = out_stem.with_suffix(".pdf")
-    fig.savefig(png, dpi=120)
-    fig.savefig(pdf)
-    plt.close(fig)
-    print(f"  wrote {png}")
+    P.poster_save(fig, out)
 
 
 # --------------------------------------------------------------------------
@@ -159,6 +159,8 @@ def parse_args():
 
 def main() -> int:
     args = parse_args()
+    P.apply_poster_style()
+
     run_dir = args.run_dir
     if not (run_dir / "crl" / "meta.json").exists():
         print(f"{run_dir}/crl/meta.json not found", file=sys.stderr)

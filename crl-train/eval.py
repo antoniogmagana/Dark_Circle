@@ -203,48 +203,13 @@ def _plot_confusion_matrix(
     title: str,
     out_path: Path,
 ) -> None:
+    """Thin wrapper around the shared poster-styled confusion plotter."""
     import matplotlib
 
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import numpy as np
+    from crl_vehicle import plotting as P
 
-    cm_arr = np.array(cm, dtype=float)
-    row_sums = cm_arr.sum(axis=1, keepdims=True)
-    cm_norm = cm_arr / np.where(row_sums == 0, 1, row_sums)
-
-    fig, ax = plt.subplots(
-        figsize=(max(4, len(class_names) * 1.2 + 1), max(4, len(class_names) * 1.2))
-    )
-    im = ax.imshow(cm_norm, interpolation="nearest", cmap="Blues", vmin=0, vmax=1)
-    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
-    ax.set_xticks(range(len(class_names)))
-    ax.set_yticks(range(len(class_names)))
-    ax.set_xticklabels(class_names, rotation=45, ha="right")
-    ax.set_yticklabels(class_names)
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("True")
-    ax.set_title(title)
-
-    for i in range(len(class_names)):
-        for j in range(len(class_names)):
-            count = int(cm_arr[i, j])
-            pct = cm_norm[i, j]
-            color = "white" if pct > 0.6 else "black"
-            ax.text(
-                j,
-                i,
-                f"{count}\n({pct:.0%})",
-                ha="center",
-                va="center",
-                fontsize=8,
-                color=color,
-            )
-
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    P.plot_confusion_matrix(cm, class_names, title, out_path)
 
 
 def _plot_binary_confusion(
@@ -345,6 +310,10 @@ def run_inference(
 
 def main() -> None:
     args = parse_args()
+    # Poster styling for any confusion plots written below.
+    from crl_vehicle import plotting as P
+
+    P.apply_poster_style()
     save_dir = Path(args.save_dir)
     out_dir = Path(args.out_dir) if args.out_dir else save_dir
     out_dir.mkdir(parents=True, exist_ok=True)

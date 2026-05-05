@@ -29,6 +29,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from crl_vehicle import analysis as A
+from crl_vehicle import plotting as P
 
 
 def _fmt(v):
@@ -117,7 +118,9 @@ def render_heatmap(
     ds_names: list[str],
     mat: np.ndarray,
     out_path: Path,
+    top_n: int = 5,
 ) -> None:
+    """Heatmap of the top-N runs by min-across-datasets type_f1."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -127,26 +130,26 @@ def render_heatmap(
         print("  (heatmap skipped — no runs or no datasets with eval data)")
         return
 
-    # Sort runs by min_type_f1 desc so best row is at top.
+    # Top-N rows by ship metric (min across datasets), best at top.
     order = sorted(
         range(len(runs)),
         key=lambda i: -(
             runs[i].min_dataset_type_f1 if runs[i].min_dataset_type_f1 is not None else -1
         ),
-    )
+    )[:top_n]
     sorted_mat = mat[order]
     sorted_names = [runs[i].name for i in order]
 
     fig, ax = plt.subplots(
-        figsize=(max(4, 1 + 0.8 * len(ds_names)), max(3, 0.5 * len(sorted_names))),
+        figsize=(max(8, 1.5 + 1.5 * len(ds_names)), max(5, 1.0 * len(sorted_names) + 2)),
     )
     im = ax.imshow(sorted_mat, aspect="auto", vmin=0.0, vmax=1.0, cmap="viridis")
     ax.set_xticks(range(len(ds_names)))
     ax.set_xticklabels(ds_names)
     ax.set_yticks(range(len(sorted_names)))
-    ax.set_yticklabels(sorted_names, fontsize=8)
+    ax.set_yticklabels(sorted_names)
     ax.set_xlabel("Dataset")
-    ax.set_title("Cross-location type_f1\n(sorted by min-across-datasets, best at top)")
+    ax.set_title(f"Cross-location type_f1 — top {len(sorted_names)} by min-across-datasets")
 
     # Annotate cells with their values.
     for i in range(sorted_mat.shape[0]):
@@ -160,14 +163,11 @@ def render_heatmap(
                     ha="center",
                     va="center",
                     color="white" if v < 0.5 else "black",
-                    fontsize=8,
+                    fontweight="bold",
                 )
 
     fig.colorbar(im, ax=ax, label="type_f1")
-    fig.tight_layout()
-    fig.savefig(out_path.with_suffix(".png"), dpi=120)
-    fig.savefig(out_path.with_suffix(".pdf"))
-    plt.close(fig)
+    P.poster_save(fig, out_path)
 
 
 # --------------------------------------------------------------------------
@@ -181,11 +181,13 @@ def parse_args():
     p.add_argument("--out", default="saved_crl/analysis", type=Path)
     p.add_argument("--filter", action="append", default=[], metavar="key=val")
     p.add_argument("--include-diverged", action="store_true")
+    p.add_argument("--top-n", type=int, default=5, help="Heatmap row limit (top-N by min-F1)")
     return p.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    P.apply_poster_style()
     runs = [A.load_run_metrics(p) for p in A.discover_runs(args.root)]
     if not runs:
         print(f"No runs found under {args.root}", file=sys.stderr)
@@ -207,7 +209,9 @@ def main() -> int:
 
     write_csv(args.out / "cross_location.csv", runs_with_eval, ds_names, mat)
     (args.out / "cross_location.md").write_text(render_markdown(runs_with_eval, ds_names, mat))
-    render_heatmap(runs_with_eval, ds_names, mat, args.out / "cross_location_heatmap")
+    render_heatmap(
+        runs_with_eval, ds_names, mat, args.out / "cross_location_heatmap", top_n=args.top_n
+    )
 
     print(f"Wrote {args.out / 'cross_location.csv'}")
     print(f"Wrote {args.out / 'cross_location.md'}")
