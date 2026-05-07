@@ -655,3 +655,24 @@ def test_egress_latency():
     # Egress should process in < 1ms to avoid backlog
     expected_max_latency = 0.001  # 1ms
     assert latency < expected_max_latency * 10  # Allow 10x margin for test overhead
+
+
+# ============================================================================
+# Readiness sentinel
+# ============================================================================
+
+
+@pytest.mark.unit
+def test_readiness_sentinel_message_format():
+    """Lock the format of the READY: log line and sentinel path. The egress
+    log line names the output topic so the customer immediately sees where
+    inference results will surface — that string in the log is the
+    customer-facing contract."""
+    from pathlib import Path as _P
+
+    src = (_P(__file__).parent.parent / "src" / "egress" / "main.py").read_text()
+    # Format is defined with f-string interpolation of output_topic, so we
+    # check the stable prefix and suffix that bracket the topic name.
+    assert "[egress] READY: NATS subscribed, ROS2 publishing." in src
+    assert "Inference results will appear on" in src
+    assert "/tmp/ready" in src or 'READY_SENTINEL' in src

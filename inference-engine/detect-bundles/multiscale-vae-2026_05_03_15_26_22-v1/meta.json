@@ -11,7 +11,9 @@
   "audio_window_size": 16000,
   "seismic_sample_rate": 100,
   "seismic_window_size": 100,
-  "pres_f1": 0.8714,
-  "min_pres_f1": 0.8021,
+  "pres_f1": 0.8786,
+  "min_pres_f1": 0.8224,
+  "pres_mcc": 0.4388,
+  "pres_balanced_accuracy": 0.6837,
   "source_run": "2026-05-03_15-26-22"
 }

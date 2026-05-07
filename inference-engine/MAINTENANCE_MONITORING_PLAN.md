@@ -42,27 +42,37 @@ This plan applies to the inference engine once deployed in operational or test e
 
 #### 2.1.1 Input Data Quality Checks
 
-The Ingestor nodes perform real-time validation on incoming ROS2 `RawSensorReading` messages:
+The Ingestor nodes perform real-time validation on incoming ROS2
+`std_msgs/String` messages carrying a bundled-channel JSON payload (one
+message per array per timestep, all channels in a single document).
 
-**Required Fields Validation:**
-- `sensor_id`: Non-empty string identifying the sensor
-- `channel_code`: Must be one of `['aud', 'ehz', 'ene', 'enn', 'enz']`
-- `sampling_rate`: Positive float (expected: 100 Hz for seismic/accel, 8000 Hz for acoustic)
-- `adc_bit_depth`: Integer (16 for acoustic, 24 for seismic/accel)
-- `data`: Non-empty float array
+**Required Fields Validation (per JSON message):**
+- `timestamp_unix`: Numeric, present (drop message if missing or non-numeric)
+- `channels`: List, present (drop message if missing or wrong type)
+- Each `channels[i].channel`: Must be a known tag in the cluster's
+  `channels.yaml` ConfigMap (skip the entry, keep processing the rest)
+- Each `channels[i].readings`: List, present (skip the entry on miss)
+- `state`: Optional, log-only (counted as background / trigger / unknown)
 
-**Data Integrity Checks:**
-```python
-# Performed per message in Ingestor
-assert len(msg.data) > 0, "Empty data array"
-assert msg.sampling_rate > 0, "Invalid sampling rate"
-assert msg.adc_bit_depth in [16, 24], "Unexpected ADC bit depth"
-```
+**Per-message rate validation (soft):**
+- If `channels[i].sampling_rate` disagrees with the configured
+  `expected_rate` for that channel's role, log a warning and continue.
+  This is non-fatal because partial / variable-cadence chunks are
+  expected during normal operation. Watch for sustained warnings —
+  they indicate firmware drift that the window-close guard may catch.
+
+**Window-close rate validation (hard):**
+- At the end of each 1-second window, the buffer compares realized
+  samples vs. `window * expected_rate` for every active channel.
+  Drift > ±1% drops the window with a clear log line:
+  `[buffer:<role>] window dropped: rate mismatch (got N, expected M)`.
+  Grep for this pattern as the primary signal that a sensor's effective
+  rate has degraded out of tolerance.
 
 **Buffer State Monitoring:**
-- Each Ingestor maintains a 1-second sliding window buffer
+- Each Ingestor maintains a 1-second window buffer
 - Monitor buffer fill rate per channel (acoustic, seismic, accel_x/y/z)
-- Alert on buffer underruns (insufficient data to form 1-second windows)
+- Alert on dropped-window log lines (rate mismatch above)
 - Alert on timestamp synchronization failures across channels
 
 **Key Metrics:**

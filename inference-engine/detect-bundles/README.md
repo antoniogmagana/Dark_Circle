@@ -66,12 +66,22 @@ re-evaluates the catalog against the selection rules below.
 
 | Metric | Role | Value |
 |--------|------|-------|
-| `pres_f1` | Primary | Highest on held-out eval (val) split |
+| `pres_mcc` | Primary | Highest test-time presence MCC on the `full` split |
 | `min_pres_f1` | Tie-breaker | Highest worst-location presence F1 |
-| `pres_f1` | Promotion floor | `≥ 0.80` to be eligible for `detect-default` |
+| `pres_mcc` | Promotion floor | `≥ 0.40` to be eligible for `detect-default` |
 
-Tie band: `|pres_f1_a − pres_f1_b| < 0.01`. Inside the band the
+Tie band: `|pres_mcc_a − pres_mcc_b| < 0.01`. Inside the band the
 tie-breaker fires; outside it the primary alone decides.
+
+**Why MCC, not raw F1**: the test set is ~75% positive (vehicles present).
+Raw F1 over a positive-skewed split rewards a model that just predicts
+"yes" — recall stays high, F1 looks great, specificity collapses. MCC is
+invariant to the class prior, so it ranks calibration honestly. The
+2026-05-03 cycle exposed this concretely: `2026-05-03_15-26-22` had the
+highest F1 (0.879) but specificity = 0.43 (the model flagged 57% of empty
+windows as vehicles); `2026-05-03_05-02-44` had lower F1 (0.858) but
+specificity = 0.65, balanced_accuracy = 0.75, and **higher MCC (0.475 vs
+0.439)** — i.e. genuinely better detection.
 
 If no bundle clears the floor, `--promote-default` exits non-zero and
 leaves the symlink untouched. Bundles below the floor still exist
@@ -100,9 +110,9 @@ the symlink change. Update the catalog table below by hand.
 
 ## Current bundles
 
-| Bundle | Frontend | pres_f1 | min_pres_f1 | source_run | Notes |
-|--------|----------|--------:|------------:|------------|-------|
-| `multiscale-vae-2026_05_03_15_26_22-v1` | multiscale | **0.871** | **0.802** | `2026-05-03_15-26-22` | Current `detect-default`. d_z=32. |
-| `multiscale-vae-2026_05_03_05_02_44-v1` | multiscale | 0.863 | 0.592 | `2026-05-03_05-02-44` | d_z=24. Below leader on min_pres_f1. |
+| Bundle | Frontend | pres_MCC | min_pres_f1 | bal_acc | pres_F1 | source_run | Notes |
+|--------|----------|---------:|------------:|--------:|--------:|------------|-------|
+| `multiscale-vae-2026_05_03_05_02_44-v1` | multiscale | **0.475** | 0.617 | **0.746** | 0.858 | `2026-05-03_05-02-44` | d_z=24. Current `detect-default`. Wins on pres_MCC under the MCC-primary selection rule. |
+| `multiscale-vae-2026_05_03_15_26_22-v1` | multiscale | 0.439 | **0.822** | 0.684 | **0.879** | `2026-05-03_15-26-22` | d_z=32. Previous `detect-default` (promoted under the legacy `pres_f1`-primary rule). Highest raw F1 and best location-robustness, but recall-biased: specificity collapses to 0.43 on the imbalanced full split. |
 
-`detect-default` → `multiscale-vae-2026_05_03_15_26_22-v1`
+`detect-default` → `multiscale-vae-2026_05_03_05_02_44-v1`

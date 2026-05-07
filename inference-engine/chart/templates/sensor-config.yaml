@@ -6,7 +6,18 @@ data:
   audio_bit_depth: "{{ .Values.sensorConfig.audioBitDepth }}"
   seismic_bit_depth: "{{ .Values.sensorConfig.seismicBitDepth }}"
   accel_bit_depth: "{{ .Values.sensorConfig.accelBitDepth }}"
-  audio_sample_rate: "{{ .Values.sensorConfig.audioSampleRate }}"
-  seismic_sample_rate: "{{ .Values.sensorConfig.seismicSampleRate }}"
-  accel_sample_rate: "{{ .Values.sensorConfig.accelSampleRate }}"
   target_rate: "{{ .Values.sensorConfig.targetRate }}"
+---
+# Cluster-level channel-tag → SensorBuffer-role map. Every Ingestor mounts
+# this at /etc/inference-engine/channels.yaml. Update channelMap in
+# values.yaml and ``helm upgrade`` to change the mapping.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingestor-channel-map
+data:
+  channels.yaml: |
+    channels:
+{{- range $tag, $spec := .Values.channelMap }}
+      {{ $tag }}: {role: {{ $spec.role }}, expected_rate: {{ $spec.expected_rate }}}
+{{- end }}

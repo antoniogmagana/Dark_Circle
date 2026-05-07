@@ -466,3 +466,25 @@ def test_inference_performance():
 
     # Should be fast (< 100ms for mock)
     assert elapsed < 0.1
+
+
+# ============================================================================
+# Readiness sentinel
+# ============================================================================
+
+
+@pytest.mark.unit
+def test_readiness_sentinel_message_format():
+    """The READY: log line is the customer-visible signal that the pipeline
+    is warm. The log line lives in main.py at the end of main_async, where
+    no test can call it without a live NATS, so we lock the wording here so
+    a careless edit can't silently break the customer's expected output."""
+    from pathlib import Path as _P
+
+    src = (_P(__file__).parent.parent / "src" / "infer_detect" / "main.py").read_text()
+    # The print may split the literal across adjacent strings; check the
+    # stable substrings that bracket any reformatting.
+    assert "[infer-detect] READY: model loaded, NATS subscribed." in src
+    assert "Pipeline accepting messages." in src
+    # Sentinel path matches what the readiness probe checks.
+    assert "/tmp/ready" in src or "READY_SENTINEL" in src

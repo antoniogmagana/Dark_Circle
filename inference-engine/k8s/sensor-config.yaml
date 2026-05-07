@@ -7,7 +7,6 @@ data:
   audio_bit_depth: "16"
   seismic_bit_depth: "24"
   accel_bit_depth: "24"
-  audio_sample_rate: "16000"
-  seismic_sample_rate: "100"
-  accel_sample_rate: "100"
+  # Per-channel native sample rates moved to ingestor-channel-map ConfigMap.
+  # target_rate still governs resampling when NATIVE_RATES != "1".
   target_rate: "16000"

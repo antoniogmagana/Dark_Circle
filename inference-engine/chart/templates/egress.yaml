@@ -5,9 +5,7 @@ metadata:
   labels:
     app: egress
 spec:
-  {{- if not .Values.keda.enabled }}
   replicas: {{ .Values.inference.egress.replicas }}
-  {{- end }}
   selector:
     matchLabels:
       app: egress
@@ -27,6 +25,12 @@ spec:
                 name: inference-engine-config
           env:
             {{- include "inference-engine.fastddsEnv" . | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/ready"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 60
           volumeMounts:
             {{- include "inference-engine.fastddsMount" . | nindent 12 }}
           resources:

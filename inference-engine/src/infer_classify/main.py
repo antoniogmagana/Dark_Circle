@@ -22,6 +22,7 @@ import torch.nn.functional as F
 from inference_protos import inference_pb2
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/model"))
+READY_SENTINEL = Path(os.environ.get("READY_SENTINEL", "/tmp/ready"))
 
 _TORCH_THREADS = int(os.environ.get("TORCH_NUM_THREADS", "2"))
 torch.set_num_threads(_TORCH_THREADS)
@@ -162,7 +163,12 @@ async def main_async():
         cb=node.on_detection_result,
         manual_ack=False,
     )
-    print("[infer_classify] bound to DETECTION_RESULT/infer-classify (JetStream)", flush=True)
+    READY_SENTINEL.touch()
+    print(
+        "[infer-classify] READY: model loaded, NATS subscribed. "
+        "Pipeline accepting messages.",
+        flush=True,
+    )
 
     try:
         while True:

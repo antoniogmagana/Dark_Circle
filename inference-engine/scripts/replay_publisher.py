@@ -2,10 +2,11 @@
 Replay a paired (audio, seismic) recording as a live ROS2 sensor source
 for end-to-end inference-engine testing.
 
-The pipeline cannot tell this apart from a real Raspberry Shake — same
-RawSensorReading messages, same topics, same rates. Optionally subscribes
-back to the configured inference output topic to score predictions
-against ground truth and measure end-to-end latency.
+Publishes one bundled-channel std_msgs/String JSON message per tick on
+the configured per-array topic — the same wire format the customer's
+real publisher uses. Optionally subscribes back to the configured
+inference output topic to score predictions against ground truth and
+measure end-to-end latency.
 
 Supported file formats: parquet (.parquet), CSV (.csv), WAV (.wav).
 Format is inferred from the file extension.
@@ -42,13 +43,15 @@ Usage examples:
         --audio-rate 16000 --seismic-rate 100 --no-subscribe
 
 ROS2 must be sourced before invocation, and the ``ros2_interfaces``
-package containing ``RawSensorReading`` and ``InferenceResult`` must be
-on AMENT_PREFIX_PATH. See chart/README.md "Testing on pre-recorded
-data" or run ``scripts/install_replay.sh`` for a guided setup.
+package containing ``InferenceResult`` must be on AMENT_PREFIX_PATH.
+See chart/README.md "Testing on pre-recorded data" or run
+``scripts/install_replay.sh`` for a guided setup.
 """
 
 import argparse
 import csv as _csv
+import datetime as _dt
+import json
 import statistics
 import struct
 import sys
@@ -62,7 +65,8 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallb
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from ros2_interfaces.msg import InferenceResult, RawSensorReading
+from ros2_interfaces.msg import InferenceResult
+from std_msgs.msg import String
 
 WINDOW_SEC = 1.0          # ingestor's window size
 TICK_HZ = 10              # tick rate; matches fake-publisher to keep the
@@ -482,8 +486,9 @@ class ReplayNode(Node):
         self.seis_reader = seis_reader
         self.has_gt = audio_reader.has_present or seis_reader.has_present
 
-        self.audio_pub = self.create_publisher(RawSensorReading, args.audio_topic, 10)
-        self.seismic_pub = self.create_publisher(RawSensorReading, args.seismic_topic, 10)
+        # Single bundled-channel publisher: one JSON message per tick
+        # carries both audio and seismic readings on args.topic.
+        self.pub = self.create_publisher(String, args.topic, 10)
 
         self.audio_per_tick = max(1, int(args.audio_rate / TICK_HZ))
         self.seismic_per_tick = max(1, int(args.seismic_rate / TICK_HZ))
@@ -606,17 +611,32 @@ class ReplayNode(Node):
                     "gt_present": None,      # filled at window-last-tick
                     "matched": False,
                 }
-        msg = RawSensorReading()
-        msg.sensor_id = self.args.sensor_id
-        msg.start_time = now
-        msg.amplitude_readings = [int(x) for x in a_chunk]
-        self.audio_pub.publish(msg)
-
-        smsg = RawSensorReading()
-        smsg.sensor_id = self.args.sensor_id.replace("aud", "ehz")
-        smsg.start_time = now
-        smsg.amplitude_readings = [int(x) for x in s_chunk]
-        self.seismic_pub.publish(smsg)
+        # One bundled JSON message per tick: matches the customer's wire
+        # format and the cluster's channels.yaml tags (default MIC / EHZ).
+        utc = _dt.datetime.fromtimestamp(now, tz=_dt.timezone.utc).isoformat()
+        doc = {
+            "sensor_id": self.args.sensor_id,
+            "state": "background",
+            "timestamp_unix": now,
+            "timestamp_utc": utc,
+            "channels": [
+                {
+                    "channel": self.args.audio_tag,
+                    "sampling_rate": int(self.args.audio_rate),
+                    "dt": 1.0 / self.args.audio_rate,
+                    "readings": [float(x) for x in a_chunk],
+                },
+                {
+                    "channel": self.args.seismic_tag,
+                    "sampling_rate": int(self.args.seismic_rate),
+                    "dt": 1.0 / self.args.seismic_rate,
+                    "readings": [float(x) for x in s_chunk],
+                },
+            ],
+        }
+        msg = String()
+        msg.data = json.dumps(doc)
+        self.pub.publish(msg)
 
         if is_window_last_tick:
             # The window's last tick — Ingestor has all the samples it
@@ -829,11 +849,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--audio-rate", type=int, default=16000,
                    help="Audio sample rate in Hz. Used as authoritative when set; otherwise inferred from time_stamp.")
     p.add_argument("--seismic-rate", type=int, default=100, help="Seismic sample rate in Hz.")
-    p.add_argument("--audio-topic", default="/shake_001/aud")
-    p.add_argument("--seismic-topic", default="/shake_001/ehz")
-    p.add_argument("--sensor-id", default="shake_001.aud",
-                   help="Per-msg sensor_id; the Ingestor uses Discovery's "
-                        "role-map binding instead, so this is informational.")
+    p.add_argument("--topic", default="/shake_001/data",
+                   help="Bundled-channel topic the customer's array publishes on. "
+                        "Must match expected-sensors.yaml.")
+    p.add_argument("--audio-tag", default="MIC",
+                   help="Channel tag for audio in the JSON payload. Must match a key "
+                        "in the cluster's channels.yaml.")
+    p.add_argument("--seismic-tag", default="EHZ",
+                   help="Channel tag for seismic in the JSON payload. Must match a key "
+                        "in the cluster's channels.yaml.")
+    p.add_argument("--sensor-id", default="shake_001",
+                   help="Per-msg sensor_id; logged for diagnostics. The Ingestor "
+                        "uses SENSOR_ARRAY (set by Discovery) for actual routing.")
     p.add_argument("--inference-topic", default="/inference_result",
                    help="ROS2 topic to subscribe to for InferenceResult scoring.")
     p.add_argument("--no-subscribe", action="store_true",

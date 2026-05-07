@@ -5,11 +5,10 @@
 # no underscores), since Discovery uses it as the Kubernetes Deployment
 # name for the array's Ingestor pod (``ingestor-<array_id>``).
 #
-# `audio` and `seismic` topic strings are firmware-defined ROS2 topics
-# and may contain underscores or other characters that ROS2 allows --
-# they are values, not keys.
-#
-# `accel` is optional; if present it must define all three of x, y, z.
+# Each array publishes a single bundled-channel std_msgs/String topic;
+# Discovery confirms it's visible on the ROS2 graph, then spawns the
+# Ingestor. The per-channel tag → buffer-role map lives in the
+# ingestor-channel-map ConfigMap and is shared across all arrays.
 #
 # Edits propagate via kubelet ConfigMap sync (~60s) and are picked up
 # on the next 5-second poll without a Discovery restart.
@@ -20,18 +19,8 @@ metadata:
   namespace: default
 data:
   expected-sensors.yaml: |
-    # Default declares only audio + seismic, the minimum the CRL model
-    # uses. fake-publisher, replay_publisher, and most real Raspberry
-    # Shake captures all publish at least these two. Add accel below
-    # (x/y/z all required) or extra arrays as needed for your site.
     arrays:
       shake-001:
-        audio: /shake_001/aud
-        seismic: /shake_001/ehz
-        # accel:
-        #   x: /shake_001/ene
-        #   y: /shake_001/enn
-        #   z: /shake_001/enz
+        topic: /shake_001/data
       # shake-002:
-      #   audio: /shake_002/aud
-      #   seismic: /shake_002/ehz
+      #   topic: /shake_002/data

@@ -510,3 +510,19 @@ def test_selective_processing():
 
     # Should only process 4 out of 10
     assert processed_count == 4
+
+
+# ============================================================================
+# Readiness sentinel
+# ============================================================================
+
+
+@pytest.mark.unit
+def test_readiness_sentinel_message_format():
+    """Lock the format of the READY: log line and sentinel path."""
+    from pathlib import Path as _P
+
+    src = (_P(__file__).parent.parent / "src" / "infer_classify" / "main.py").read_text()
+    assert "[infer-classify] READY: model loaded, NATS subscribed." in src
+    assert "Pipeline accepting messages." in src
+    assert "/tmp/ready" in src or "READY_SENTINEL" in src

@@ -93,23 +93,28 @@ ros2:
 # -----------------------------------------------------------------------------
 expectedSensors:
   shake-001:
-    audio: /shake_001/aud
-    seismic: /shake_001/ehz
-    accel:
-      # Keys MUST be quoted: YAML 1.1 (which Helm uses) interprets bare
-      # ``y``/``n`` as booleans, which would silently turn into the wrong
-      # map key and break Discovery's topic resolution.
-      "x": /shake_001/ene
-      "y": /shake_001/enn
-      "z": /shake_001/enz
+    topic: /shake_001/data
+
+# -----------------------------------------------------------------------------
+# Channel-tag map
+#
+# Customer's free-form channel-tag strings → SensorBuffer roles.
+# Mounted at /etc/inference-engine/channels.yaml in every Ingestor pod.
+# Required roles: acoustic, seismic. Accel roles are all-or-nothing.
+# -----------------------------------------------------------------------------
+channelMap:
+  MIC: {role: acoustic, expected_rate: 16000}
+  EHZ: {role: seismic,  expected_rate: 100}
+  ENE: {role: accel_x,  expected_rate: 100}
+  ENN: {role: accel_y,  expected_rate: 100}
+  ENZ: {role: accel_z,  expected_rate: 100}
 
 # -----------------------------------------------------------------------------
 # Sensor signal parameters
 #
-# Physical characteristics of the sensor hardware. The Ingestor uses these
-# to normalize ADC samples to [-1, 1] and to size its 1-second buffers.
-# Defaults match the Raspberry Shake RS4D + 16-bit USB microphone setup
-# the pipeline was developed against.
+# Physical characteristics of the sensor hardware. Native sample rates
+# moved to channelMap above; only ADC depth and the legacy resample
+# target remain here.
 # -----------------------------------------------------------------------------
 sensorConfig:
   # Acoustic ADC bit depth (signed). 16 = standard USB / I2S microphones.
@@ -118,12 +123,6 @@ sensorConfig:
   seismicBitDepth: 24
   # Accelerometer ADC bit depth. 24 = Raspberry Shake RS4D.
   accelBitDepth: 24
-  # Acoustic sample rate in Hz. 16000 matches the CRL training data.
-  audioSampleRate: 16000
-  # Seismic sample rate in Hz. 100 matches Raspberry Shake EHZ channel.
-  seismicSampleRate: 100
-  # Accelerometer sample rate in Hz (per axis). 100 matches RS4D.
-  accelSampleRate: 100
   # Target rate for upsampling in legacy CNN mode. Ignored when
   # nativeRates: true (default), which ships each channel at its
   # native rate to match the CRL pipeline's expectations.
@@ -241,16 +240,24 @@ keda:
   # up when pending exceeds this number per existing replica.
   lagThreshold: 50
   pollingInterval: 10
-  cooldownPeriod: 60
+  # Long cooldown so brief idle gaps don't churn replicas; combined with
+  # min=1 and the readiness-probe gating, a Ready replica stays warm.
+  cooldownPeriod: 300
 
 # -----------------------------------------------------------------------------
-# Fake publisher (smoke test only)
+# Fake publisher (smoke test / customer pipeline validation)
 #
-# Synthesizes RawSensorReading messages on the configured topics so the
-# pipeline can be exercised end-to-end without real hardware. Disable in
-# any environment with real sensors.
+# Synthesizes std_msgs/String JSON messages on the configured per-array
+# topics — same wire format the customer's real publisher uses. Disable
+# in any environment with real sensors.
 # -----------------------------------------------------------------------------
 fakePublisher:
   enabled: false
-  topics: "/shake_001/aud,/shake_001/ehz,/shake_001/ene,/shake_001/enn,/shake_001/enz"
+  topics: "/shake_001/data"
   rateHz: 10
+  # Channel tags emitted in the JSON payload. Must match keys in
+  # channelMap above so the ingestor recognizes them.
+  channelTags: "MIC,EHZ,ENE,ENN,ENZ"
+  # Emit state="trigger" every Nth tick; rest are "background". 0 disables
+  # trigger emission entirely (always "background").
+  triggerEvery: 10

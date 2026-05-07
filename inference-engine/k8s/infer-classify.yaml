@@ -17,6 +17,7 @@ metadata:
   labels:
     app: infer-classify
 spec:
+  replicas: 1
   selector:
     matchLabels:
       app: infer-classify
@@ -35,3 +36,9 @@ spec:
           env:
             - name: MODEL_DIR
               value: "/app/model"
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/ready"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 60

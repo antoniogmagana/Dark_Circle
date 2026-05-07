@@ -9,17 +9,25 @@
 # participant lives on the same IP as the in-cluster pods — the
 # pipeline cannot tell this apart from a real Raspberry Shake.
 #
+# Bring-up is auto-skipped when the inference pipeline is already
+# healthy on the kind cluster — re-running replay back-to-back doesn't
+# rebuild images or restart deployments. Force a full rebuild with
+# FORCE_REBUILD=1.
+#
 # Usage:
 #   scripts/replay_in_kind.sh <audio.parquet|csv|wav> <seismic.parquet|csv|wav> [replay flags...]
 #
 # Env:
-#   POD_NAME      override the one-off pod name (default: replay-publisher)
-#   IMAGE         override the base image (default: inference-engine/ingestor:dev)
-#   SKIP_CLUSTER_UP=1   don't touch the cluster (assume it's already running with no fake-publisher)
+#   POD_NAME           override the one-off pod name (default: replay-publisher)
+#   IMAGE              override the base image (default: inference-engine/ingestor:dev)
+#   FORCE_REBUILD=1    rebuild images and re-apply manifests even if cluster is healthy
+#   SKIP_CLUSTER_UP=1  legacy alias for "skip bring-up unconditionally"; FORCE_REBUILD=1 takes precedence
 set -eo pipefail
 
 POD_NAME="${POD_NAME:-replay-publisher}"
 IMAGE="${IMAGE:-inference-engine/ingestor:dev}"
+KIND_CLUSTER="${KIND_CLUSTER:-dark-circle}"
+NAMESPACE="${NAMESPACE:-default}"
 
 if [ "$#" -lt 2 ]; then
     echo "usage: $0 <audio.parquet|csv|wav> <seismic.parquet|csv|wav> [replay flags...]" >&2
@@ -35,10 +43,35 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Bring up the cluster (without fake-publisher) unless the caller
-# explicitly opts out. The cluster_up function is idempotent — if
-# everything's already running, this is a fast no-op.
-if [ "${SKIP_CLUSTER_UP:-0}" != "1" ]; then
+# Decide whether to bring up the cluster. Default is "auto-skip when
+# healthy"; rebuild flow stays explicit via FORCE_REBUILD=1.
+need_cluster_up=1
+if [ "${FORCE_REBUILD:-0}" = "1" ]; then
+    echo "=== FORCE_REBUILD=1: running full cluster_up ==="
+    need_cluster_up=1
+elif [ "${SKIP_CLUSTER_UP:-0}" = "1" ]; then
+    echo "=== SKIP_CLUSTER_UP=1: skipping cluster_up ==="
+    need_cluster_up=0
+else
+    # Pin kubectl context to our kind cluster so a stale context (e.g.
+    # pointing at a remote production cluster) can't accidentally pass
+    # the health check below.
+    if kubectl config get-contexts -o name 2>/dev/null | grep -qx "kind-$KIND_CLUSTER"; then
+        kubectl config use-context "kind-$KIND_CLUSTER" >/dev/null 2>&1 || true
+        infer_status=$(kubectl get deployment infer-detect -n "$NAMESPACE" \
+            -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || true)
+        if [ "$infer_status" = "True" ]; then
+            echo "=== Pipeline already ready — starting replay immediately. ==="
+            need_cluster_up=0
+        else
+            echo "=== Pipeline not ready (infer-detect Available=$infer_status) — running cluster_up ==="
+        fi
+    else
+        echo "=== kind cluster '$KIND_CLUSTER' not found — running cluster_up ==="
+    fi
+fi
+
+if [ "$need_cluster_up" = "1" ]; then
     # shellcheck source=_cluster_up.sh
     source "$SCRIPT_DIR/_cluster_up.sh"
     WITH_FAKE_PUBLISHER=0 cluster_up

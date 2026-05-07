@@ -6,6 +6,15 @@ import torchaudio.functional as F
 from google.protobuf.timestamp_pb2 import Timestamp
 from inference_protos import inference_pb2
 
+# Roles the buffer accepts. Source of truth (dispatch.py imports these).
+VALID_ROLES = frozenset({"acoustic", "seismic", "accel_x", "accel_y", "accel_z"})
+REQUIRED_ROLES = frozenset({"acoustic", "seismic"})
+ACCEL_ROLES = frozenset({"accel_x", "accel_y", "accel_z"})
+
+# Tolerance for window-close rate validation: realized samples-per-window may
+# legitimately drift this fraction from expected before we drop the window.
+RATE_TOLERANCE = 0.01
+
 _AUDIO_BITS = int(os.environ.get("AUDIO_BIT_DEPTH", "16"))
 _SEISMIC_BITS = int(os.environ.get("SEISMIC_BIT_DEPTH", "24"))
 _ACCEL_BITS = int(os.environ.get("ACCEL_BIT_DEPTH", "24"))
@@ -19,20 +28,26 @@ _ADC_SCALE_NORMALIZE = os.environ.get("ADC_SCALE_NORMALIZE", "0") == "1"
 
 
 class SensorBuffer:
-    def __init__(self, sensor_id):
+    def __init__(self, sensor_id, expected_rates=None):
         self.active_channels = set()
         self.sensor_id = sensor_id
         self.start_time = None
         self.window = 1.0
 
-        # Per-channel native (incoming) sample rates.
-        self.rates = {
-            "acoustic": int(os.environ.get("AUDIO_SAMPLE_RATE", "16000")),
-            "seismic": int(os.environ.get("SEISMIC_SAMPLE_RATE", "100")),
-            "accel_x": int(os.environ.get("ACCEL_SAMPLE_RATE", "100")),
-            "accel_y": int(os.environ.get("ACCEL_SAMPLE_RATE", "100")),
-            "accel_z": int(os.environ.get("ACCEL_SAMPLE_RATE", "100")),
+        # Per-channel native (incoming) sample rates. ``expected_rates`` is
+        # the channel-map's authority on rates; fall back to the (legacy)
+        # default rates only when no map was supplied.
+        default_rates = {
+            "acoustic": 16000,
+            "seismic": 100,
+            "accel_x": 100,
+            "accel_y": 100,
+            "accel_z": 100,
         }
+        if expected_rates is None:
+            self.rates = default_rates
+        else:
+            self.rates = {ch: expected_rates.get(ch, default_rates[ch]) for ch in default_rates}
 
         # Per-channel TARGET (post-resample) rates. The buffer resamples each
         # incoming channel to its target rate before packaging.
@@ -48,6 +63,13 @@ class SensorBuffer:
 
         self.limits = {ch: int(self.window * self.target_rates[ch]) for ch in self.rates}
         self.buffers = {ch: np.zeros(self.limits[ch]) for ch in self.rates}
+
+        # received_samples counts how many samples actually arrived for each
+        # channel during the current window, including any carried over from
+        # the holding pen during _reset_buffers. _package_window compares
+        # this against the expected total (``window * target_rate``) and
+        # drops the window if the realized count drifts outside tolerance.
+        self.received_samples = dict.fromkeys(default_rates, 0)
 
         self.holding_pen = {
             "acoustic": [],
@@ -69,6 +91,24 @@ class SensorBuffer:
         return out.numpy()
 
     def _package_window(self):
+        # Window-close rate validation. For each active channel, compare
+        # realized samples against window*target_rate. A drift outside
+        # ±RATE_TOLERANCE drops the window: better to miss one second than
+        # ship rate-corrupted data into the model.
+        for ch in self.active_channels:
+            expected = self.limits[ch]
+            got = self.received_samples[ch]
+            if expected == 0:
+                continue
+            drift = abs(got - expected) / expected
+            if drift > RATE_TOLERANCE:
+                print(
+                    f"[buffer:{ch}] window dropped: rate mismatch "
+                    f"(got {got} samples, expected {expected})",
+                    flush=True,
+                )
+                return None
+
         ts = Timestamp()
         ts.seconds = int(self.start_time)
         ts.nanos = int((self.start_time - int(self.start_time)) * 1e9)
@@ -120,6 +160,7 @@ class SensorBuffer:
 
     def _reset_buffers(self):
         self.active_channels.clear()
+        self.received_samples = dict.fromkeys(self.buffers, 0)
 
         for ch in self.buffers:
             self.buffers[ch].fill(0)
@@ -137,39 +178,69 @@ class SensorBuffer:
                 self.buffers[ch][0:pen_len] = pen
                 self.holding_pen[ch].clear()
                 self.active_channels.add(ch)
+                self.received_samples[ch] += pen_len
 
         self.start_time += self.window
         return None
 
+    def maybe_close_window(self, timestamp):
+        """Decide whether ``timestamp`` ends the current window.
+
+        Called once per incoming bundled message, before any channel data
+        is written. Returns a packaged ``SensorData`` payload when a window
+        closes (or ``None`` if the rate-mismatch guard rejected it), and
+        ``None`` when the new message still belongs to the current window.
+
+        Replaces the previous "acoustic channel triggers close" rule, which
+        only worked when channels arrived on independent topics.
+        """
+        if self.start_time is None:
+            self.start_time = timestamp
+            return None
+
+        time_diff = timestamp - self.start_time
+        if time_diff < self.window:
+            return None
+
+        # Stream-restart guard: if no channel has loaded any sample into
+        # the current window AND no holding-pen carry is queued, the
+        # source has been silent. Snap start_time to the new timestamp
+        # rather than emit phantom zero-windows for every silent second.
+        if not self.active_channels and not any(self.holding_pen.values()):
+            self.start_time = timestamp
+            return None
+
+        ready_payload = self._package_window()
+        # _reset_buffers advances start_time by exactly self.window, not
+        # to the new message's timestamp. This preserves holding-pen
+        # carry semantics (chunk_2 from the previous window lands at
+        # offset 0 of the new window). After a long gap, the next few
+        # windows may drop on the rate-mismatch guard while start_time
+        # catches up — that is intentional. Do NOT snap start_time to
+        # ``timestamp`` here; the silent-stream guard above handles the
+        # truly-idle case.
+        self._reset_buffers()
+        return ready_payload
+
     def load_buffer(self, channel, timestamp, data):
+        """Write one channel's slice of a bundled message into the current window.
+
+        Window-close logic moved to ``maybe_close_window``; the dispatch
+        callback must call that first per message. ``load_buffer`` here only
+        handles the data write and the within-message straddle case
+        (chunk_1 into the current window, chunk_2 into the holding pen).
+        """
         rate = self.target_rates[channel]
         limit = self.limits[channel]
         buffer = self.buffers[channel]
 
         if self.start_time is None:
+            # maybe_close_window should have set this, but be defensive.
             self.start_time = timestamp
 
         time_diff = timestamp - self.start_time
-
         if time_diff < 0:
             return None
-
-        if time_diff >= self.window:
-            # Stream-restart guard: if no channel has loaded any sample into
-            # the current window AND no holding-pen carry is queued, the
-            # source has been silent. Snap start_time to the new timestamp
-            # rather than emit phantom zero-windows for every silent second.
-            if not self.active_channels and not any(self.holding_pen.values()):
-                self.start_time = timestamp
-                time_diff = 0.0
-            elif channel == "acoustic":
-                ready_payload = self._package_window()
-                self._reset_buffers()
-                self.load_buffer(channel, timestamp, data)
-                return ready_payload
-            else:
-                self.holding_pen[channel].extend(data)
-                return None
 
         self.active_channels.add(channel)
         if self.rates[channel] != self.target_rates[channel]:
@@ -180,17 +251,16 @@ class SensorBuffer:
 
         if end_index < limit:
             buffer[start_index:end_index] = data
+            self.received_samples[channel] += data_length
             return None
 
+        # Straddle: chunk_1 lands in this window, chunk_2 carries to the next
+        # via the holding pen. maybe_close_window will fire on the next
+        # message and flush the pen during _reset_buffers.
         space_left = limit - start_index
         chunk_1 = data[0:space_left]
         chunk_2 = data[space_left:]
         buffer[start_index:limit] = chunk_1
-
-        if channel == "acoustic":
-            ready_payload = self._package_window()
-            self.holding_pen[channel].extend(chunk_2)
-            self._reset_buffers()
-            return ready_payload
+        self.received_samples[channel] += space_left
         self.holding_pen[channel].extend(chunk_2)
         return None

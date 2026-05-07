@@ -9,12 +9,5 @@ data:
     arrays:
 {{- range $arrayId, $spec := .Values.expectedSensors }}
       {{ $arrayId }}:
-        audio: {{ $spec.audio }}
-        seismic: {{ $spec.seismic }}
-{{- if $spec.accel }}
-        accel:
-          x: {{ index $spec.accel "x" }}
-          y: {{ index $spec.accel "y" }}
-          z: {{ index $spec.accel "z" }}
-{{- end }}
+        topic: {{ $spec.topic }}
 {{- end }}

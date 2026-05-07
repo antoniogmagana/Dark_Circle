@@ -29,9 +29,13 @@ spec:
                 name: inference-engine-config
           env:
             - name: FAKE_TOPICS
-              value: "/shake_001/aud,/shake_001/ehz,/shake_001/ene,/shake_001/enn,/shake_001/enz"
+              value: "/shake_001/data"
             - name: FAKE_RATE_HZ
               value: "10"
+            - name: FAKE_TRIGGER_EVERY
+              value: "10"
+            - name: FAKE_CHANNEL_TAGS
+              value: "MIC,EHZ,ENE,ENN,ENZ"
             - name: FASTRTPS_DEFAULT_PROFILES_FILE
               value: "/etc/fastdds/fastdds.xml"
           volumeMounts:

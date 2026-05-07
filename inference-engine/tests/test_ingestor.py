@@ -1,275 +1,398 @@
 """
 Tests for Ingestor Node (ROS2 -> Buffer -> NATS).
 
-The Ingestor now binds each ROS2 subscription to a known buffer role
-(``acoustic`` / ``seismic`` / ``accel_x|y|z``) at construction time, using
-the ``SENSOR_ROLE_MAP`` JSON env var produced by Discovery. Pure logic
-(env-var parsing, role dispatch) lives in ``ingestor.dispatch`` and is
-imported directly. ROS2 / NATS plumbing is exercised through inline
-simulation.
+The Ingestor subscribes to one ``std_msgs/String`` topic per sensor array.
+Each message is a JSON document bundling all channels for one timestep.
+A cluster-level YAML maps the customer's free-form channel-tag strings
+onto SensorBuffer roles. Pure logic (channel-map loading, JSON dispatch)
+lives in ``ingestor.dispatch`` and is imported directly. ROS2 / NATS
+plumbing is exercised through inline simulation.
 """
 
 import json
+import textwrap
 from unittest.mock import Mock
 
 import numpy as np
 import pytest
 from dispatch import (
-    InvalidRoleMapError,
-    UnknownRoleError,
-    make_role_callback,
-    parse_role_map,
+    ChannelSpec,
+    InvalidChannelMapError,
+    load_channel_map,
+    make_array_callback,
 )
 
 # ---------------------------------------------------------------------------
-# parse_role_map
+# load_channel_map
 # ---------------------------------------------------------------------------
 
 
-class TestParseRoleMap:
-    """``parse_role_map`` validates and decodes the SENSOR_ROLE_MAP env var."""
+class TestLoadChannelMap:
+    """``load_channel_map`` parses channels.yaml into ChannelSpec entries."""
 
     @pytest.mark.unit
-    def test_audio_seismic_only(self):
-        env = json.dumps(
-            {
-                "acoustic": "/shake_001/aud",
-                "seismic": "/shake_001/ehz",
-            }
+    def test_audio_seismic_only(self, tmp_path):
+        path = tmp_path / "channels.yaml"
+        path.write_text(
+            textwrap.dedent(
+                """
+                channels:
+                  MIC: {role: acoustic, expected_rate: 16000}
+                  EHZ: {role: seismic,  expected_rate: 100}
+                """
+            )
         )
-        assert parse_role_map(env) == {
-            "acoustic": "/shake_001/aud",
-            "seismic": "/shake_001/ehz",
-        }
+        result = load_channel_map(str(path))
+        assert result["MIC"] == ChannelSpec(role="acoustic", expected_rate=16000)
+        assert result["EHZ"] == ChannelSpec(role="seismic", expected_rate=100)
 
     @pytest.mark.unit
-    def test_with_accel(self):
-        env = json.dumps(
-            {
-                "acoustic": "/a/aud",
-                "seismic": "/a/ehz",
-                "accel_x": "/a/ene",
-                "accel_y": "/a/enn",
-                "accel_z": "/a/enz",
-            }
+    def test_with_accel(self, tmp_path):
+        path = tmp_path / "channels.yaml"
+        path.write_text(
+            textwrap.dedent(
+                """
+                channels:
+                  MIC: {role: acoustic, expected_rate: 16000}
+                  EHZ: {role: seismic,  expected_rate: 100}
+                  ENE: {role: accel_x,  expected_rate: 100}
+                  ENN: {role: accel_y,  expected_rate: 100}
+                  ENZ: {role: accel_z,  expected_rate: 100}
+                """
+            )
         )
-        result = parse_role_map(env)
-        assert result["accel_x"] == "/a/ene"
-        assert result["accel_y"] == "/a/enn"
-        assert result["accel_z"] == "/a/enz"
+        result = load_channel_map(str(path))
+        assert result["ENE"].role == "accel_x"
+        assert result["ENN"].role == "accel_y"
+        assert result["ENZ"].role == "accel_z"
 
     @pytest.mark.unit
-    def test_invalid_json_rejected(self):
-        with pytest.raises(InvalidRoleMapError):
-            parse_role_map("not-json")
+    def test_missing_file_rejected(self, tmp_path):
+        with pytest.raises(InvalidChannelMapError, match="not found"):
+            load_channel_map(str(tmp_path / "nope.yaml"))
 
     @pytest.mark.unit
-    def test_missing_acoustic_rejected(self):
-        env = json.dumps({"seismic": "/a/ehz"})
-        with pytest.raises(InvalidRoleMapError):
-            parse_role_map(env)
+    def test_malformed_yaml_rejected(self, tmp_path):
+        path = tmp_path / "channels.yaml"
+        path.write_text("channels: {MIC: [unbalanced")
+        with pytest.raises(InvalidChannelMapError, match="malformed"):
+            load_channel_map(str(path))
 
     @pytest.mark.unit
-    def test_missing_seismic_rejected(self):
-        env = json.dumps({"acoustic": "/a/aud"})
-        with pytest.raises(InvalidRoleMapError):
-            parse_role_map(env)
+    def test_missing_top_level_channels_rejected(self, tmp_path):
+        path = tmp_path / "channels.yaml"
+        path.write_text("other: {}")
+        with pytest.raises(InvalidChannelMapError, match="top-level 'channels'"):
+            load_channel_map(str(path))
 
     @pytest.mark.unit
-    def test_unknown_role_rejected(self):
-        env = json.dumps(
-            {
-                "acoustic": "/a/aud",
-                "seismic": "/a/ehz",
-                "lidar": "/a/lidar",  # not a valid buffer channel
-            }
+    def test_unknown_role_rejected(self, tmp_path):
+        path = tmp_path / "channels.yaml"
+        path.write_text(
+            textwrap.dedent(
+                """
+                channels:
+                  MIC: {role: acoustic, expected_rate: 16000}
+                  EHZ: {role: seismic,  expected_rate: 100}
+                  XYZ: {role: lidar,    expected_rate: 50}
+                """
+            )
         )
-        with pytest.raises(UnknownRoleError):
-            parse_role_map(env)
+        with pytest.raises(InvalidChannelMapError, match="unknown role"):
+            load_channel_map(str(path))
 
     @pytest.mark.unit
-    def test_partial_accel_rejected(self):
-        """If any accel role is present, all three must be."""
-        env = json.dumps(
-            {
-                "acoustic": "/a/aud",
-                "seismic": "/a/ehz",
-                "accel_x": "/a/ene",
-                "accel_y": "/a/enn",
-            }
+    def test_missing_required_role_rejected(self, tmp_path):
+        path = tmp_path / "channels.yaml"
+        path.write_text(
+            textwrap.dedent(
+                """
+                channels:
+                  MIC: {role: acoustic, expected_rate: 16000}
+                """
+            )
         )
-        with pytest.raises(InvalidRoleMapError):
-            parse_role_map(env)
+        with pytest.raises(InvalidChannelMapError, match="required roles"):
+            load_channel_map(str(path))
+
+    @pytest.mark.unit
+    def test_partial_accel_rejected(self, tmp_path):
+        path = tmp_path / "channels.yaml"
+        path.write_text(
+            textwrap.dedent(
+                """
+                channels:
+                  MIC: {role: acoustic, expected_rate: 16000}
+                  EHZ: {role: seismic,  expected_rate: 100}
+                  ENE: {role: accel_x,  expected_rate: 100}
+                  ENN: {role: accel_y,  expected_rate: 100}
+                """
+            )
+        )
+        with pytest.raises(InvalidChannelMapError, match="accel"):
+            load_channel_map(str(path))
+
+    @pytest.mark.unit
+    def test_non_positive_rate_rejected(self, tmp_path):
+        path = tmp_path / "channels.yaml"
+        path.write_text(
+            textwrap.dedent(
+                """
+                channels:
+                  MIC: {role: acoustic, expected_rate: 0}
+                  EHZ: {role: seismic,  expected_rate: 100}
+                """
+            )
+        )
+        with pytest.raises(InvalidChannelMapError, match="positive integer"):
+            load_channel_map(str(path))
 
 
 # ---------------------------------------------------------------------------
-# make_role_callback
+# make_array_callback — happy path
 # ---------------------------------------------------------------------------
 
 
-class TestRoleCallback:
-    """``make_role_callback`` returns a closure that dispatches msg -> role."""
+def _make_msg(**body):
+    """Build a Mock std_msgs/String whose .data is the JSON-encoded body."""
+    return Mock(data=json.dumps(body))
+
+
+def _basic_map():
+    return {
+        "MIC": ChannelSpec(role="acoustic", expected_rate=16000),
+        "EHZ": ChannelSpec(role="seismic", expected_rate=100),
+    }
+
+
+class TestArrayCallbackHappyPath:
+    """JSON message arrives, callback fans out to buffer per channel."""
 
     @pytest.mark.unit
-    def test_callback_routes_to_buffer_with_role(self):
+    def test_calls_maybe_close_then_load_per_channel(self):
         buffer = Mock()
+        buffer.maybe_close_window.return_value = None
         buffer.load_buffer.return_value = None
         publish = Mock()
 
-        cb = make_role_callback(
-            role="acoustic",
-            buffer=buffer,
-            publish_payload=publish,
+        cb = make_array_callback(_basic_map(), buffer, publish)
+        msg = _make_msg(
+            sensor_id="sensor_1",
+            state="background",
+            timestamp_unix=1700000000.0,
+            channels=[
+                {"channel": "MIC", "sampling_rate": 16000, "readings": [1, 2, 3]},
+                {"channel": "EHZ", "sampling_rate": 100, "readings": [4, 5]},
+            ],
         )
-
-        msg = Mock()
-        msg.start_time = 1700000000.0
-        msg.amplitude_readings = [1, 2, 3]
         cb(msg)
 
-        buffer.load_buffer.assert_called_once_with("acoustic", 1700000000.0, [1, 2, 3])
+        buffer.maybe_close_window.assert_called_once_with(1700000000.0)
+        load_calls = buffer.load_buffer.call_args_list
+        assert load_calls[0].args == ("acoustic", 1700000000.0, [1, 2, 3])
+        assert load_calls[1].args == ("seismic", 1700000000.0, [4, 5])
         publish.assert_not_called()
 
     @pytest.mark.unit
-    def test_callback_publishes_when_buffer_returns_payload(self):
+    def test_publishes_when_close_returns_payload(self):
         buffer = Mock()
         payload = Mock()
-        payload.SerializeToString.return_value = b"serialized"
-        buffer.load_buffer.return_value = payload
-
+        buffer.maybe_close_window.return_value = payload
+        buffer.load_buffer.return_value = None
         publish = Mock()
 
-        cb = make_role_callback(
-            role="acoustic",
-            buffer=buffer,
-            publish_payload=publish,
+        cb = make_array_callback(_basic_map(), buffer, publish)
+        cb(
+            _make_msg(
+                sensor_id="s",
+                state="background",
+                timestamp_unix=1.0,
+                channels=[{"channel": "MIC", "sampling_rate": 16000, "readings": [1]}],
+            )
         )
-
-        msg = Mock()
-        msg.start_time = 0.0
-        msg.amplitude_readings = list(range(10))
-        cb(msg)
 
         publish.assert_called_once_with(payload)
 
     @pytest.mark.unit
-    def test_callback_uses_its_bound_role(self):
-        """Two callbacks for two different roles must route correctly."""
+    def test_close_fires_before_loads(self):
+        """maybe_close_window must run before any load_buffer in a message."""
         buffer = Mock()
-        buffer.load_buffer.return_value = None
+        order = []
+        buffer.maybe_close_window.side_effect = lambda ts: order.append("close") or None
+        buffer.load_buffer.side_effect = lambda *a, **k: order.append("load")
         publish = Mock()
 
-        ac_cb = make_role_callback("acoustic", buffer, publish)
-        seismic_cb = make_role_callback("seismic", buffer, publish)
-
-        msg_ac = Mock(start_time=1.0, amplitude_readings=[1])
-        msg_se = Mock(start_time=2.0, amplitude_readings=[2])
-
-        ac_cb(msg_ac)
-        seismic_cb(msg_se)
-
-        calls = buffer.load_buffer.call_args_list
-        assert calls[0].args == ("acoustic", 1.0, [1])
-        assert calls[1].args == ("seismic", 2.0, [2])
-
-    @pytest.mark.unit
-    def test_callback_does_not_inspect_sensor_id(self):
-        """Role binding is independent of msg.sensor_id (no suffix parsing)."""
-        buffer = Mock()
-        buffer.load_buffer.return_value = None
-        publish = Mock()
-
-        cb = make_role_callback("seismic", buffer, publish)
-
-        msg = Mock(
-            sensor_id="completely.unrelated.name",
-            start_time=0.0,
-            amplitude_readings=[],
+        cb = make_array_callback(_basic_map(), buffer, publish)
+        cb(
+            _make_msg(
+                sensor_id="s",
+                state="background",
+                timestamp_unix=1.0,
+                channels=[
+                    {"channel": "MIC", "sampling_rate": 16000, "readings": [1]},
+                    {"channel": "EHZ", "sampling_rate": 100, "readings": [2]},
+                ],
+            )
         )
-        cb(msg)
-
-        # Routed to 'seismic' regardless of sensor_id contents.
-        buffer.load_buffer.assert_called_once_with("seismic", 0.0, [])
+        assert order == ["close", "load", "load"]
 
 
 # ---------------------------------------------------------------------------
-# End-to-end: env -> subscriptions -> dispatch
+# make_array_callback — error and edge cases
 # ---------------------------------------------------------------------------
 
 
-class TestSubscriptionWiring:
-    """One subscription created per role; each callback bound to its role."""
-
-    @pytest.mark.integration
-    @pytest.mark.ros2
-    def test_one_subscription_per_role(self, mock_ros2_node):
-        role_map = {
-            "acoustic": "/shake_001/aud",
-            "seismic": "/shake_001/ehz",
-        }
+class TestArrayCallbackEdgeCases:
+    @pytest.mark.unit
+    def test_unknown_channel_tag_is_skipped(self):
         buffer = Mock()
-        buffer.load_buffer.return_value = None
+        buffer.maybe_close_window.return_value = None
         publish = Mock()
 
-        # Simulate IngestorNode.__init__ subscription loop.
-        for role, topic in role_map.items():
-            cb = make_role_callback(role, buffer, publish)
-            mock_ros2_node.create_subscription(Mock(), topic, cb, 10)
+        cb = make_array_callback(_basic_map(), buffer, publish)
+        cb(
+            _make_msg(
+                sensor_id="s",
+                state="background",
+                timestamp_unix=1.0,
+                channels=[
+                    {"channel": "UNKNOWN", "sampling_rate": 99, "readings": [9]},
+                    {"channel": "MIC", "sampling_rate": 16000, "readings": [1]},
+                ],
+            )
+        )
 
-        topics_subscribed = [
-            call.args[1] for call in mock_ros2_node.create_subscription.call_args_list
-        ]
-        assert sorted(topics_subscribed) == [
-            "/shake_001/aud",
-            "/shake_001/ehz",
-        ]
+        # Only MIC routed.
+        load_calls = buffer.load_buffer.call_args_list
+        assert len(load_calls) == 1
+        assert load_calls[0].args == ("acoustic", 1.0, [1])
 
-    @pytest.mark.integration
-    @pytest.mark.ros2
-    def test_renamed_topic_still_dispatches_to_correct_role(self, mock_ros2_node):
-        """A non-conventional topic name still works because role binding is explicit."""
-        role_map = {
-            "acoustic": "/weird/microphone_channel",
-            "seismic": "/weird/ground_motion",
-        }
+    @pytest.mark.unit
+    def test_malformed_json_drops_message(self):
         buffer = Mock()
-        buffer.load_buffer.return_value = None
         publish = Mock()
+        cb = make_array_callback(_basic_map(), buffer, publish)
 
-        callbacks = {}
-        for role, topic in role_map.items():
-            cb = make_role_callback(role, buffer, publish)
-            callbacks[topic] = cb
-            mock_ros2_node.create_subscription(Mock(), topic, cb, 10)
+        cb(Mock(data="this is not json"))
 
-        msg = Mock(start_time=0.0, amplitude_readings=[42])
-        callbacks["/weird/microphone_channel"](msg)
-        callbacks["/weird/ground_motion"](msg)
-
-        roles_called = [c.args[0] for c in buffer.load_buffer.call_args_list]
-        assert roles_called == ["acoustic", "seismic"]
-
-
-# ---------------------------------------------------------------------------
-# ADC normalization sanity checks (kept from the prior suite — protect against
-# regressions in the unchanged buffer math).
-# ---------------------------------------------------------------------------
-
-
-class TestADCNormalization:
-    @pytest.mark.unit
-    def test_16bit_audio_scale(self):
-        sample = np.array([16384, -16384], dtype=np.int16)
-        normalized = sample / 32768.0
-        assert normalized[0] == 0.5
-        assert normalized[1] == -0.5
+        buffer.maybe_close_window.assert_not_called()
+        buffer.load_buffer.assert_not_called()
 
     @pytest.mark.unit
-    def test_24bit_seismic_scale(self):
-        sample = np.array([4194304, -4194304], dtype=np.int32)
-        normalized = sample / 8388608.0
-        assert normalized[0] == 0.5
-        assert normalized[1] == -0.5
+    def test_missing_timestamp_drops_message(self):
+        buffer = Mock()
+        publish = Mock()
+        cb = make_array_callback(_basic_map(), buffer, publish)
+
+        cb(_make_msg(sensor_id="s", state="background", channels=[]))
+
+        buffer.maybe_close_window.assert_not_called()
+        buffer.load_buffer.assert_not_called()
+
+    @pytest.mark.unit
+    def test_non_numeric_timestamp_drops_message(self):
+        buffer = Mock()
+        publish = Mock()
+        cb = make_array_callback(_basic_map(), buffer, publish)
+
+        cb(
+            _make_msg(
+                sensor_id="s",
+                state="background",
+                timestamp_unix="not-a-number",
+                channels=[],
+            )
+        )
+
+        buffer.maybe_close_window.assert_not_called()
+
+    @pytest.mark.unit
+    def test_missing_channels_field_drops_message(self):
+        buffer = Mock()
+        publish = Mock()
+        cb = make_array_callback(_basic_map(), buffer, publish)
+
+        cb(
+            _make_msg(
+                sensor_id="s", state="background", timestamp_unix=1.0
+            )  # no channels[]
+        )
+
+        buffer.maybe_close_window.assert_not_called()
+        buffer.load_buffer.assert_not_called()
+
+    @pytest.mark.unit
+    def test_state_counter_tracks_background_and_trigger(self, capsys):
+        buffer = Mock()
+        buffer.maybe_close_window.return_value = None
+        publish = Mock()
+        cb = make_array_callback(_basic_map(), buffer, publish)
+
+        for state in ("background", "trigger", "background", None, "weird"):
+            body = {"sensor_id": "s", "timestamp_unix": 1.0, "channels": []}
+            if state is not None:
+                body["state"] = state
+            cb(Mock(data=json.dumps(body)))
+
+        # First message log line is emitted at recv=1; trigger one more to
+        # force the second milestone (recv=10) to verify counts.
+        for _ in range(8):
+            cb(
+                _make_msg(
+                    sensor_id="s",
+                    state="background",
+                    timestamp_unix=1.0,
+                    channels=[],
+                )
+            )
+
+        out = capsys.readouterr().out
+        assert "bg=" in out
+        assert "trig=" in out
+
+    @pytest.mark.unit
+    def test_sampling_rate_mismatch_logs_but_continues(self, capsys):
+        buffer = Mock()
+        buffer.maybe_close_window.return_value = None
+        publish = Mock()
+        cb = make_array_callback(_basic_map(), buffer, publish)
+
+        cb(
+            _make_msg(
+                sensor_id="s",
+                state="background",
+                timestamp_unix=1.0,
+                channels=[{"channel": "MIC", "sampling_rate": 8000, "readings": [1]}],
+            )
+        )
+
+        out = capsys.readouterr().out
+        assert "sampling_rate mismatch" in out
+        # But still routed to buffer — soft validation.
+        buffer.load_buffer.assert_called_once_with("acoustic", 1.0, [1])
+
+    @pytest.mark.unit
+    def test_missing_readings_skips_channel(self):
+        buffer = Mock()
+        buffer.maybe_close_window.return_value = None
+        publish = Mock()
+        cb = make_array_callback(_basic_map(), buffer, publish)
+
+        cb(
+            _make_msg(
+                sensor_id="s",
+                state="background",
+                timestamp_unix=1.0,
+                channels=[
+                    {"channel": "MIC", "sampling_rate": 16000},  # no readings
+                    {"channel": "EHZ", "sampling_rate": 100, "readings": [2]},
+                ],
+            )
+        )
+        # Only EHZ routed; MIC skipped.
+        load_calls = buffer.load_buffer.call_args_list
+        assert len(load_calls) == 1
+        assert load_calls[0].args == ("seismic", 1.0, [2])
 
 
 # ---------------------------------------------------------------------------
@@ -313,56 +436,61 @@ class TestNATSPublishing:
 
 
 # ---------------------------------------------------------------------------
-# End-to-end happy path
+# ADC normalization sanity checks (kept from the prior suite — protect against
+# regressions in the unchanged buffer math).
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-def test_ingestor_end_to_end():
-    buffer = Mock()
-    payload = Mock()
-    payload.SerializeToString.return_value = b"e2e_payload"
-    buffer.load_buffer.return_value = payload
+class TestADCNormalization:
+    @pytest.mark.unit
+    def test_16bit_audio_scale(self):
+        sample = np.array([16384, -16384], dtype=np.int16)
+        normalized = sample / 32768.0
+        assert normalized[0] == 0.5
+        assert normalized[1] == -0.5
 
-    published = []
-
-    def publish(p):
-        return published.append(p.SerializeToString())
-
-    cb = make_role_callback("acoustic", buffer, publish)
-    msg = Mock(start_time=1700000000.0, amplitude_readings=list(range(100)))
-    cb(msg)
-
-    buffer.load_buffer.assert_called_once_with("acoustic", 1700000000.0, list(range(100)))
-    assert published == [b"e2e_payload"]
+    @pytest.mark.unit
+    def test_24bit_seismic_scale(self):
+        sample = np.array([4194304, -4194304], dtype=np.int32)
+        normalized = sample / 8388608.0
+        assert normalized[0] == 0.5
+        assert normalized[1] == -0.5
 
 
-@pytest.mark.unit
-def test_ingestor_handles_buffer_returns_none():
-    buffer = Mock()
-    buffer.load_buffer.return_value = None
-    publish = Mock()
-
-    cb = make_role_callback("seismic", buffer, publish)
-    cb(Mock(start_time=0.0, amplitude_readings=[]))
-    publish.assert_not_called()
+# ---------------------------------------------------------------------------
+# End-to-end: callback throughput
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_ingestor_throughput_is_low_overhead():
-    """Mirror the prior suite's perf check; primarily protects against accidental quadratic deserialization."""
+def test_callback_throughput_is_low_overhead():
+    """Protect against accidental quadratic deserialization or per-call work."""
     import time
 
     buffer = Mock()
+    buffer.maybe_close_window.return_value = None
     buffer.load_buffer.return_value = None
     publish = Mock()
-    cb = make_role_callback("acoustic", buffer, publish)
+    cb = make_array_callback(_basic_map(), buffer, publish)
+
+    payload = json.dumps(
+        {
+            "sensor_id": "s",
+            "state": "background",
+            "timestamp_unix": 1.0,
+            "channels": [
+                {"channel": "MIC", "sampling_rate": 16000, "readings": [1, 2, 3, 4, 5]},
+                {"channel": "EHZ", "sampling_rate": 100, "readings": [6, 7]},
+            ],
+        }
+    )
+    msg = Mock(data=payload)
 
     n = 1000
     t0 = time.time()
     for _ in range(n):
-        cb(Mock(start_time=0.0, amplitude_readings=[1, 2, 3, 4, 5]))
+        cb(msg)
     elapsed = time.time() - t0
 
-    assert buffer.load_buffer.call_count == n
+    assert buffer.maybe_close_window.call_count == n
     assert n / max(elapsed, 1e-6) > 100

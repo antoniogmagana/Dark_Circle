@@ -5,9 +5,11 @@ metadata:
   labels:
     app: infer-detect
 spec:
-  {{- if not .Values.keda.enabled }}
+  # Floor of 1 replica regardless of KEDA. When KEDA is enabled it
+  # owns scale-up beyond this floor via its own minReplicaCount; if
+  # KEDA is uninstalled or its CRD goes missing, this floor still
+  # keeps the pipeline alive.
   replicas: {{ .Values.inference.inferDetect.replicas }}
-  {{- end }}
   selector:
     matchLabels:
       app: infer-detect
@@ -32,6 +34,15 @@ spec:
             # values.yaml inference.inferDetect.resources.limits.cpu.
             - name: TORCH_NUM_THREADS
               value: {{ .Values.inference.inferDetect.torchThreads | default "2" | quote }}
+          # Sentinel-file readiness: the pod becomes Ready only after
+          # the model is loaded and JetStream subscription is bound, so
+          # downstream traffic only flows once the pipeline can actually infer.
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/ready"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 60
           resources:
             {{- toYaml .Values.inference.inferDetect.resources | nindent 12 }}
 {{- if .Values.keda.enabled }}

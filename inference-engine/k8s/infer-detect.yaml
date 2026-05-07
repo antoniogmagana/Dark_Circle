@@ -14,6 +14,10 @@ metadata:
   labels:
     app: infer-detect
 spec:
+  # Belt-and-suspenders floor: if KEDA is uninstalled or its CRD goes
+  # missing, the Deployment still maintains 1 replica so the customer's
+  # pipeline doesn't silently scale to zero.
+  replicas: 1
   selector:
     matchLabels:
       app: infer-detect
@@ -32,3 +36,13 @@ spec:
           env:
             - name: MODEL_DIR
               value: "/app/model"
+          # Sentinel-file readiness: the pod becomes Ready only after
+          # the model is loaded and JetStream subscription is bound. With
+          # KEDA min=1, this means a Ready pod is one that can actually
+          # infer immediately — no warm-up delay surfaces to the customer.
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/ready"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 60

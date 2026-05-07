@@ -116,10 +116,10 @@ def mock_ros2_node():
     node.create_publisher = MagicMock(return_value=MagicMock())
     node.create_timer = MagicMock(return_value=MagicMock())
 
-    # Mock get_topic_names_and_types for Discovery node testing
+    # Mock get_topic_names_and_types for Discovery node testing.
+    # Each sensor array now publishes one bundled-channel std_msgs/String topic.
     node.get_topic_names_and_types.return_value = [
-        ("/sensor_array_01/acoustic", ["ros2_interfaces/msg/RawSensorReading"]),
-        ("/sensor_array_01/seismic", ["ros2_interfaces/msg/RawSensorReading"]),
+        ("/sensor_array_01/data", ["std_msgs/msg/String"]),
     ]
 
     return node
@@ -187,11 +187,28 @@ def mock_k8s_client():
 
 @pytest.fixture
 def mock_ros2_message():
-    """Mock ROS2 RawSensorReading message."""
+    """Mock ROS2 std_msgs/String message carrying a bundled-channel JSON payload."""
+    import json as _json
+
+    body = {
+        "sensor_id": "sensor_array_01",
+        "state": "background",
+        "timestamp_unix": 1700000000.0,
+        "channels": [
+            {
+                "channel": "MIC",
+                "sampling_rate": 16000,
+                "readings": np.random.randint(-32768, 32767, size=100, dtype=np.int16).tolist(),
+            },
+            {
+                "channel": "EHZ",
+                "sampling_rate": 100,
+                "readings": np.random.randint(-8388608, 8388607, size=10, dtype=np.int32).tolist(),
+            },
+        ],
+    }
     msg = MagicMock()
-    msg.sensor_id = "sensor_array_01.aud"
-    msg.start_time = 1700000000.0
-    msg.amplitude_readings = np.random.randint(-32768, 32767, size=100, dtype=np.int16).tolist()
+    msg.data = _json.dumps(body)
     return msg
 
 

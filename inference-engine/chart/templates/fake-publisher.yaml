@@ -31,6 +31,10 @@ spec:
               value: {{ .Values.fakePublisher.topics | quote }}
             - name: FAKE_RATE_HZ
               value: "{{ .Values.fakePublisher.rateHz }}"
+            - name: FAKE_TRIGGER_EVERY
+              value: "{{ .Values.fakePublisher.triggerEvery }}"
+            - name: FAKE_CHANNEL_TAGS
+              value: {{ .Values.fakePublisher.channelTags | quote }}
             {{- include "inference-engine.fastddsEnv" . | nindent 12 }}
           volumeMounts:
             {{- include "inference-engine.fastddsMount" . | nindent 12 }}

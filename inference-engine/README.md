@@ -116,11 +116,12 @@ required topics are all visible. Tears down an Ingestor when its array is
 removed from the ConfigMap or any of its required topics goes missing for
 3 consecutive polls (~15 s). Topics not listed in the ConfigMap are ignored.
 
-The ConfigMap entry for one array names the audio and seismic topics
-explicitly; an optional `accel` block names the x/y/z accelerometer topics.
-Discovery passes those role bindings into each Ingestor via the
-`SENSOR_ROLE_MAP` env var, so role assignment is configuration, not a topic-
-naming convention.
+The ConfigMap entry for one array names a single bundled-channel topic
+the array publishes on. Discovery passes that topic into each Ingestor
+via the `SENSOR_TOPIC` env var. The per-channel-tag → buffer-role
+mapping lives in a separate cluster-level `ingestor-channel-map`
+ConfigMap mounted into every Ingestor pod, so the customer can change
+their channel-tag scheme without touching the discovery config.
 
 **Environment variables:**
 
@@ -186,14 +187,16 @@ which divides by `2^(bits-1)` before mean subtraction:
 |----------|---------|-------------|
 | `NATS_URL` | — | NATS server address (e.g. `nats://nats-service:4222`) |
 | `SENSOR_ARRAY` | — | Sensor array identifier (e.g. `shake_001`) |
-| `SENSOR_ROLE_MAP` | — | JSON object `{role: topic}` injected by Discovery, e.g. `{"acoustic":"/shake_001/aud","seismic":"/shake_001/ehz"}` |
+| `SENSOR_TOPIC` | — | Bundled-channel ROS2 topic the array publishes on (injected by Discovery) |
+| `CHANNEL_MAP_PATH` | `/etc/inference-engine/channels.yaml` | Path to the channel-tag → role YAML; mounted from the `ingestor-channel-map` ConfigMap |
 | `NATIVE_RATES` | `0` | When `1`, ship each channel at its native rate (CRL expects audio=16k, seismic=100). When `0`, upsample everything to `TARGET_RATE` for the legacy CNN path. |
 | `ADC_SCALE_NORMALIZE` | `0` | When `1`, divide each channel by `2^(bits-1)` before mean subtraction (legacy `[-1, 1]` contract). When `0`, preserve raw counts. |
 | `AUDIO_BIT_DEPTH` / `SEISMIC_BIT_DEPTH` / `ACCEL_BIT_DEPTH` | `16` / `24` / `24` | Used only when `ADC_SCALE_NORMALIZE=1`. Adjust if hardware bit depth differs. |
 
 **Buffer roles:** `acoustic`, `seismic`, `accel_x`, `accel_y`, `accel_z`.
 `acoustic` and `seismic` are required; the three `accel_*` roles must
-appear together or not at all.
+appear together or not at all. The customer's free-form channel tags
+(e.g. `MIC`, `EHZ`) map to these roles via `channels.yaml`.
 
 ---
 
@@ -223,7 +226,7 @@ populated for both positives and negatives:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `publish_time` | `float64` (Unix epoch s) | Wall-clock moment egress published this result. Same clock source as the upstream `RawSensorReading.start_time`. |
+| `publish_time` | `float64` (Unix epoch s) | Wall-clock moment egress published this result. Same clock source as the upstream message's `timestamp_unix`. |
 | `latency_seconds` | `float64` | `publish_time` − the window's original capture timestamp. **Includes the 1.0 s window-fill duration as a floor** — a value of `~1.05` means ~50 ms of pipeline compute, not "broken." |
 
 These flow through to ROS2 subscribers — `replay_publisher.py` reports
@@ -254,8 +257,13 @@ existing pipeline).
 
 | Message | Package | Used by |
 |---------|---------|---------|
-| `RawSensorReading` | `ros2_interfaces` | Ingestor (subscriber) |
+| `std_msgs/String` (JSON payload) | `std_msgs` | Ingestor (subscriber) |
 | `InferenceResult` | `ros2_interfaces` | Egress (publisher) |
+
+The bundled-channel JSON payload carries `sensor_id`, `state`,
+`timestamp_unix`, and a `channels` list with `{channel, sampling_rate,
+dt, readings}` per entry. See `src/ingestor/dispatch.py` for the
+parser and the channel-tag → buffer-role mapping.
 
 **If you change a `.msg` file**, every host that runs the replay tool
 or otherwise links against `ros2_interfaces` outside the cluster must
@@ -358,7 +366,7 @@ poetry run pytest -m asyncio -v      # Async tests only
 
 **Test coverage:**
 - **Discovery Node**: ConfigMap parsing, completeness checks, PollState grace logic, manifest construction
-- **Ingestor Node**: `SENSOR_ROLE_MAP` parsing, role-bound callbacks, subscription wiring
+- **Ingestor Node**: channel-map loading, JSON-message dispatch, single subscription wiring, window-close rate validation
 - **SensorBuffer**: window math, holding-pen logic, packaging contract — both default (raw counts) and legacy (`ADC_SCALE_NORMALIZE=1`) modes
 - **Egress Node**: protobuf conversion, NATS subscriptions, ROS2 publishing (including new `publish_time` / `latency_seconds` fields), edge cases
 - **Infer Detect Node**: model loading (CUDA/MPS/CPU), binary detection, tensor preprocessing, NATS integration

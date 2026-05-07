@@ -5,10 +5,15 @@ This module is intentionally free of rclpy / kubernetes imports so it can be
 unit-tested without the ROS2 or Kubernetes runtime. ``discovery.main``
 imports from here and adds the ROS2 graph poll + Kubernetes API plumbing on
 top.
+
+Schema note (post-JSON-message refactor): each sensor array now publishes a
+single bundled-channel ``std_msgs/String`` topic, so ``ArraySpec`` collapses
+to one ``topic`` field. The per-channel ``audio`` / ``seismic`` / ``accel``
+mapping moved into the cluster-level ``channels.yaml`` consumed by the
+Ingestor.
 """
 
 import copy
-import json
 import re
 from collections import defaultdict
 from collections.abc import Iterable
@@ -22,6 +27,8 @@ import yaml
 RFC_1123_ARRAY_ID = re.compile(r"^[a-z]([-a-z0-9]*[a-z0-9])?$")
 MAX_ARRAY_ID_LEN = 63 - len("ingestor-")
 
+LEGACY_KEYS = {"audio", "seismic", "accel"}
+
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -30,10 +37,6 @@ MAX_ARRAY_ID_LEN = 63 - len("ingestor-")
 
 class InvalidConfigError(ValueError):
     """The ConfigMap YAML is malformed or missing required keys."""
-
-
-class PartialAccelError(InvalidConfigError):
-    """An ``accel`` block is present but doesn't define all of x, y, z."""
 
 
 # ---------------------------------------------------------------------------
@@ -45,13 +48,12 @@ class PartialAccelError(InvalidConfigError):
 class ArraySpec:
     """One configured sensor array.
 
-    ``accel`` is None when the operator chose not to include accelerometer
-    data; when present it must contain all three of x/y/z.
+    Each array publishes a single bundled-channel ``std_msgs/String`` topic;
+    Discovery only needs to know which one and confirm it's visible on the
+    ROS2 graph.
     """
 
-    audio: str
-    seismic: str
-    accel: dict | None = None
+    topic: str
 
 
 @dataclass
@@ -99,25 +101,21 @@ def load_config(yaml_text: str) -> dict[str, ArraySpec]:
         if not isinstance(entry, dict):
             raise InvalidConfigError(f"{array_id}: entry must be a mapping")
 
-        audio = entry.get("audio")
-        seismic = entry.get("seismic")
-        if not audio:
-            raise InvalidConfigError(f"{array_id}: 'audio' is required")
-        if not seismic:
-            raise InvalidConfigError(f"{array_id}: 'seismic' is required")
+        legacy_present = LEGACY_KEYS & set(entry)
+        if legacy_present:
+            raise InvalidConfigError(
+                f"{array_id}: config schema changed: replace "
+                f"{sorted(legacy_present)} with a single 'topic:' field. "
+                "See ingestor channels.yaml for per-channel mapping."
+            )
 
-        accel = entry.get("accel")
-        if accel is not None:
-            if not isinstance(accel, dict):
-                raise InvalidConfigError(f"{array_id}: 'accel' must be a mapping with x/y/z")
-            missing = {"x", "y", "z"} - set(accel)
-            if missing:
-                raise PartialAccelError(
-                    f"{array_id}: accel block missing keys {sorted(missing)}; "
-                    "accel must define all of x, y, z or be omitted entirely"
-                )
+        topic = entry.get("topic")
+        if not isinstance(topic, str) or not topic:
+            raise InvalidConfigError(
+                f"{array_id}: 'topic' is required and must be a non-empty string"
+            )
 
-        specs[array_id] = ArraySpec(audio=audio, seismic=seismic, accel=accel)
+        specs[array_id] = ArraySpec(topic=topic)
 
     return specs
 
@@ -129,10 +127,7 @@ def load_config(yaml_text: str) -> dict[str, ArraySpec]:
 
 def required_topics(spec: ArraySpec) -> set[str]:
     """Topics that must be on the ROS2 graph for ``spec`` to spawn."""
-    topics = {spec.audio, spec.seismic}
-    if spec.accel is not None:
-        topics.update(spec.accel.values())
-    return topics
+    return {spec.topic}
 
 
 def is_complete(spec: ArraySpec, visible: Iterable[str]) -> bool:
@@ -141,24 +136,6 @@ def is_complete(spec: ArraySpec, visible: Iterable[str]) -> bool:
 
 def missing_topics(spec: ArraySpec, visible: Iterable[str]) -> set[str]:
     return required_topics(spec) - set(visible)
-
-
-# ---------------------------------------------------------------------------
-# Role-map injection (env var sent to the Ingestor)
-# ---------------------------------------------------------------------------
-
-
-def build_role_map(spec: ArraySpec) -> dict[str, str]:
-    """``{role: topic}`` mapping consumed by the Ingestor at startup."""
-    role_map = {
-        "acoustic": spec.audio,
-        "seismic": spec.seismic,
-    }
-    if spec.accel is not None:
-        role_map["accel_x"] = spec.accel["x"]
-        role_map["accel_y"] = spec.accel["y"]
-        role_map["accel_z"] = spec.accel["z"]
-    return role_map
 
 
 # ---------------------------------------------------------------------------
@@ -173,12 +150,13 @@ def build_ingestor_manifest(
 ) -> dict:
     """Render the ingestor Deployment for ``sensor_array``.
 
-    Loads the template YAML once, then mutates the dict directly so JSON
-    role-map values containing quotes / braces never collide with the
-    placeholder string. Returns a dict ready for the Kubernetes API.
+    Loads the template YAML once, then mutates the dict directly. Returns a
+    dict ready for the Kubernetes API. The container's per-pod env vars
+    (``SENSOR_ARRAY``, ``SENSOR_TOPIC``) are written here; the channel-name
+    map is mounted as a ConfigMap volume defined in the template, not
+    injected per-array.
     """
     body = copy.deepcopy(yaml.safe_load(template_yaml))
-    role_map_json = json.dumps(build_role_map(spec))
     deployment_name = f"ingestor-{sensor_array}"
 
     body["metadata"]["name"] = deployment_name
@@ -195,7 +173,7 @@ def build_ingestor_manifest(
     for container in body["spec"]["template"]["spec"]["containers"]:
         env = container.setdefault("env", [])
         _set_env(env, "SENSOR_ARRAY", sensor_array)
-        _set_env(env, "SENSOR_ROLE_MAP", role_map_json)
+        _set_env(env, "SENSOR_TOPIC", spec.topic)
 
     return body
 
@@ -253,8 +231,6 @@ class PollState:
                     self._last_missing[array_id] = missing
 
         # ----- teardown pass: any active array failing either condition --
-        # An array is "healthy" iff (a) still in config AND (b) all required
-        # topics still visible. Anything else accumulates absent_counts.
         for array_id in list(active):
             spec = config.get(array_id)
             healthy = spec is not None and is_complete(spec, visible)

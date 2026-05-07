@@ -5,9 +5,7 @@ metadata:
   labels:
     app: infer-classify
 spec:
-  {{- if not .Values.keda.enabled }}
   replicas: {{ .Values.inference.inferClassify.replicas }}
-  {{- end }}
   selector:
     matchLabels:
       app: infer-classify
@@ -32,6 +30,12 @@ spec:
             # values.yaml inference.inferClassify.resources.limits.cpu.
             - name: TORCH_NUM_THREADS
               value: {{ .Values.inference.inferClassify.torchThreads | default "2" | quote }}
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/ready"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 60
           resources:
             {{- toYaml .Values.inference.inferClassify.resources | nindent 12 }}
 {{- if .Values.keda.enabled }}

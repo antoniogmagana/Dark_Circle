@@ -33,7 +33,7 @@ TOTAL:            125 passed, 0 skipped, 0 failed ✅
 The inference-engine test suite covers:
 - **SensorBuffer** (`test_buffer.py`) - ✅ **Complete** (33 comprehensive tests, all passing)
 - **Discovery Node** (`test_discovery.py`) - ✅ **Complete** (37 tests: ConfigMap parsing, completeness checks, PollState grace logic, manifest construction)
-- **Ingestor Node** (`test_ingestor.py`) - ✅ **Complete** (21 tests: SENSOR_ROLE_MAP parsing, role-bound callbacks, subscription wiring, ADC normalization, performance)
+- **Ingestor Node** (`test_ingestor.py`) - ✅ **Complete** (channels.yaml loader, JSON-message dispatch, subscription wiring, ADC normalization, performance)
 - **Egress Node** (`test_egress.py`) - ✅ **Complete** (21 tests: protobuf conversion, NATS/ROS2 integration, edge cases, latency)
 - **Infer Detect Node** (`test_infer_detect.py`) - ✅ **Complete** (23 tests: model loading, binary detection, tensor preprocessing, NATS integration)
 - **Infer Classify Node** (`test_infer_classify.py`) - ✅ **Complete** (23 tests: multi-class classification, Mel spectrograms, CLASS_MAP, confidence scoring)
@@ -178,30 +178,34 @@ inference-engine/
 - Unknown topics ignored
 - ``log_awaiting`` state-change throttle (logs only when missing set changes)
 
-#### Manifest construction (2 tests)
-- Template substitution carries SENSOR_ROLE_MAP JSON intact
+#### Manifest construction (3 tests)
+- Template substitution injects ``SENSOR_TOPIC`` env var
+- Topic strings with special characters survive YAML round-trip
 - Teardown calls ``delete_namespaced_deployment``
 
 #### Integration (1 test)
 - Full poll cycle: incomplete → complete → spawn → loss → grace → teardown
 
-### ✅ Ingestor Node (`test_ingestor.py`) - 21 tests
+### ✅ Ingestor Node (`test_ingestor.py`)
 
-**Coverage for the SENSOR_ROLE_MAP-driven ROS2 → NATS bridge:**
+**Coverage for the JSON-message-driven ROS2 → NATS bridge:**
 
-#### SENSOR_ROLE_MAP parsing (7 tests)
+#### channels.yaml loader (8 tests)
 - Audio + seismic only / with full accel
-- Invalid JSON / missing acoustic / missing seismic / unknown role / partial accel rejected
+- Missing file / malformed YAML / missing top-level ``channels`` rejected
+- Unknown role / missing required role / partial accel / non-positive rate rejected
 
-#### Role-bound callbacks (4 tests)
-- Callback routes to buffer with its bound role
-- Callback publishes when buffer returns a payload
-- Two callbacks for two roles dispatch independently
-- Callback ignores ``msg.sensor_id`` (no suffix derivation)
+#### Array callback — happy path (3 tests)
+- Calls ``maybe_close_window`` then ``load_buffer`` per channel
+- Publishes when window-close returns a payload
+- Close fires before any per-channel load
 
-#### Subscription wiring (2 tests)
-- One ``create_subscription`` call per role
-- Renamed (non-conventional) topic names still dispatch correctly
+#### Array callback — edge cases (7 tests)
+- Unknown channel tags skipped, others routed
+- Malformed JSON / missing timestamp / non-numeric timestamp / missing channels[] dropped
+- ``state`` counter tracks background / trigger / unknown
+- Sampling-rate mismatch logs warning but continues (soft validation)
+- Missing ``readings`` field on a channel skips that entry only
 
 #### ADC normalization (2 tests)
 - 16-bit audio scale (-32768 / 32768 = -1.0, etc.)

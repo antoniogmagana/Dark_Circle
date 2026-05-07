@@ -15,6 +15,7 @@ metadata:
   labels:
     app: egress
 spec:
+  replicas: 1
   selector:
     matchLabels:
       app: egress
@@ -38,6 +39,12 @@ spec:
           env:
             - name: FASTRTPS_DEFAULT_PROFILES_FILE
               value: "/etc/fastdds/fastdds.xml"
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/ready"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 60
           volumeMounts:
             - name: fastdds-profiles
               mountPath: /etc/fastdds

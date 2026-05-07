@@ -117,6 +117,7 @@ EOF
     kubectl apply -f k8s/rbac/
     kubectl apply -f k8s/inference-engine-config.yaml
     kubectl apply -f k8s/sensor-config.yaml
+    kubectl apply -f k8s/ingestor-channel-map.yaml
     kubectl apply -f k8s/expected-sensors.yaml
     kubectl apply -f k8s/discovery.yaml
     if [ "$WITH_FAKE_PUBLISHER" = "1" ]; then
@@ -139,13 +140,21 @@ EOF
     if [ "$WITH_FAKE_PUBLISHER" = "1" ]; then
         kubectl wait --for=condition=available --timeout=180s deployment/fake-publisher -n "$NAMESPACE"
     fi
-    kubectl wait --for=condition=available --timeout=180s deployment/infer-detect -n "$NAMESPACE"
-    kubectl wait --for=condition=available --timeout=180s deployment/infer-classify -n "$NAMESPACE"
-    kubectl wait --for=condition=available --timeout=180s deployment/egress -n "$NAMESPACE"
+    # The inference and egress pods declare Available only after model
+    # load + NATS subscription bind (sentinel-file readiness probe), so
+    # this wait is what the customer sees as "pipeline warm-up time."
+    kubectl wait --for=condition=available --timeout=300s deployment/infer-detect -n "$NAMESPACE"
+    kubectl wait --for=condition=available --timeout=300s deployment/infer-classify -n "$NAMESPACE"
+    kubectl wait --for=condition=available --timeout=300s deployment/egress -n "$NAMESPACE"
 
     echo
     echo "=== current pods ==="
     kubectl get pods -n "$NAMESPACE"
+
+    echo
+    echo "==========================================="
+    echo "Pipeline ready. You can now publish messages."
+    echo "==========================================="
 }
 
 cluster_teardown() {

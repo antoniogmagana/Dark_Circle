@@ -13,6 +13,7 @@ import asyncio
 import os
 import threading
 import time
+from pathlib import Path
 
 import nats
 import rclpy
@@ -21,6 +22,7 @@ from rclpy.node import Node
 from ros2_interfaces.msg import InferenceResult
 
 DEFAULT_OUTPUT_TOPIC = "/inference_result"
+READY_SENTINEL = Path(os.environ.get("READY_SENTINEL", "/tmp/ready"))
 
 
 class EgressNode(Node):
@@ -100,6 +102,13 @@ def main():
 
     loop.run_until_complete(bind("DETECTION_RESULT", "egress-detection", node.on_detection))
     loop.run_until_complete(bind("CLASSIFICATION_RESULT", "egress-classification", node.on_classification))
+
+    READY_SENTINEL.touch()
+    print(
+        f"[egress] READY: NATS subscribed, ROS2 publishing. "
+        f"Inference results will appear on {output_topic}.",
+        flush=True,
+    )
 
     thread = threading.Thread(target=loop.run_forever, daemon=True)
     thread.start()

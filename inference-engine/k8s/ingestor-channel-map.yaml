@@ -1,0 +1,28 @@
+# Cluster-level channel-tag → SensorBuffer-role map consumed by every Ingestor.
+#
+# Customer publishes one std_msgs/String message per sensor array per timestep,
+# with all channels bundled. Each channel entry's "channel" field is a
+# free-form tag controlled by the customer's firmware. This file maps those
+# tags to the five buffer roles the rest of the pipeline understands.
+#
+# expected_rate is the native sampling rate the buffer compares against at
+# window close; a drift outside ±1% drops the window with a clear log line.
+#
+# Channel tags below are placeholders pending finalization of the customer's
+# documentation — MIC is the most likely audio tag they will adopt; EHZ /
+# ENE / ENN / ENZ match the SEED-style codes Raspberry Shake firmware
+# already uses. Update this ConfigMap and `kubectl rollout restart
+# deployment -l app=ingestor` to pick up new tags without a code change.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingestor-channel-map
+  namespace: default
+data:
+  channels.yaml: |
+    channels:
+      MIC: {role: acoustic, expected_rate: 16000}
+      EHZ: {role: seismic,  expected_rate: 100}
+      ENE: {role: accel_x,  expected_rate: 100}
+      ENN: {role: accel_y,  expected_rate: 100}
+      ENZ: {role: accel_z,  expected_rate: 100}

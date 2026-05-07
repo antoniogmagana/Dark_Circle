@@ -15,7 +15,7 @@ from whitelist import (
     load_config,
 )
 
-SENSOR_MSG_TYPE = "ros2_interfaces/msg/RawSensorReading"
+SENSOR_MSG_TYPE = "std_msgs/msg/String"
 POLL_INTERVAL = 5.0
 GRACE_POLLS = 3
 DEFAULT_CONFIG_PATH = "/etc/inference-engine/expected-sensors.yaml"
@@ -133,12 +133,7 @@ class DiscoveryNode(Node):
             self.get_logger().error(f"poll cycle failed: {exc!r}")
 
     def _log_unknown_topics(self, cfg: dict[str, ArraySpec], visible: set[str]):
-        configured = set()
-        for spec in cfg.values():
-            configured.add(spec.audio)
-            configured.add(spec.seismic)
-            if spec.accel is not None:
-                configured.update(spec.accel.values())
+        configured = {spec.topic for spec in cfg.values()}
         unknown = frozenset(visible - configured)
         if unknown != self._last_unknown:
             for topic in sorted(unknown - self._last_unknown):

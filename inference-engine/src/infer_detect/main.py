@@ -23,6 +23,7 @@ import torch
 from inference_protos import inference_pb2
 
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/model"))
+READY_SENTINEL = Path(os.environ.get("READY_SENTINEL", "/tmp/ready"))
 
 # Constrain PyTorch's intra-op thread pool to the container's CPU budget.
 # Without this, PyTorch defaults to the host's physical core count (e.g.
@@ -170,7 +171,12 @@ async def main_async():
         cb=node.on_sensor_data,
         manual_ack=False,
     )
-    print("[infer_detect] bound to SENSOR_DATA/infer-detect (JetStream)", flush=True)
+    READY_SENTINEL.touch()
+    print(
+        "[infer-detect] READY: model loaded, NATS subscribed. "
+        "Pipeline accepting messages.",
+        flush=True,
+    )
 
     try:
         while True:

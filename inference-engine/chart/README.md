@@ -98,7 +98,36 @@ Watch the rollout:
 kubectl get pods -w
 ```
 
-When all pods are `Running`, verify ROS2 input → inference → ROS2 output:
+### Verifying the pipeline is ready
+
+The `infer-detect`, `infer-classify`, and `egress` pods each load a model
+and bind a NATS subscription before declaring themselves Ready. Use the
+helper script to wait for the whole pipeline:
+
+```bash
+scripts/wait_for_pipeline_ready.sh --namespace default
+```
+
+It blocks until the three Deployments report `Available`, then prints a
+banner. On timeout (5 min) it lists which Deployments failed and a hint
+for `kubectl describe`.
+
+For a manual one-line check:
+
+```bash
+kubectl wait --for=condition=available --timeout=300s \
+  deployment/infer-detect deployment/infer-classify deployment/egress
+```
+
+You can also tail the per-pod stdout for the explicit `READY:` log line:
+
+```bash
+kubectl logs -l app=infer-detect | grep READY
+kubectl logs -l app=infer-classify | grep READY
+kubectl logs -l app=egress | grep READY
+```
+
+Once Ready, verify ROS2 input → inference → ROS2 output:
 
 ```bash
 # Confirm Discovery sees your sensor topics
@@ -145,10 +174,21 @@ production install.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `expectedSensors` | one example `shake-001` | Map of `{array_id: {audio, seismic, accel?}}`. Array IDs become Deployment names (must be RFC 1123 subdomain). |
+| `expectedSensors` | one example `shake-001` | Map of `{array_id: {topic}}`. Each array publishes one bundled-channel `std_msgs/String` topic carrying a JSON payload. Array IDs become Deployment names (must be RFC 1123 subdomain). |
 
-Each entry's `accel` block is optional but if present must define `x`,
-`y`, AND `z`.
+### Channel-tag map
+
+The customer's free-form channel-tag strings (e.g. `MIC`, `EHZ`) map to
+the five SensorBuffer roles via a cluster-level ConfigMap, mounted at
+`/etc/inference-engine/channels.yaml` in every Ingestor pod.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `channelMap` | `MIC/EHZ/ENE/ENN/ENZ` placeholders | Map of `{tag: {role, expected_rate}}`. Required roles: `acoustic`, `seismic`. Accel roles are all-or-nothing. `expected_rate` is the native sample rate the buffer compares against at window close — drift outside ±1% drops the window. |
+
+Update `channelMap` in `values.yaml` and `helm upgrade` (then
+`kubectl rollout restart deployment -l app=ingestor`) to change tags
+without a code change.
 
 ### Sensor signal parameters
 
@@ -157,11 +197,10 @@ Each entry's `accel` block is optional but if present must define `x`,
 | `sensorConfig.audioBitDepth` | `16` | Acoustic ADC bit depth (signed). |
 | `sensorConfig.seismicBitDepth` | `24` | Seismic ADC bit depth. |
 | `sensorConfig.accelBitDepth` | `24` | Accelerometer ADC bit depth. |
-| `sensorConfig.audioSampleRate` | `16000` | Acoustic samples/sec. |
-| `sensorConfig.seismicSampleRate` | `100` | Seismic samples/sec. |
-| `sensorConfig.accelSampleRate` | `100` | Accelerometer samples/sec/axis. |
 | `sensorConfig.targetRate` | `16000` | Target rate for legacy upsampled mode. Ignored when `nativeRates: true`. |
 | `sensorConfig.nativeRates` | `true` | Ship each channel at its native rate (CRL pipeline). Set `false` only for legacy CNN. |
+
+(Per-channel native sample rates moved to `channelMap` above.)
 
 ### Inference workloads
 
@@ -371,10 +410,15 @@ python3 inference-engine/scripts/replay_publisher.py \
     --duration 30
 ```
 
-The tool publishes to `/shake_001/aud` and `/shake_001/ehz` by default
-(matches the chart's default `expectedSensors.shake-001`). Override
-with `--audio-topic` / `--seismic-topic` if your `expectedSensors`
-configuration uses different names.
+The tool publishes one bundled-channel JSON message per tick to
+`/shake_001/data` by default (matches the chart's default
+`expectedSensors.shake-001.topic`). Override with `--topic` if your
+`expectedSensors` configuration uses a different name.
+
+The default channel tags in the JSON payload are `MIC` (audio) and `EHZ`
+(seismic), matching the chart's default `channelMap`. Override with
+`--audio-tag` / `--seismic-tag` if your `channelMap` uses different
+tag strings.
 
 ### Reading the output
 

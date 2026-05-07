@@ -38,8 +38,10 @@ spec:
               value: "1"
             - name: SENSOR_ARRAY
               value: "placeholder"
-            - name: SENSOR_ROLE_MAP
-              value: "{}"
+            - name: SENSOR_TOPIC
+              value: "/placeholder/data"
+            - name: CHANNEL_MAP_PATH
+              value: "/etc/inference-engine/channels.yaml"
             - name: AUDIO_BIT_DEPTH
               valueFrom:
                 configMapKeyRef:
@@ -55,21 +57,6 @@ spec:
                 configMapKeyRef:
                   name: sensor-config
                   key: accel_bit_depth
-            - name: AUDIO_SAMPLE_RATE
-              valueFrom:
-                configMapKeyRef:
-                  name: sensor-config
-                  key: audio_sample_rate
-            - name: SEISMIC_SAMPLE_RATE
-              valueFrom:
-                configMapKeyRef:
-                  name: sensor-config
-                  key: seismic_sample_rate
-            - name: ACCEL_SAMPLE_RATE
-              valueFrom:
-                configMapKeyRef:
-                  name: sensor-config
-                  key: accel_sample_rate
             - name: target_rate
               valueFrom:
                 configMapKeyRef:
@@ -81,7 +68,13 @@ spec:
             - name: fastdds-profiles
               mountPath: /etc/fastdds
               readOnly: true
+            - name: channel-map
+              mountPath: /etc/inference-engine
+              readOnly: true
       volumes:
         - name: fastdds-profiles
           configMap:
             name: fastdds-profiles
+        - name: channel-map
+          configMap:
+            name: ingestor-channel-map
