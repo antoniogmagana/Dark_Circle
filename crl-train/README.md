@@ -73,6 +73,9 @@ Post-hoc comparison of completed runs:
 - `compare_cross_location.py` — per-dataset heatmap + ship metric (min-F1)
 - `plot_run.py` — per-run diagnostic plots (training curves, beta, Morlet freq drift, downstream)
 - `plot_aggregate.py` — cross-run overlay + bar + scatter
+- `gather_top_confusions.py` — re-render confusion matrices for top-ranked runs (uses the same selection rule as `--promote-default`)
+- `per_vehicle_confusion.py` — per-(dataset, vehicle, rs_node) confusion breakdown for a single downstream probe; flags reclassification candidates
+- `supervised_baseline.py` — end-to-end supervised classifier on the CRL frontend+encoder (no VAE/CRL machinery), as a ceiling for what the data + architecture can achieve
 
 All read recursively from `saved_crl/runs/` and write to `saved_crl/analysis/` by default.
 
@@ -96,7 +99,7 @@ crl-train/
 │   └── trainer.py               # CRLModel + Trainer (epoch loop, opt groups, stage-2)
 ├── configs/
 │   └── sweeps/                  # YAML sweep specs
-├── tests/                       # 488 tests mirror the module tree
+├── tests/                       # 518 tests mirror the module tree
 ├── saved_crl/                   # run outputs (see analysis scripts)
 │   ├── runs/                    # canonical: <frontend>/<training_mode>/<run-id>/{crl,downstream,eval}/
 │   │   ├── multiscale/
@@ -123,6 +126,9 @@ crl-train/
 ├── compare_cross_location.py    # per-dataset heatmap
 ├── plot_run.py                  # per-run plots
 ├── plot_aggregate.py            # cross-run plots
+├── gather_top_confusions.py     # confusion matrices for top-ranked runs
+├── per_vehicle_confusion.py     # per-(dataset, vehicle) confusion breakdown
+├── supervised_baseline.py       # supervised ceiling baseline (no CRL machinery)
 ```
 
 ---
@@ -235,52 +241,72 @@ Probe checkpoint names: `downstream_best_pres.pth` (argmax `val_pres_f1`), `down
 ## Deploying a checkpoint to the inference engine
 
 Use `export_for_inference.py` to convert a probe-trained run into the
-TorchScript bundle the inference pods consume. The exporter writes
-**directly into `inference-engine/crl-bundles/`** when given
-`--bundle-name`, so the deployment artifact lands where
-`scripts/build_containers.sh` will find it via `CRL_BUNDLE`. Assumes
-`crl-train` and `inference-engine` are siblings under one parent
-directory (the standard project layout).
+TorchScript bundles the inference pods consume. The two inference pods
+(`infer-detect` and `infer-classify`) are deployed independently and
+read from **two separate catalogs**:
+
+- `inference-engine/detect-bundles/` — encoder + presence head, selected at build time by `DETECT_BUNDLE` (default `detect-default`).
+- `inference-engine/classify-bundles/` — encoder + type head, selected by `CLASSIFY_BUNDLE` (default `classify-default`).
+
+Each invocation produces **one** bundle; export both kinds from the
+same saved run with two calls. The exporter writes directly into the
+appropriate catalog when given `--bundle-name`. Assumes `crl-train`
+and `inference-engine` are siblings under one parent directory (the
+standard project layout); override with `--bundles-dir` otherwise.
 
 ```bash
-# Pick the run + probe, choose a versioned bundle name, write into the
-# inference-engine catalog.
+# Detect bundle (encoder + presence head)
 poetry run python export_for_inference.py \
     --save-dir saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \
-    --bundle-name <frontend>-<mode>-<run>-<probe>-aux_type-v<N>
+    --bundle-kind detect \
+    --bundle-name <frontend>-<mode>-<run>-v<N>
+
+# Classify bundle (encoder + type head)
+poetry run python export_for_inference.py \
+    --save-dir saved_crl/runs/<frontend>/<mode>/<run>/downstream/<probe> \
+    --bundle-kind classify \
+    --bundle-name <frontend>-<mode>-<run>-<probe>-v<N>
 ```
 
 Naming convention (enforced by the exporter — fails fast if the name
-doesn't end in `-v<N>`): `<frontend>-<training_mode>-<run-id>-<probe>-[aux_type-]v<N>`.
+doesn't end in `-v<N>`):
+- detect:   `<frontend>-<training-mode>-<run-id>-v<N>`
+- classify: `<frontend>-<training-mode>-<run-id>-<probe>-v<N>`
 
 Example for the current shipping leader:
 
 ```bash
 poetry run python export_for_inference.py \
     --save-dir saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type \
-    --bundle-name multiscale-vae-v3_lowfreq-mlp_ztype-aux_type-v2
+    --bundle-kind classify \
+    --bundle-name multiscale-vae-v3_lowfreq-mlp_ztype-v2
 ```
 
-To promote the new bundle as the default that customers get when
-they don't override `CRL_BUNDLE`, repoint the symlink in the same
-invocation:
+To evaluate the new bundle against its catalog and repoint the
+`<kind>-default` symlink if it wins, add `--promote-default`:
 
 ```bash
 poetry run python export_for_inference.py \
     --save-dir saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type \
-    --bundle-name multiscale-vae-v3_lowfreq-mlp_ztype-aux_type-v2 \
-    --update-default-symlink
+    --bundle-kind classify \
+    --bundle-name multiscale-vae-v3_lowfreq-mlp_ztype-v2 \
+    --promote-default
 ```
+
+The selection rule is run by the exporter, not by hand — it enforces
+catalog floors so a regression isn't auto-promoted into the shipping
+default.
 
 After exporting:
 
-1. Update the catalog table in `inference-engine/crl-bundles/README.md`
-   with the new bundle's pres_f1 / type_f1 / min_type_f1 numbers.
+1. Update the catalog table in
+   `inference-engine/<kind>-bundles/README.md` with the new bundle's
+   pres_f1 / type_f1 / min_*_f1 numbers.
 2. Commit the bundle directory and (if you promoted) the symlink change.
 
 For ad-hoc exports outside the bundle catalog (parity testing, scratch
-deploys), use `--out-dir <path>` instead of `--bundle-name` — that
-flag skips the naming check and writes wherever you point it.
+deploys), use `--out-dir <path>` instead of `--bundle-name` — that flag
+skips the naming check and writes wherever you point it.
 
 ---
 
@@ -290,7 +316,7 @@ flag skips the naming check and writes wherever you point it.
 python -m pytest tests/ -q
 ```
 
-488 tests across `tests/` mirroring the module tree. Run pytest against `tests/` directly — the top-level `smoke_test.py` is a script, not a pytest module, and pytest will fail at collection if pointed at the repo root.
+518 tests across `tests/` mirroring the module tree. Run pytest against `tests/` directly — the top-level `smoke_test.py` is a script, not a pytest module, and pytest will fail at collection if pointed at the repo root.
 
 ---
 

@@ -293,7 +293,7 @@ poetry run python scripts/compile_protos.py
 
 ## Testing
 
-**Test suite status (2026-05-02): ✅ 167 passed, 3 skipped (rclpy-only), 0 failed.**
+**Test suite status (2026-05-07): ✅ 174 passed, 3 skipped (rclpy-only), 0 failed.**
 
 The inference engine has comprehensive test coverage across all nodes.
 `tests/conftest.py` sets `NATIVE_RATES=1` by default so per-channel
@@ -321,8 +321,8 @@ poetry run pip install \
 poetry run pytest tests/ -v
 ```
 
-Expected outcome on Linux x86_64 (verified 2026-05-02):
-**167 passed, 3 skipped (rclpy-only), 0 failed.**
+Expected outcome on Linux x86_64 (verified 2026-05-07):
+**174 passed, 3 skipped (rclpy-only), 0 failed.**
 
 **Run subsets:**
 
