@@ -11,6 +11,7 @@
 | v2 | multiscale | False | False | 100 | 0.8767 | 0.6082 | 0.1799 |  |  |  |
 | filesplit_v2 | multiscale | False | False | 100 | 0.8924 | 0.5248 | 0.1631 |  |  |  |
 | phase_v1_diag | morlet_per_sensor | True | False | 78 | 0.7884 | 0.4977 | 2.2769 |  |  |  |
+| 2026-05-04_05-49-26 | morlet_per_sensor | False | False | 78 | 0.7432 | 0.4871 | 4.46 | 0.3357 | focal | 0.2288 |
 | 2026-04-25_09-41 | multiscale | False | False | 68 | 0.8859 | 0.4778 | 0.1438 |  |  |  |
 | 2026-04-24_16-31 | multiscale | False | False | 100 | 0.8837 | 0.4718 | 0.1736 |  |  |  |
 | 2026-04-24_16-17 | multiscale | False | False | 35 | 0.7519 | 0.4029 |  |  |  |  |

@@ -8,6 +8,7 @@ v3_lowfreq,multiscale,False,standard,disentangled,False,100,0.8612,0.6499,0.1072
 v2,multiscale,False,standard,vae,False,100,0.8767,0.6082,0.1799,,,,,,False,False
 filesplit_v2,multiscale,False,standard,vae,False,100,0.8924,0.5248,0.1631,,,,,,False,False
 phase_v1_diag,morlet_per_sensor,True,standard,vae,False,78,0.7884,0.4977,2.2769,,,,,,False,False
+2026-05-04_05-49-26,morlet_per_sensor,False,standard,vae,False,78,0.7432,0.4871,4.46,0.3357,focal,0.4418,0.6267,0.2288,False,False
 2026-04-25_09-41,multiscale,False,standard,disentangled,False,68,0.8859,0.4778,0.1438,,,,,,False,False
 2026-04-24_16-31,multiscale,False,standard,vae,False,100,0.8837,0.4718,0.1736,,,,,,False,False
 2026-04-24_16-17,multiscale,False,standard,contrastive,False,35,0.7519,0.4029,,,,,,,False,False

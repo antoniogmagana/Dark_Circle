@@ -1,6 +1,6 @@
 # Ablation Pairs
 
-Runs considered: 14
+Runs considered: 15
 
 A pair matches an axis when those two runs differ in that axis AND all other tracked axes are identical. Δ = variant − baseline.
 
@@ -9,10 +9,19 @@ A pair matches an axis when those two runs differ in that axis AND all other tra
 | Baseline | Variant | Axis: base → variant | Δpres_f1 | Δtype_f1 | Δref_elbo |
 |---|---|---|---|---|---|
 | 2026-04-24_18-57 | phase_v1_diag | morlet_fused → morlet_per_sensor | -0.0308 | +0.1488 | -0.0345 |
+| 2026-05-04_05-49-26 | 2026-04-24_16-31 | morlet_per_sensor → multiscale | +0.1405 | -0.0153 | -4.2863 |
+| 2026-05-04_05-49-26 | 2026-04-28_23-12-59 | morlet_per_sensor → multiscale | +0.1345 | +0.1480 | -4.2460 |
+| 2026-05-04_05-49-26 | 2026-04-29_13-26-17 | morlet_per_sensor → multiscale | +0.1310 | +0.1718 | -4.2674 |
+| 2026-05-04_05-49-26 | 2026-05-03_05-02-44 | morlet_per_sensor → multiscale | +0.1193 | +0.1520 | -3.9074 |
+| 2026-05-04_05-49-26 | filesplit_v2 | morlet_per_sensor → multiscale | +0.1492 | +0.0377 | -4.2969 |
+| 2026-05-04_05-49-26 | v2 | morlet_per_sensor → multiscale | +0.1335 | +0.1211 | -4.2800 |
+| 2026-05-04_05-49-26 | v3_lowfreq | morlet_per_sensor → multiscale | +0.1318 | +0.1694 | -4.2572 |
 
 ## morlet_use_phase
 
-_No matching pairs found._
+| Baseline | Variant | Axis: base → variant | Δpres_f1 | Δtype_f1 | Δref_elbo |
+|---|---|---|---|---|---|
+| 2026-05-04_05-49-26 | phase_v1_diag | False → True | +0.0452 | +0.0106 | -2.1831 |
 
 ## prior_type
 

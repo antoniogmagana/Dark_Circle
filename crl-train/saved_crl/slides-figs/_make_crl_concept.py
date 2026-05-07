@@ -39,7 +39,7 @@ mpl.rcParams.update(
     {
         "font.family": "sans-serif",
         "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
-        "savefig.dpi": 300,
+        "savefig.dpi": 900,
         "savefig.bbox": "tight",
         "savefig.facecolor": "white",
         "figure.facecolor": "white",
@@ -68,14 +68,14 @@ def main() -> None:
     ax.set_axis_off()
 
     # ---------- shared input column (far left) -----------------------------
-    rounded_box(ax, (0.2, 3.4), 2.0, 2.2, edge=C_INPUT, face="#eeeeee")
+    rounded_box(ax, (0.05, 3.2), 2.7, 2.6, edge=C_INPUT, face="#eeeeee")
     ax.text(
-        1.2,
-        4.85,
+        1.4,
+        5.15,
         "x  (input)",
         ha="center",
         va="center",
-        fontsize=18,
+        fontsize=30,
         fontweight="bold",
         color=C_INPUT,
     )
@@ -83,49 +83,50 @@ def main() -> None:
     # The factors of variation that the input contains — listed inside the
     # input box rather than as floating labels.
     ax.text(
-        1.2,
-        4.05,
+        1.4,
+        4.15,
         "vehicle type\nproximity\nenvironment",
         ha="center",
         va="center",
-        fontsize=11,
+        fontsize=20,
         color=C_FACTOR,
         style="italic",
         linespacing=1.3,
     )
 
     # ---------- LEFT side: entangled / vanilla representation --------------
-    # title strip
+    # title strip — centered between left edge and divider (x=7.4)
     ax.text(
-        4.6,
-        8.4,
+        3.7,
+        7.95,
         "vanilla representation",
         ha="center",
         va="center",
-        fontsize=20,
+        fontsize=30,
         fontweight="bold",
         color=C_TANGLED,
     )
     ax.text(
-        4.6,
-        7.85,
-        "every factor mixed across every latent dim",
+        3.7,
+        7.4,
+        "every factor mixed across all dims",
         ha="center",
         va="center",
-        fontsize=14,
+        fontsize=20,
         color="#555555",
         style="italic",
     )
 
     # tangled blob — single big rounded box with random "wires" inside
-    rounded_box(ax, (2.8, 2.0), 3.6, 5.0, edge=C_TANGLED, face=C_TANGLED_BG, lw=2.0)
+    # centered between x (input) right edge (x=2.75) and divider (x=7.4)
+    rounded_box(ax, (3.275, 2.0), 3.6, 4.3, edge=C_TANGLED, face=C_TANGLED_BG, lw=2.0)
     ax.text(
-        4.6,
+        5.075,
         2.45,
         "z  (entangled)",
         ha="center",
         va="center",
-        fontsize=18,
+        fontsize=30,
         fontweight="bold",
         color=C_TANGLED,
     )
@@ -134,19 +135,19 @@ def main() -> None:
     rng = np.random.default_rng(7)
     n_wires = 24
     for _ in range(n_wires):
-        x_pts = rng.uniform(3.0, 6.2, size=4)
-        y_pts = rng.uniform(3.1, 6.7, size=4)
+        x_pts = rng.uniform(3.475, 6.675, size=4)
+        y_pts = rng.uniform(3.0, 6.0, size=4)
         ax.plot(x_pts, y_pts, color=C_TANGLED, alpha=0.35, linewidth=1.2)
     # nodes
     for _ in range(14):
-        cx = rng.uniform(3.05, 6.15)
-        cy = rng.uniform(3.05, 6.85)
+        cx = rng.uniform(3.525, 6.625)
+        cy = rng.uniform(3.0, 6.15)
         ax.add_patch(Circle((cx, cy), 0.10, color=C_TANGLED, alpha=0.85))
 
     # single short arrow from input → tangled blob
     a = FancyArrowPatch(
-        (2.2, 4.5),
-        (2.8, 4.5),
+        (2.75, 4.3),
+        (3.275, 4.3),
         arrowstyle="-|>",
         mutation_scale=18,
         color=C_TANGLED,
@@ -158,20 +159,20 @@ def main() -> None:
     ax.add_patch(a)
 
     # downstream readout from tangled
-    rounded_box(ax, (3.0, 0.6), 3.2, 1.0, edge=C_DECISION, face="#f7e5e5")
+    rounded_box(ax, (3.175, 0.55), 3.8, 1.1, edge=C_DECISION, face="#f7e5e5")
     ax.text(
-        4.6,
+        5.075,
         1.1,
         "linear readout",
         ha="center",
         va="center",
-        fontsize=14,
+        fontsize=30,
         fontweight="bold",
         color=C_DECISION,
     )
     a = FancyArrowPatch(
-        (4.6, 2.0),
-        (4.6, 1.6),
+        (5.075, 2.0),
+        (5.075, 1.65),
         arrowstyle="-|>",
         mutation_scale=16,
         color=C_DECISION,
@@ -179,104 +180,106 @@ def main() -> None:
     )
     ax.add_patch(a)
     ax.text(
-        4.6,
-        0.20,
-        "must untangle every factor at once",
-        ha="center",
-        va="center",
-        fontsize=13,
-        color=C_DECISION,
-        style="italic",
-    )
-
-    # ---------- vertical divider -------------------------------------------
-    ax.plot([8.0, 8.0], [1.5, 8.6], color="#cccccc", linewidth=1.2, linestyle=":")
-
-    # ---------- RIGHT side: causal / factorized representation -------------
-    ax.text(
-        11.8,
-        8.4,
-        "causal representation",
+        1.4,
+        1.55,
+        "must untangle\nevery factor\nat once",
         ha="center",
         va="center",
         fontsize=20,
+        color=C_DECISION,
+        style="italic",
+        linespacing=1.3,
+    )
+
+    # ---------- vertical divider -------------------------------------------
+    # centered on the figure's top/bottom edges (ylim 0..9 → midline y=4.5)
+    ax.plot([7.4, 7.4], [1.075, 7.925], color="#666666", linewidth=1.4, linestyle=":")
+
+    # ---------- RIGHT side: causal / factorized representation -------------
+    ax.text(
+        11.85,
+        7.95,
+        "causal representation",
+        ha="center",
+        va="center",
+        fontsize=30,
         fontweight="bold",
         color=C_SIGNAL,
     )
     ax.text(
-        11.8,
-        7.85,
-        "the latent is partitioned by what each block describes",
+        11.85,
+        7.4,
+        "each block describes one factor",
         ha="center",
         va="center",
-        fontsize=14,
+        fontsize=20,
         color="#555555",
         style="italic",
     )
 
     # outer z box
-    rounded_box(ax, (8.6, 2.0), 6.4, 5.0, edge=C_SIGNAL, face="#f5fbf6", lw=2.0)
+    rounded_box(ax, (7.7, 2.0), 8.25, 4.3, edge=C_SIGNAL, face="#f5fbf6", lw=2.0)
     ax.text(
-        11.8,
+        11.85,
         2.45,
         "z  (factorized)",
         ha="center",
         va="center",
-        fontsize=18,
+        fontsize=30,
         fontweight="bold",
         color=C_SIGNAL,
     )
 
     # two inner blocks: signal and environment
-    rounded_box(ax, (9.0, 4.6), 2.8, 2.0, edge=C_SIGNAL, face=C_SIGNAL_BG, lw=1.6)
+    rounded_box(ax, (7.9, 3.9), 3.4, 2.1, edge=C_SIGNAL, face=C_SIGNAL_BG, lw=1.6)
     ax.text(
-        10.4,
-        5.95,
+        9.6,
+        5.4,
         "z_signal",
         ha="center",
         va="center",
-        fontsize=18,
+        fontsize=30,
         fontweight="bold",
         color=C_SIGNAL,
     )
     ax.text(
-        10.4,
-        5.30,
+        9.6,
+        4.45,
         "vehicle-relevant\n(type · proximity)",
         ha="center",
         va="center",
-        fontsize=13,
+        fontsize=20,
         color=C_SIGNAL,
     )
 
-    rounded_box(ax, (11.8, 4.6), 3.0, 2.0, edge=C_ENV, face=C_ENV_BG, lw=1.6)
+    rounded_box(ax, (11.7, 3.9), 4.1, 2.1, edge=C_ENV, face=C_ENV_BG, lw=1.6)
     ax.text(
-        13.3,
-        5.95,
+        13.75,
+        5.4,
         "z_environment",
         ha="center",
         va="center",
-        fontsize=18,
+        fontsize=30,
         fontweight="bold",
         color=C_ENV,
     )
     ax.text(
-        13.3,
-        5.30,
+        13.75,
+        4.45,
         "nuisance / context\n(scene, weather, time)",
         ha="center",
         va="center",
-        fontsize=13,
+        fontsize=20,
         color=C_ENV,
     )
 
     # Route input → factorized z over the top of the figure so the line
     # doesn't pass through the entangled blob. Three legs: up from input,
     # across above both columns, down into the right z-box.
-    over_y = 7.55
+    over_y = 7.0
     a1 = FancyArrowPatch(
-        (1.2, 5.6),
-        (1.2, over_y),
+        (1.4, 5.8),
+        (1.4, over_y),
         arrowstyle="-",
         color=C_SIGNAL,
         alpha=0.65,
@@ -284,8 +287,8 @@ def main() -> None:
     )
     ax.add_patch(a1)
     a2 = FancyArrowPatch(
-        (1.2, over_y),
-        (11.8, over_y),
+        (1.4, over_y),
+        (11.85, over_y),
         arrowstyle="-",
         color=C_SIGNAL,
         alpha=0.65,
@@ -293,8 +296,8 @@ def main() -> None:
     )
     ax.add_patch(a2)
     a3 = FancyArrowPatch(
-        (11.8, over_y),
-        (11.8, 7.0),
+        (11.85, over_y),
+        (11.85, 6.3),
         arrowstyle="-|>",
         mutation_scale=18,
         color=C_SIGNAL,
@@ -306,20 +309,20 @@ def main() -> None:
     # (block sub-text already names what each block captures; no extra labels)
 
     # downstream readout from z_signal only
-    rounded_box(ax, (8.9, 0.6), 3.0, 1.0, edge=C_DECISION, face="#f7e5e5")
+    rounded_box(ax, (7.7, 0.55), 3.8, 1.1, edge=C_DECISION, face="#f7e5e5")
     ax.text(
-        10.4,
+        9.6,
         1.1,
         "linear readout",
         ha="center",
         va="center",
-        fontsize=14,
+        fontsize=30,
         fontweight="bold",
         color=C_DECISION,
     )
     a = FancyArrowPatch(
-        (10.4, 4.6),
-        (10.4, 1.6),
+        (9.6, 3.9),
+        (9.6, 1.65),
         arrowstyle="-|>",
         mutation_scale=16,
         color=C_DECISION,
@@ -327,20 +330,20 @@ def main() -> None:
     )
     ax.add_patch(a)
     ax.text(
-        10.4,
-        0.20,
+        13.725,
+        1.0,
         "reads only z_signal",
         ha="center",
         va="center",
-        fontsize=13,
+        fontsize=20,
         color=C_DECISION,
         style="italic",
     )
 
     # "ignored" label coming off z_environment
     a = FancyArrowPatch(
-        (13.3, 4.6),
-        (13.3, 2.0),
+        (13.75, 3.9),
+        (13.75, 3.4),
         arrowstyle="-",
         color="#999999",
         linewidth=1.0,
@@ -348,23 +351,25 @@ def main() -> None:
     )
     ax.add_patch(a)
     ax.text(
-        13.3,
-        1.1,
-        "free to vary,\nnot used at decision time",
+        13.75,
+        3.1,
+        "not used",
         ha="center",
         va="center",
-        fontsize=12,
+        fontsize=20,
         color="#777777",
         style="italic",
     )
 
     # title bar
     ax.text(
-        0.2,
-        8.6,
+        8.0,
+        8.75,
         "Causal Representation Learning · structure the latent so each "
         "factor lives in its own subspace",
-        fontsize=15,
+        ha="center",
+        va="center",
+        fontsize=20,
         color="#555555",
         style="italic",
     )
