@@ -78,6 +78,16 @@ def plot_metric_over_epochs(
     P.poster_save(fig, out)
 
 
+def _label_with_probe(label: str, probe: str | None) -> str:
+    """Append the type-head winning probe to a bar label, abbreviated.
+    'mlp_ztype__crl_best_aux_type' -> '(mlp_ztype_aux)'."""
+    if not probe:
+        return label
+    name, _, ckpt = probe.partition("__")
+    suffix = "_aux" if ckpt.endswith("aux_type") else ""
+    return f"{label}\n({name}{suffix})"
+
+
 def plot_best_f1_bar(runs: list[A.RunMetrics], styles: list[dict], out: Path) -> None:
     pairs = [(rm, s) for rm, s in zip(runs, styles, strict=True) if rm.best_type_f1 is not None]
     if not pairs:
@@ -85,7 +95,7 @@ def plot_best_f1_bar(runs: list[A.RunMetrics], styles: list[dict], out: Path) ->
         return
     # Plot bars in ascending order so best ends up at the top.
     pairs = sorted(pairs, key=lambda p: p[0].best_type_f1)
-    names = [s["label"] for _, s in pairs]
+    names = [_label_with_probe(s["label"], rm.best_type_probe) for rm, s in pairs]
     values = [rm.best_type_f1 for rm, _ in pairs]
     colors = [s["color"] for _, s in pairs]
 
@@ -182,7 +192,11 @@ def main() -> int:
     styles = P.assign_run_styles(top)
     print(f"Plotting top-{len(top)} runs:")
     for rm in top:
-        print(f"  {rm.name}  best_type_f1={rm.best_type_f1:.3f}  ({rm.config.get('frontend_type','?')})")
+        probe = rm.best_type_probe or "?"
+        print(
+            f"  {rm.name}  best_type_f1={rm.best_type_f1:.3f}  "
+            f"({rm.config.get('frontend_type','?')}, via {probe})"
+        )
 
     out_dir = args.out
     out_dir.mkdir(parents=True, exist_ok=True)

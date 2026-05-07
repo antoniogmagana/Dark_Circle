@@ -1,0 +1,53 @@
+{
+  "eligible": [
+    "morlet_per_sensor/vae/phase_v1_diag",
+    "multiscale/disentangled/v3_lowfreq",
+    "multiscale/vae/v3_lowfreq"
+  ],
+  "dead": [
+    {
+      "run": "morlet_fused/vae/2026-04-24_18-57",
+      "reason": "Error(s) in loading state_dict for CRLModel:\n\tsize mismatch for frontends.seismic.0.kernel_re: copying a param with shape torch.Size([64, 1, 573]) from checkpoint, the shape in current model is torch.Size([64, 1, 287]).\n\tsize mismatch for frontends.seismic.0.kernel_im: copying a param with shape torch.Size([64, 1, 573]) from checkpoint, the shape in current model is torch.Size([64, 1, 287])."
+    },
+    {
+      "run": "morlet_per_sensor/disentangled/2026-04-25_10-06",
+      "reason": "Error(s) in loading state_dict for CRLModel:\n\tsize mismatch for frontends.seismic.0.kernel_re: copying a param with shape torch.Size([64, 1, 573]) from checkpoint, the shape in current model is torch.Size([64, 1, 287]).\n\tsize mismatch for frontends.seismic.0.kernel_im: copying a param with shape torch.Size([64, 1, 573]) from checkpoint, the shape in current model is torch.Size([64, 1, 287])."
+    },
+    {
+      "run": "morlet_per_sensor/disentangled/smoke",
+      "reason": "Error(s) in loading state_dict for CRLModel:\n\tsize mismatch for frontends.seismic.0.kernel_re: copying a param with shape torch.Size([64, 1, 573]) from checkpoint, the shape in current model is torch.Size([64, 1, 287]).\n\tsize mismatch for frontends.seismic.0.kernel_im: copying a param with shape torch.Size([64, 1, 573]) from checkpoint, the shape in current model is torch.Size([64, 1, 287])."
+    },
+    {
+      "run": "morlet_per_sensor/vae/2026-04-24_18-57",
+      "reason": "Error(s) in loading state_dict for CRLModel:\n\tsize mismatch for frontends.seismic.0.kernel_re: copying a param with shape torch.Size([64, 1, 573]) from checkpoint, the shape in current model is torch.Size([64, 1, 287]).\n\tsize mismatch for frontends.seismic.0.kernel_im: copying a param with shape torch.Size([64, 1, 573]) from checkpoint, the shape in current model is torch.Size([64, 1, 287])."
+    },
+    {
+      "run": "multiscale/contrastive/2026-04-24_16-17",
+      "reason": "Error(s) in loading state_dict for CRLModel:\n\tMissing key(s) in state_dict: \"frontends.audio.0.branches.3.0.weight\", \"frontends.audio.0.branches.3.1.weight\", \"frontends.audio.0.branches.3.1.bias\". \n\tsize mismatch for frontends.audio.0.proj.weight: copying a param with shape torch.Size([64, 192, 1]) from checkpoint, the shape in current model is torch.Size([64, 256, 1])."
+    },
+    {
+      "run": "multiscale/disentangled/2026-04-25_09-41",
+      "reason": "Error(s) in loading state_dict for CRLModel:\n\tMissing key(s) in state_dict: \"frontends.audio.0.branches.3.0.weight\", \"frontends.audio.0.branches.3.1.weight\", \"frontends.audio.0.branches.3.1.bias\". \n\tsize mismatch for frontends.audio.0.proj.weight: copying a param with shape torch.Size([64, 192, 1]) from checkpoint, the shape in current model is torch.Size([64, 256, 1])."
+    },
+    {
+      "run": "multiscale/vae/2026-04-24_16-31",
+      "reason": "Error(s) in loading state_dict for CRLModel:\n\tMissing key(s) in state_dict: \"frontends.audio.0.branches.3.0.weight\", \"frontends.audio.0.branches.3.1.weight\", \"frontends.audio.0.branches.3.1.bias\". \n\tsize mismatch for frontends.audio.0.proj.weight: copying a param with shape torch.Size([64, 192, 1]) from checkpoint, the shape in current model is torch.Size([64, 256, 1])."
+    },
+    {
+      "run": "multiscale/vae/2026-04-28_23-12-59",
+      "reason": "Error(s) in loading state_dict for CRLModel:\n\tsize mismatch for aux_type_heads.fused.weight: copying a param with shape torch.Size([4, 12]) from checkpoint, the shape in current model is torch.Size([4, 6])."
+    },
+    {
+      "run": "multiscale/vae/2026-04-29_13-26-17",
+      "reason": "Error(s) in loading state_dict for CRLModel:\n\tsize mismatch for aux_type_heads.fused.weight: copying a param with shape torch.Size([4, 12]) from checkpoint, the shape in current model is torch.Size([4, 6])."
+    },
+    {
+      "run": "multiscale/vae/filesplit_v2",
+      "reason": "Error(s) in loading state_dict for CRLModel:\n\tMissing key(s) in state_dict: \"frontends.audio.0.branches.3.0.weight\", \"frontends.audio.0.branches.3.1.weight\", \"frontends.audio.0.branches.3.1.bias\". \n\tsize mismatch for frontends.audio.0.proj.weight: copying a param with shape torch.Size([64, 192, 1]) from checkpoint, the shape in current model is torch.Size([64, 256, 1])."
+    },
+    {
+      "run": "multiscale/vae/v2",
+      "reason": "Error(s) in loading state_dict for CRLModel:\n\tMissing key(s) in state_dict: \"frontends.audio.0.branches.3.0.weight\", \"frontends.audio.0.branches.3.1.weight\", \"frontends.audio.0.branches.3.1.bias\". \n\tsize mismatch for frontends.audio.0.proj.weight: copying a param with shape torch.Size([64, 192, 1]) from checkpoint, the shape in current model is torch.Size([64, 256, 1])."
+    }
+  ]
+}

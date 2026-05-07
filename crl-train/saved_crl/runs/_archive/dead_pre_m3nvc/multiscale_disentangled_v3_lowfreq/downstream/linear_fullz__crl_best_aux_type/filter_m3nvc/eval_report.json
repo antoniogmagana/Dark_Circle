@@ -1,0 +1,23 @@
+{
+  "save_dir": "/Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_fullz__crl_best_aux_type",
+  "test_dir": "../data_files/parsed/test/",
+  "head": "pres",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "n_windows": 59675,
+  "presence": {
+    "accuracy": 0.7976,
+    "precision": 0.797,
+    "recall": 0.9694,
+    "specificity": 0.3348,
+    "f1": 0.8748,
+    "balanced_accuracy": 0.6521,
+    "mcc": 0.4269,
+    "tp": 42187,
+    "fp": 10747,
+    "fn": 1333,
+    "tn": 5408
+  },
+  "type": null
+}

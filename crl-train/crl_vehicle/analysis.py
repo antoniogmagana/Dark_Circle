@@ -48,10 +48,19 @@ from pathlib import Path
 # Constants
 # --------------------------------------------------------------------------
 
-# The probe config treated as "canonical" for the leaderboard. Chosen because
-# it's the minimal-capacity probe on the ELBO-selected checkpoint — everything
-# else is a variation.
+# Default probe used by single-probe consumers (gather_top_confusions.py walks
+# confusion matrices for one probe at a time). The leaderboard NO LONGER uses
+# this — load_run_metrics picks the best probe per head independently. Kept
+# for backward compatibility with scripts that accept a probe name as a CLI
+# default.
 CANONICAL_PROBE = "linear_ztype__crl_best"
+
+# Tie band for probe / bundle ranking. Two candidates are considered tied iff
+# |primary_a - primary_b| < TIE_EPSILON; inside the band the tiebreaker
+# (min_*_f1) fires, outside it the primary alone decides. This must match
+# export_for_inference.py's promotion logic so leaderboard "best" agrees with
+# what the bundle catalog would promote.
+TIE_EPSILON = 0.01
 
 # Split names that count as "per-dataset" for cross-location aggregation.
 # Per-vehicle splits (named '<dataset>__<vehicle>') and 'full' are excluded —
@@ -124,19 +133,30 @@ class RunMetrics:
     final_val_raw_kl: float | None = None
     epochs_completed: int = 0
 
-    # Downstream probe metrics (from canonical probe's downstream_metrics.csv)
+    # Downstream probe metrics — best probe selected independently per head.
+    # The two heads' downstream checkpoints are saved at independent argmax
+    # epochs, and run-level report.md already reports the per-head winner;
+    # the leaderboard now does the same.
     best_pres_f1: float | None = None
     best_type_f1: float | None = None
     best_pres_acc: float | None = None
     best_type_acc: float | None = None
     final_val_loss: float | None = None
-    probe_mode_used: str | None = None  # which probe config was canonical
+    best_pres_probe: str | None = None  # probe variant that won the pres head
+    best_type_probe: str | None = None  # probe variant that won the type head
+    probe_mode_used: str | None = None  # alias for best_type_probe; legacy
 
-    # Cross-location eval (from eval/<probe>/<split>/eval_report.json)
+    # Cross-location eval (from eval/<probe>/<split>/eval_report.json).
+    # Per-head min-F1 acts as the tie-breaker for both probe selection
+    # within a run (see _best_probe_per_head) and bundle promotion (see
+    # export_for_inference.py:_rank_bundles).
     per_dataset_type_f1: dict[str, float] = field(default_factory=dict)
     per_dataset_pres_f1: dict[str, float] = field(default_factory=dict)
     min_dataset_type_f1: float | None = None
-    worst_dataset: str | None = None
+    min_dataset_pres_f1: float | None = None
+    worst_dataset: str | None = None  # legacy: type-head worst
+    worst_pres_dataset: str | None = None
+    worst_type_dataset: str | None = None
 
     # Calibrated metrics if available (balanced_acc, MCC) from canonical eval
     calibrated_type_f1: float | None = None
@@ -158,16 +178,44 @@ class RunMetrics:
 
 
 def discover_runs(root: Path) -> list[Path]:
-    """Find all <run>/ dirs anywhere under `root` that have crl/meta.json.
+    """Find all <run>/ dirs anywhere under `root`. A run dir is recognized
+    by either a crl/meta.json (canonical layout) or, for runs whose CRL
+    metadata was lost, an eval/ directory containing per-probe eval
+    reports. Without the latter fallback, exported-but-meta-stripped runs
+    (the deployed `2026-05-03_15-26-22` in production) would silently
+    drop out of the leaderboard.
+
     Recurses arbitrarily deep so the canonical
     saved_crl/runs/<frontend>/<mode>/<run-id>/ layout works alongside
     older flat layouts (saved_crl/<run-id>/). Returns run dir paths,
-    not meta.json paths."""
+    not meta.json paths.
+    """
     root = Path(root)
     if not root.exists():
         return []
-    runs = [p.parent.parent for p in root.rglob("crl/meta.json")]
-    return sorted(set(runs))
+    def _archived(p: Path) -> bool:
+        # Skip anything under an `_archive/` ancestor — these are runs we've
+        # quarantined as dead/unloadable but kept on disk for forensics.
+        return any(part == "_archive" for part in p.parts)
+
+    runs: set[Path] = set()
+    for meta in root.rglob("crl/meta.json"):
+        if _archived(meta):
+            continue
+        runs.add(meta.parent.parent)
+    # Fallback: any directory containing an eval/ subdir with at least one
+    # eval_report.json is also a run. Walks up from the eval/ dir to its
+    # parent (the run root).
+    for eval_dir in root.rglob("eval"):
+        if not eval_dir.is_dir() or _archived(eval_dir):
+            continue
+        run_root = eval_dir.parent
+        if (run_root / "crl" / "meta.json").exists():
+            continue  # Already discovered via meta.
+        # Confirm eval/ actually has reports — empty dirs don't count.
+        if any(eval_dir.rglob("eval_report.json")):
+            runs.add(run_root)
+    return sorted(runs)
 
 
 # --------------------------------------------------------------------------
@@ -201,20 +249,29 @@ def _read_csv_columns(path: Path) -> dict[str, list]:
     return columns
 
 
-def _pick_canonical_probe_dir(run_dir: Path, preferred: str = CANONICAL_PROBE) -> Path | None:
-    """Find the downstream subdir for the canonical probe config. Falls
-    back to any available probe if the preferred one is missing."""
+def _list_probe_dirs(run_dir: Path) -> list[Path]:
+    """Return every downstream/<probe>/ that has a downstream_metrics.csv."""
     downstream = run_dir / "downstream"
     if not downstream.is_dir():
+        return []
+    return [
+        sub
+        for sub in sorted(downstream.iterdir())
+        if sub.is_dir() and (sub / "downstream_metrics.csv").exists()
+    ]
+
+
+def _pick_canonical_probe_dir(run_dir: Path, preferred: str = CANONICAL_PROBE) -> Path | None:
+    """Backward-compat helper. Returns the preferred probe dir if present,
+    else the first available. Used by load_morlet_freq_history and any
+    external consumer that wants a single probe to walk."""
+    probes = _list_probe_dirs(run_dir)
+    if not probes:
         return None
-    pref_path = downstream / preferred
-    if pref_path.is_dir() and (pref_path / "downstream_metrics.csv").exists():
-        return pref_path
-    # Fallback: first available probe config.
-    for sub in sorted(downstream.iterdir()):
-        if sub.is_dir() and (sub / "downstream_metrics.csv").exists():
-            return sub
-    return None
+    for p in probes:
+        if p.name == preferred:
+            return p
+    return probes[0]
 
 
 def _best_from_ds_metrics(cols: dict) -> dict:
@@ -235,41 +292,186 @@ def _best_from_ds_metrics(cols: dict) -> dict:
     return out
 
 
-def _cross_location_metrics(run_dir: Path, preferred: str = CANONICAL_PROBE) -> dict:
+def _per_probe_min_f1(run_dir: Path, probe_name: str, head: str) -> float | None:
+    """Read per-location eval_reports for `probe_name`/`head` and return
+    the minimum F1, or None if unavailable. Handles two on-disk layouts:
+
+        eval/<probe>/<head>/<dataset>/eval_report.json    (per-head, newer)
+        eval/<probe>/<dataset>/eval_report.json           (flat, older)
+
+    The flat layout's eval_report carries both `presence` and `type` blocks;
+    we read whichever the caller asked for. Mirrors the bundle-catalog
+    tie-breaker semantics in export_for_inference.py.
+    """
+    block_key = "presence" if head == "pres" else "type"
+    f1_key = "f1" if head == "pres" else "macro_f1_support_only"
+    fallback_key = None if head == "pres" else "macro_f1"
+
+    candidate_dirs = [run_dir / "eval" / probe_name / head, run_dir / "eval" / probe_name]
+    values: list[float] = []
+    for eval_dir in candidate_dirs:
+        if not eval_dir.is_dir():
+            continue
+        for split_dir in sorted(eval_dir.iterdir()):
+            if not split_dir.is_dir() or split_dir.name not in _PER_DATASET_KEYS:
+                continue
+            report = _read_json(split_dir / "eval_report.json")
+            if not report:
+                continue
+            block = report.get(block_key) or {}
+            f1 = block.get(f1_key)
+            if f1 is None and fallback_key is not None:
+                f1 = block.get(fallback_key)
+            if f1 is not None:
+                values.append(float(f1))
+        if values:
+            return min(values)  # First layout that had data wins.
+    return min(values) if values else None
+
+
+def _select_with_tiebreak(
+    candidates: list[tuple[str, float, float | None]],
+) -> tuple[str, float, float | None] | None:
+    """Pick the winner from `[(name, primary, tiebreaker)]` using ε-tie-band
+    semantics matching export_for_inference.py:_rank_bundles.
+
+    Sort by primary descending. Walk top-down; bundle into tie groups of
+    candidates within TIE_EPSILON of the group anchor. Within a group, sort
+    by tiebreaker descending (None → -inf), then name ascending. Return the
+    first candidate in the first group.
+
+    None tiebreaker means "tied without a way to break" — sort stable by
+    name and pick the first; better than crashing.
+    """
+    if not candidates:
+        return None
+    ranked = sorted(candidates, key=lambda c: (-c[1], c[0]))
+    anchor = ranked[0][1]
+    tied = [c for c in ranked if (anchor - c[1]) < TIE_EPSILON]
+    tied.sort(key=lambda c: (-(c[2] if c[2] is not None else float("-inf")), c[0]))
+    return tied[0]
+
+
+def _best_probe_per_head(probe_dirs: list[Path], run_dir: Path | None = None) -> dict:
+    """For each head ('pres', 'type'), pick the probe that the bundle catalog
+    would promote: argmax val F1 with min_*_f1 as tie-breaker inside an
+    ε=TIE_EPSILON tie band. Heads are selected independently.
+
+    Returns a flat dict with keys:
+        best_pres_f1, best_pres_acc, best_pres_probe,
+        best_type_f1, best_type_acc, best_type_probe,
+        final_val_loss (from the type-head winner)
+    Missing probes / heads simply omit their keys.
+
+    `run_dir` enables the tie-breaker by reading per-probe min-F1 from
+    eval/<probe>/<head>/<dataset>/eval_report.json. When None or when no
+    eval artifacts exist, falls back to pure argmax (the previous behavior).
+    """
+    out: dict = {}
+    if not probe_dirs:
+        return out
+
+    per_probe: dict[str, dict] = {}
+    for pdir in probe_dirs:
+        cols = _read_csv_columns(pdir / "downstream_metrics.csv")
+        per_probe[pdir.name] = _best_from_ds_metrics(cols)
+
+    for head, primary_key, acc_key, out_prefix in (
+        ("pres", "val_pres_f1", "val_pres_acc", "best_pres"),
+        ("type", "val_type_f1", "val_type_acc", "best_type"),
+    ):
+        candidates: list[tuple[str, float, float | None]] = []
+        for name, m in per_probe.items():
+            primary = m.get(primary_key)
+            if primary is None:
+                continue
+            tiebreaker = (
+                _per_probe_min_f1(run_dir, name, head) if run_dir is not None else None
+            )
+            candidates.append((name, primary, tiebreaker))
+        winner = _select_with_tiebreak(candidates)
+        if winner is None:
+            continue
+        name, primary, _ = winner
+        out[f"{out_prefix}_f1"] = primary
+        out[f"{out_prefix}_acc"] = per_probe[name].get(acc_key)
+        out[f"{out_prefix}_probe"] = name
+        if head == "type":
+            out["final_val_loss"] = per_probe[name].get("val_loss")
+
+    return out
+
+
+def _cross_location_metrics(
+    run_dir: Path,
+    pres_probe: str | None = None,
+    type_probe: str | None = None,
+    *,
+    preferred: str | None = None,
+) -> dict:
     """Walk eval/<probe>/<head>/<split>/eval_report.json and collect
     per-dataset type_f1 (from head=type) + pres_f1 (from head=pres).
     'full' is an aggregate, not a cross-location data point — excluded from
-    per-dataset but used as the source for calibrated metrics."""
+    per-dataset but used as the source for calibrated metrics.
+
+    `pres_probe` and `type_probe` name the probe variant to read per head.
+    They are typically the per-head leaderboard winners so the cross-location
+    numbers stay consistent with the headline F1s. Both default to the
+    legacy CANONICAL_PROBE when None, falling back to any available probe.
+
+    `preferred` is a backward-compat alias used by export_for_inference.py
+    when it wants a single probe applied to both heads (the bundle is built
+    around one probe). Wins over pres_probe/type_probe when set.
+    """
+    if preferred is not None:
+        pres_probe = preferred
+        type_probe = preferred
     eval_dir = run_dir / "eval"
     if not eval_dir.is_dir():
         return {"per_dataset_type_f1": {}, "per_dataset_pres_f1": {}}
 
-    probe_dir = eval_dir / preferred
-    if not probe_dir.is_dir():
-        # Fallback to any available probe.
-        candidates = [p for p in sorted(eval_dir.iterdir()) if p.is_dir()]
-        if not candidates:
-            return {"per_dataset_type_f1": {}, "per_dataset_pres_f1": {}}
-        probe_dir = candidates[0]
+    available = [p for p in sorted(eval_dir.iterdir()) if p.is_dir()]
+    if not available:
+        return {"per_dataset_type_f1": {}, "per_dataset_pres_f1": {}}
+
+    def _resolve(name: str | None) -> Path:
+        if name is not None:
+            target = eval_dir / name
+            if target.is_dir():
+                return target
+        # Fallback chain: legacy canonical, then first available.
+        legacy = eval_dir / CANONICAL_PROBE
+        if legacy.is_dir():
+            return legacy
+        return available[0]
+
+    pres_dir = _resolve(pres_probe)
+    type_dir = _resolve(type_probe)
 
     per_type: dict[str, float] = {}
     per_pres: dict[str, float] = {}
     calibrated: dict = {}
 
-    # Each probe dir contains per-head subdirs: pres/ and type/. Each holds
-    # the per-split eval_report.json for its head only. Presence metrics live
-    # exclusively under pres/, type metrics under type/.
-    for head_name, store, want_block in (
-        ("pres", per_pres, "presence"),
-        ("type", per_type, "type"),
+    # Each probe dir typically contains per-head subdirs: pres/ and type/.
+    # Each holds the per-split eval_report.json for its head only. Older
+    # runs use a flat layout (eval/<probe>/<split>/eval_report.json) where
+    # both blocks live in one report — try the per-head subdir first, fall
+    # back to the flat layout when that's missing.
+    for head_name, probe_dir, store, want_block in (
+        ("pres", pres_dir, per_pres, "presence"),
+        ("type", type_dir, per_type, "type"),
     ):
         head_dir = probe_dir / head_name
-        if not head_dir.is_dir():
+        scan_dir = head_dir if head_dir.is_dir() else probe_dir
+        if not scan_dir.is_dir():
             continue
-        for split_dir in sorted(head_dir.iterdir()):
+        for split_dir in sorted(scan_dir.iterdir()):
             if not split_dir.is_dir():
                 continue
             split = split_dir.name
+            # Skip per-head subdirs encountered when scanning the probe root.
+            if scan_dir is probe_dir and split in ("pres", "type"):
+                continue
             report = _read_json(split_dir / "eval_report.json")
             if not report:
                 continue
@@ -344,26 +546,40 @@ def load_run_metrics(run_dir: Path) -> RunMetrics:
             if vals:
                 rm.best_val_ref_elbo = min(vals)
 
-    # Downstream probes.
-    probe_dir = _pick_canonical_probe_dir(run_dir)
-    if probe_dir is not None:
-        rm.probe_mode_used = probe_dir.name
-        ds_cols = _read_csv_columns(probe_dir / "downstream_metrics.csv")
-        best = _best_from_ds_metrics(ds_cols)
-        rm.best_pres_f1 = best.get("val_pres_f1")
-        rm.best_pres_acc = best.get("val_pres_acc")
-        rm.best_type_f1 = best.get("val_type_f1")
-        rm.best_type_acc = best.get("val_type_acc")
-        rm.final_val_loss = best.get("val_loss")
+    # Downstream probes — pick the best probe per head with bundle-catalog
+    # tie-breaker semantics (val argmax + min_*_f1 inside the ε=0.01 band).
+    probe_dirs = _list_probe_dirs(run_dir)
+    best = _best_probe_per_head(probe_dirs, run_dir=run_dir)
+    rm.best_pres_f1 = best.get("best_pres_f1")
+    rm.best_pres_acc = best.get("best_pres_acc")
+    rm.best_pres_probe = best.get("best_pres_probe")
+    rm.best_type_f1 = best.get("best_type_f1")
+    rm.best_type_acc = best.get("best_type_acc")
+    rm.best_type_probe = best.get("best_type_probe")
+    rm.final_val_loss = best.get("final_val_loss")
+    # Legacy alias — points at the type-head winner since type-F1 is the
+    # capstone deliverable and downstream consumers historically used this
+    # field for "the probe whose numbers are reported".
+    rm.probe_mode_used = rm.best_type_probe or rm.best_pres_probe
 
-    # Cross-location eval.
-    cl = _cross_location_metrics(run_dir)
+    # Cross-location eval — pull each head's per-dataset numbers from its
+    # own winning probe so the leaderboard stays internally consistent.
+    cl = _cross_location_metrics(
+        run_dir,
+        pres_probe=rm.best_pres_probe,
+        type_probe=rm.best_type_probe,
+    )
     rm.per_dataset_type_f1 = cl.get("per_dataset_type_f1", {})
     rm.per_dataset_pres_f1 = cl.get("per_dataset_pres_f1", {})
     if rm.per_dataset_type_f1:
         worst = min(rm.per_dataset_type_f1.items(), key=lambda kv: kv[1])
-        rm.worst_dataset = worst[0]
+        rm.worst_type_dataset = worst[0]
+        rm.worst_dataset = worst[0]  # legacy alias
         rm.min_dataset_type_f1 = worst[1]
+    if rm.per_dataset_pres_f1:
+        worst_p = min(rm.per_dataset_pres_f1.items(), key=lambda kv: kv[1])
+        rm.worst_pres_dataset = worst_p[0]
+        rm.min_dataset_pres_f1 = worst_p[1]
     calibrated = cl.get("calibrated") or {}
     rm.calibrated_type_f1 = calibrated.get("type_macro_f1_support_only")
     rm.balanced_accuracy = calibrated.get("pres_balanced_accuracy")

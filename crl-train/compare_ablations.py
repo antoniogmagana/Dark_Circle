@@ -7,6 +7,11 @@ training_mode, stage2, morlet_learnable_w0), this script finds every pair of
 runs that differ ONLY in that axis (all other axes match) and reports
 Δpres_f1, Δtype_f1, Δref_elbo.
 
+best_pres_f1 and best_type_f1 each come from the per-head winning probe
+within their run (see crl_vehicle/analysis.py:_best_probe_per_head). The
+two sides of a pair may therefore have different winning probes; that's
+expected — we're comparing each run's best, not a fixed probe across runs.
+
 This is how you answer "does knob X matter?" without manually eyeballing the
 leaderboard.
 

@@ -343,10 +343,23 @@ def main() -> None:
     )
     ckpt_path = save_dir / ckpt_filename
     if not ckpt_path.exists():
-        raise FileNotFoundError(
-            f"{ckpt_filename} not found in {save_dir}. "
-            "Run train.py --phase full (or --phase downstream) first."
-        )
+        # Legacy fallback: pre-2026-05 runs saved a single combined-head
+        # checkpoint at downstream_best.pth (joint argmax over both heads).
+        # Loading it for either --head reports the metric of that combined
+        # checkpoint, which is what the run's report.md showed at the time.
+        legacy_path = save_dir / "downstream_best.pth"
+        if legacy_path.exists():
+            print(
+                f"  {ckpt_filename} missing — falling back to legacy "
+                f"combined-head checkpoint {legacy_path.name}"
+            )
+            ckpt_path = legacy_path
+        else:
+            raise FileNotFoundError(
+                f"{ckpt_filename} not found in {save_dir} (and no "
+                f"downstream_best.pth fallback). Run train.py --phase full "
+                f"(or --phase downstream) first."
+            )
     model = CRLModel(cfg, sensors=sensors, probe_mode=probe_mode).to(device)
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
     model.eval()

@@ -2,22 +2,23 @@
 """
 gather_top_confusions.py — re-render confusion matrices for top performers.
 
-Picks the top-N runs twice — once by **test-time** presence F1 and once by
-**test-time** type macro_f1 — and re-renders each winner's confusion matrix
-at poster styling from the saved `eval_report.json`. Output paths:
+Ranks runs the same way the bundle catalog promotes defaults: primary val
+F1 (val_pres_f1 / val_type_f1) with min-F1 tie-breaker inside an ε=0.01
+band. Each run's per-head winning probe drives both the ranking and the
+confusion matrix plotted. This means the top-1 PNG is from the same run
++ probe combination that would win `--promote-default` if exported now.
+
+Output paths:
 
     saved_crl/analysis/top_confusions/detection/<rank>_<run-name>.{png,pdf}
     saved_crl/analysis/top_confusions/type/<rank>_<run-name>.{png,pdf}
 
-The raw confusion data and per-head test F1 are already on disk in
-eval_report.json (`presence.f1` for binary, `type.macro_f1` for
-multiclass, plus `presence.{tp,fp,fn,tn}` and `type.confusion_matrix`).
-We don't need to re-run inference — just reload + re-plot through the
-shared `P.plot_confusion_matrix()` so the new poster rcParams apply.
+The confusion-matrix data itself comes from eval_report.json (test-time
+inference results — `presence.{tp,fp,fn,tn}` for binary,
+`type.confusion_matrix` for multiclass). We don't re-run inference.
 
-Ranking uses test-time F1 from the report itself, *not* the val-time
-`best_pres_f1` / `best_type_f1` cached on RunMetrics — that way the
-poster plots are ranked by the same number a reader sees on the figure.
+Pass `--probe` to force a single probe across all runs (debugging /
+poster overrides). Default is auto-select per the bundle catalog rule.
 
 Usage
 -----
@@ -82,18 +83,14 @@ def render_presence(report: dict, run_name: str, out_stem: Path) -> bool:
         return False
     tn, fp, fn, tp = pres["tn"], pres["fp"], pres["fn"], pres["tp"]
     cm = [[tn, fp], [fn, tp]]
-    P.plot_confusion_matrix(
-        cm,
-        ["absent", "present"],
-        f"{run_name} — Presence (test)",
-        out_stem.with_suffix(".png"),
-    )
-    P.plot_confusion_matrix(
-        cm,
-        ["absent", "present"],
-        f"{run_name} — Presence (test)",
-        out_stem.with_suffix(".pdf"),
-    )
+    for ext in (".png", ".pdf"):
+        P.plot_confusion_matrix(
+            cm,
+            ["absent", "present"],
+            run_name,
+            out_stem.with_suffix(ext),
+            subtitle="Presence (test)",
+        )
     print(f"  wrote {out_stem.with_suffix('.png')}")
     return True
 
@@ -107,81 +104,105 @@ def render_type(report: dict, run_name: str, out_stem: Path) -> bool:
     # Class names from per_class keys (insertion order = class index).
     per_class = type_block.get("per_class", {})
     class_names = list(per_class.keys()) if per_class else [str(i) for i in range(len(cm))]
-    P.plot_confusion_matrix(
-        cm,
-        class_names,
-        f"{run_name} — Vehicle type (test)",
-        out_stem.with_suffix(".png"),
-    )
-    P.plot_confusion_matrix(
-        cm,
-        class_names,
-        f"{run_name} — Vehicle type (test)",
-        out_stem.with_suffix(".pdf"),
-    )
+    for ext in (".png", ".pdf"):
+        P.plot_confusion_matrix(
+            cm,
+            class_names,
+            run_name,
+            out_stem.with_suffix(ext),
+            subtitle="Vehicle type (test)",
+        )
     print(f"  wrote {out_stem.with_suffix('.png')}")
     return True
 
 
-def _test_f1(report: dict, head: str) -> float | None:
-    """Pull test-time F1 from an eval_report. presence → presence.f1
-    (binary), type → type.macro_f1."""
-    if head == "presence":
-        block = report.get("presence") or {}
-        return block.get("f1")
-    block = report.get("type") or {}
-    return block.get("macro_f1")
-
-
-def _score_runs(
-    runs: list[A.RunMetrics], head: str, probe: str
-) -> list[tuple[float, A.RunMetrics, Path, dict]]:
-    """For each run, locate its eval_report.json and pull test F1 for
-    `head`. Returns [(score, rm, report_path, report_dict)] for runs
-    where both the report and the test-F1 field exist."""
-    head_subdir = "pres" if head == "presence" else "type"
-    scored: list[tuple[float, A.RunMetrics, Path, dict]] = []
+def _rank_runs_with_tiebreak(
+    runs: list[A.RunMetrics], head: str
+) -> list[A.RunMetrics]:
+    """Rank runs the same way the bundle catalog does (see
+    export_for_inference.py:_rank_bundles + _RANKING_METRICS): MCC primary
+    for presence (the test set is ~75% positive so raw F1 rewards recall-
+    biased predictors), val type-F1 primary for type, with the per-head
+    min-F1 as tie-breaker inside an ε=TIE_EPSILON band. Each run
+    contributes its per-head winner, so the same probe selection that
+    wins promotion is the one whose confusion matrix gets plotted.
+    """
+    primary_attr = "mcc" if head == "presence" else "best_type_f1"
+    min_attr = "min_dataset_pres_f1" if head == "presence" else "min_dataset_type_f1"
+    candidates: list[tuple[float, float, str, A.RunMetrics]] = []
     for rm in runs:
-        report_path = find_eval_report(rm.path, probe, head=head_subdir) or find_eval_report(
-            rm.path, probe, head=None
+        primary = getattr(rm, primary_attr)
+        if primary is None:
+            continue
+        tiebreaker = getattr(rm, min_attr)
+        # Sort key: (-primary, -tiebreaker, name) so primary descending,
+        # then tie-break descending, then name ascending for determinism.
+        # We bin by ε on the primary axis below.
+        candidates.append(
+            (primary, tiebreaker if tiebreaker is not None else float("-inf"), rm.name, rm)
         )
-        if report_path is None:
-            continue
-        report = json.loads(report_path.read_text())
-        score = _test_f1(report, head)
-        if score is None:
-            continue
-        scored.append((score, rm, report_path, report))
-    return scored
+    if not candidates:
+        return []
+    candidates.sort(key=lambda c: (-c[0], c[2]))
+    out: list[A.RunMetrics] = []
+    i = 0
+    while i < len(candidates):
+        anchor = candidates[i][0]
+        end = i
+        while end < len(candidates) and (anchor - candidates[end][0]) < A.TIE_EPSILON:
+            end += 1
+        group = candidates[i:end]
+        group.sort(key=lambda c: (-c[1], c[2]))
+        out.extend(c[3] for c in group)
+        i = end
+    return out
 
 
 def gather(
     runs: list[A.RunMetrics],
     head: str,
     out_subdir: Path,
-    probe: str,
+    probe: str | None,
     top_n: int,
 ) -> None:
-    """Pick top-N runs by **test-time** F1 for `head`, re-render each
-    winner's confusion at poster styling.
+    """Pick top-N runs by val F1 with min-F1 tie-breaker (matching the
+    bundle-catalog promotion rule). For each winner, render its test-time
+    confusion matrix from the per-head winning probe.
 
     `head` is one of {"presence", "type"} — drives both the metric used
-    for ranking (presence.f1 vs type.macro_f1) and which block of the
+    for ranking (val_pres_f1 vs val_type_f1) and which block of the
     report gets plotted.
     """
-    scored = _score_runs(runs, head, probe)
-    if not scored:
-        print(f"  no runs with test-time {head} F1; skipping")
+    ranked = _rank_runs_with_tiebreak(runs, head)
+    if not ranked:
+        print(f"  no runs with val {head} F1; skipping")
         return
-    scored.sort(key=lambda t: t[0], reverse=True)
-    top = scored[:top_n]
-    metric_label = "presence.f1" if head == "presence" else "type.macro_f1"
-    print(f"Top {len(top)} by test-time {metric_label}:")
-    for rank, (score, rm, report_path, report) in enumerate(top, start=1):
-        print(
-            f"  {rank}. {rm.name}  {metric_label}={score:.3f}  "
-            f"({rm.config.get('frontend_type','?')})  ← {report_path.relative_to(rm.path)}"
+    top = ranked[:top_n]
+    head_subdir = "pres" if head == "presence" else "type"
+    per_head_field = "best_pres_probe" if head == "presence" else "best_type_probe"
+    primary_attr = "mcc" if head == "presence" else "best_type_f1"
+    min_attr = "min_dataset_pres_f1" if head == "presence" else "min_dataset_type_f1"
+    metric_label = "pres_MCC" if head == "presence" else "val_type_f1"
+    print(f"Top {len(top)} by {metric_label} (with min-F1 tie-breaker):")
+    for rank, rm in enumerate(top, start=1):
+        per_run_probe = probe or getattr(rm, per_head_field, None) or A.CANONICAL_PROBE
+        report_path = find_eval_report(rm.path, per_run_probe, head=head_subdir) or find_eval_report(
+            rm.path, per_run_probe, head=None
         )
+        primary = getattr(rm, primary_attr)
+        tb = getattr(rm, min_attr)
+        tb_str = f"{tb:.3f}" if tb is not None else "—"
+        provenance = (
+            f"{report_path.relative_to(rm.path)}" if report_path is not None else "(no eval_report.json)"
+        )
+        print(
+            f"  {rank}. {rm.name}  {metric_label}={primary:.3f}  "
+            f"min_f1={tb_str}  probe={per_run_probe}  "
+            f"({rm.config.get('frontend_type','?')})  ← {provenance}"
+        )
+        if report_path is None:
+            continue
+        report = json.loads(report_path.read_text())
         out_stem = out_subdir / f"{rank:02d}_{rm.name}"
         out_stem.parent.mkdir(parents=True, exist_ok=True)
         ok = (
@@ -200,9 +221,12 @@ def parse_args():
     p.add_argument("--top-n", type=int, default=5)
     p.add_argument(
         "--probe",
-        default=A.CANONICAL_PROBE,
-        help=f"Probe to pull eval_report from (default: {A.CANONICAL_PROBE}). "
-        "Falls back to any available probe per run if missing.",
+        default=None,
+        help="Probe to pull eval_report from. Default behavior is per-head "
+        "auto-select: presence head reads from each run's best_pres_probe, "
+        "type head reads from each run's best_type_probe. Pass an explicit "
+        "probe name (e.g. linear_signal__crl_best) to override and force a "
+        "single probe across all runs and both heads.",
     )
     return p.parse_args()
 

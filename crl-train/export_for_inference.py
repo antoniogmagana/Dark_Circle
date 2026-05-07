@@ -99,13 +99,21 @@ _TIE_EPSILON = 0.01
 # bundles below the floor still exist on disk and can be selected
 # explicitly via DETECT_BUNDLE / CLASSIFY_BUNDLE.
 _PROMOTION_FLOOR = {
-    "detect": ("pres_f1", 0.80),
+    # Detect floor on MCC: 0.40 corresponds to "noticeably better than
+    # majority-class on a 75/25 imbalanced test set". Raw F1 was the old
+    # floor metric, but on this imbalanced split a model that just predicts
+    # 'positive' lands ~0.85 F1 with MCC ~0 — a degenerate floor.
+    "detect": ("pres_mcc", 0.40),
     "classify": ("min_type_f1", 0.40),
 }
 
-# (primary_metric, tiebreaker_metric) per kind.
+# (primary_metric, tiebreaker_metric) per kind. Detect uses MCC as primary
+# rather than raw F1 because the test set is ~75% positive — F1 rewards
+# recall-biased models that spam 'yes' on absent windows. MCC is invariant
+# to the class prior. Tie-break by per-location min F1 keeps the spatial-
+# robustness check the old rule had.
 _RANKING_METRICS = {
-    "detect": ("pres_f1", "min_pres_f1"),
+    "detect": ("pres_mcc", "min_pres_f1"),
     "classify": ("type_f1", "min_type_f1"),
 }
 
@@ -886,7 +894,15 @@ def _read_selection_metrics(save_dir: Path, kind: str) -> dict:
 
     # Pick which probe to read metrics from.
     if kind == "detect":
-        probe_name = analysis.CANONICAL_PROBE
+        # Detect-side bundles don't pin a probe at the path level (no probe
+        # subdir in the save_dir). Use the same per-head selection rule the
+        # leaderboard uses: argmax val_pres_f1 with min_pres_f1 tiebreak
+        # inside the ε=TIE_EPSILON band. Falls back to CANONICAL_PROBE only
+        # when no probes exist on disk (defensive — exports always run after
+        # downstream training).
+        probe_dirs = analysis._list_probe_dirs(run_root)
+        best = analysis._best_probe_per_head(probe_dirs, run_dir=run_root)
+        probe_name = best.get("best_pres_probe") or analysis.CANONICAL_PROBE
     elif kind == "classify":
         # ``save_dir`` IS the probe dir; its name is the probe id.
         probe_name = save_dir.name
@@ -913,11 +929,17 @@ def _read_selection_metrics(save_dir: Path, kind: str) -> dict:
     cl = analysis._cross_location_metrics(run_root, preferred=probe_name)
     per_pres = cl.get("per_dataset_pres_f1") or {}
     per_type = cl.get("per_dataset_type_f1") or {}
+    calibrated = cl.get("calibrated") or {}
 
     out: dict = {}
     if kind == "detect":
         pres_f1 = best.get("val_pres_f1")
         min_pres_f1 = _min_or_none(per_pres)
+        # MCC comes from the test-time 'full' split eval_report.json under
+        # eval/<probe>/pres/full/. _cross_location_metrics surfaces it as
+        # calibrated.pres_mcc. The bundle's primary ranking metric.
+        pres_mcc = calibrated.get("pres_mcc")
+        pres_balacc = calibrated.get("pres_balanced_accuracy")
         if pres_f1 is None:
             raise KeyError(
                 f"val_pres_f1 missing from {ds_csv}. Re-run downstream "
@@ -929,8 +951,17 @@ def _read_selection_metrics(save_dir: Path, kind: str) -> dict:
                 f"{run_root / 'eval' / probe_name / 'pres'}/. Re-run "
                 f"run_full_diagnostic.py to produce per-location eval reports."
             )
+        if pres_mcc is None:
+            raise KeyError(
+                f"presence MCC missing from "
+                f"{run_root / 'eval' / probe_name / 'pres' / 'full' / 'eval_report.json'}. "
+                f"Re-run eval.py --head pres on the full test split."
+            )
         out["pres_f1"] = float(pres_f1)
         out["min_pres_f1"] = float(min_pres_f1)
+        out["pres_mcc"] = float(pres_mcc)
+        if pres_balacc is not None:
+            out["pres_balanced_accuracy"] = float(pres_balacc)
     else:  # classify
         type_f1 = best.get("val_type_f1")
         min_type_f1 = _min_or_none(per_type)

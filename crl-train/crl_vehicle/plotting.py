@@ -175,13 +175,24 @@ def plot_confusion_matrix(
     title: str,
     out_path: Path,
     cmap: str = "Blues",
+    subtitle: str | None = None,
 ) -> None:
     """Render a single normalized (per-row) confusion matrix.
 
     Cell text shows raw count and row-percent. Cell text color flips to
     white above 0.6 row-fraction for legibility on dark cells.
     Inherits font sizes from rcParams (set by apply_poster_style).
+
+    `subtitle` renders below the bold title at smaller weight; useful for
+    pulling the head/mode tag off the main title so long run names don't
+    overflow the figure width. If `subtitle` is None, the legacy behavior
+    of splitting the title at the first ``" — "`` separator is used so
+    callers passing a single-string ``"<run> — <head> (test)"`` still
+    benefit without code changes.
     """
+    if subtitle is None and " — " in title:
+        title, subtitle = title.split(" — ", 1)
+
     cm_arr = np.array(cm, dtype=float)
     row_sums = cm_arr.sum(axis=1, keepdims=True)
     cm_norm = cm_arr / np.where(row_sums == 0, 1, row_sums)
@@ -197,7 +208,21 @@ def plot_confusion_matrix(
     ax.set_yticklabels(class_names)
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")
-    ax.set_title(title)
+    if subtitle:
+        # Two-line stacked title: bold main on top, lighter subtitle below.
+        # set_title pads ~6pt by default; nudge subtitle just below it via
+        # axes-coords text. Bold title goes a bit higher to leave room.
+        ax.set_title(title, pad=22)
+        ax.text(
+            0.5, 1.005, subtitle,
+            transform=ax.transAxes,
+            ha="center", va="bottom",
+            fontsize=plt.rcParams["axes.titlesize"] * 0.78,
+            fontweight="normal",
+            style="italic",
+        )
+    else:
+        ax.set_title(title)
 
     for i in range(n):
         for j in range(n):

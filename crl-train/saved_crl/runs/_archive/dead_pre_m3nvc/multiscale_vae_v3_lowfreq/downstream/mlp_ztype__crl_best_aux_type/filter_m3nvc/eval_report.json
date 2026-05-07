@@ -1,0 +1,69 @@
+{
+  "save_dir": "/Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type",
+  "test_dir": "../data_files/parsed/test/",
+  "head": "type",
+  "include_datasets": [
+    "m3nvc"
+  ],
+  "n_windows": 59675,
+  "presence": null,
+  "type": {
+    "accuracy": 0.8395,
+    "macro_f1": 0.3933,
+    "macro_f1_support_only": 0.7866,
+    "macro_precision": 0.393,
+    "macro_recall": 0.3937,
+    "per_class": {
+      "pedestrian": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "light": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "medium": {
+        "precision": 0.8976,
+        "recall": 0.8896,
+        "f1": 0.8936,
+        "support": 32848
+      },
+      "heavy": {
+        "precision": 0.6742,
+        "recall": 0.6853,
+        "f1": 0.6797,
+        "support": 10672
+      }
+    },
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        22,
+        69,
+        29222,
+        3535
+      ],
+      [
+        10,
+        14,
+        3334,
+        7314
+      ]
+    ]
+  }
+}

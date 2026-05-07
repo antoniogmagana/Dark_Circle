@@ -226,6 +226,17 @@ class TestDiscoverRuns:
     def test_missing_root_returns_empty(self, tmp_path):
         assert A.discover_runs(tmp_path / "nope") == []
 
+    def test_finds_run_without_meta_via_eval_fallback(self, tmp_path):
+        """A run dir with eval/<probe>/<head>/full/eval_report.json but
+        no crl/meta.json must still be discoverable. This is the case for
+        runs whose CRL pretraining metadata was stripped after export
+        (e.g. the deployed `2026-05-03_15-26-22`)."""
+        run = tmp_path / "no-meta-run"
+        # No crl/ at all — only eval/ artifacts.
+        _write_eval(run)  # writes eval/<probe>/{pres,type}/<split>/eval_report.json
+        runs = A.discover_runs(tmp_path)
+        assert run in runs
+
 
 # --------------------------------------------------------------------------
 # load_run_metrics
@@ -256,7 +267,128 @@ class TestLoadRunMetrics:
         rm = A.load_run_metrics(run)
         assert rm.best_pres_f1 == 0.8
         assert rm.best_type_f1 == 0.6
+        # Single-probe run: both heads pick the same (only) probe.
+        assert rm.best_pres_probe == A.CANONICAL_PROBE
+        assert rm.best_type_probe == A.CANONICAL_PROBE
+        # Legacy alias points at the type-head winner.
         assert rm.probe_mode_used == A.CANONICAL_PROBE
+
+    def test_picks_best_probe_per_head_independently(self, tmp_path):
+        """When multiple probes exist, the loader picks the best per head
+        independently — pres-F1 winner and type-F1 winner can be different
+        probes within the same run."""
+        run = _build_fake_run(tmp_path, "r1")
+        # Add a second probe that wins on type but loses on pres.
+        _write_downstream(
+            run,
+            probe="mlp_ztype__crl_best_aux_type",
+            best_pres_f1=0.70,
+            best_type_f1=0.80,
+        )
+        # Default _build_fake_run wrote the canonical probe with pres=0.8, type=0.6.
+        rm = A.load_run_metrics(run)
+        assert rm.best_pres_f1 == 0.80  # canonical wins pres
+        assert rm.best_pres_probe == A.CANONICAL_PROBE
+        assert rm.best_type_f1 == 0.80  # mlp wins type
+        assert rm.best_type_probe == "mlp_ztype__crl_best_aux_type"
+
+    def test_falls_back_when_only_one_probe_exists(self, tmp_path):
+        """Old single-probe runs still load — both head winners point at
+        the only available probe."""
+        run = _build_fake_run(tmp_path, "r1")
+        rm = A.load_run_metrics(run)
+        assert rm.best_pres_probe == A.CANONICAL_PROBE
+        assert rm.best_type_probe == A.CANONICAL_PROBE
+
+    def test_probe_tiebreak_inside_band_uses_min_f1(self, tmp_path):
+        """Two probes within ε=0.01 of each other on val_type_f1 should
+        be tie-broken by min-type-F1, matching the bundle catalog rule."""
+        run = _build_fake_run(tmp_path, "r1")
+        # Default canonical probe has type_f1=0.6; per-dataset eval has
+        # iobt=0.65, focal=0.45, m3nvc=0.55 → min=0.45.
+        # Add a second probe inside the tie band but with higher min-type-F1.
+        _write_downstream(
+            run,
+            probe="mlp_signal__crl_best_aux_type",
+            best_pres_f1=0.70,
+            best_type_f1=0.605,  # within ε=0.01 of 0.6 → tied
+        )
+        _write_eval(
+            run,
+            probe="mlp_signal__crl_best_aux_type",
+            per_dataset={"iobt": 0.70, "focal": 0.60, "m3nvc": 0.65},  # min=0.60
+        )
+        rm = A.load_run_metrics(run)
+        # Inside tie band → min-F1 wins. mlp_signal has min=0.60 vs canonical's 0.45.
+        assert rm.best_type_probe == "mlp_signal__crl_best_aux_type"
+        assert rm.best_type_f1 == pytest.approx(0.605)
+
+    def test_probe_tiebreak_outside_band_uses_primary(self, tmp_path):
+        """When primary F1 differences exceed ε=0.01, primary alone
+        decides — min-F1 tie-breaker should not fire."""
+        run = _build_fake_run(tmp_path, "r1")
+        # Default canonical: type_f1=0.6, min=0.45.
+        # Second probe: WORSE min-F1 but BETTER primary (outside tie band).
+        _write_downstream(
+            run,
+            probe="mlp_signal__crl_best_aux_type",
+            best_pres_f1=0.70,
+            best_type_f1=0.700,  # 0.10 above canonical — outside band
+        )
+        _write_eval(
+            run,
+            probe="mlp_signal__crl_best_aux_type",
+            per_dataset={"iobt": 0.50, "focal": 0.30, "m3nvc": 0.40},  # min=0.30
+        )
+        rm = A.load_run_metrics(run)
+        # Outside band → primary wins. mlp_signal has higher type_f1 even
+        # though its min-F1 is worse.
+        assert rm.best_type_probe == "mlp_signal__crl_best_aux_type"
+        assert rm.best_type_f1 == pytest.approx(0.700)
+
+    def test_min_dataset_pres_f1_populated(self, tmp_path):
+        """min_dataset_pres_f1 + worst_pres_dataset are filled from
+        per_dataset_pres_f1."""
+        run = _build_fake_run(tmp_path, "r1")
+        rm = A.load_run_metrics(run)
+        # _write_eval defaults pres f1 = type f1 + 0.1 → iobt=0.75, focal=0.55, m3nvc=0.65.
+        assert rm.per_dataset_pres_f1 == {
+            "iobt": pytest.approx(0.75),
+            "focal": pytest.approx(0.55),
+            "m3nvc": pytest.approx(0.65),
+        }
+        assert rm.min_dataset_pres_f1 == pytest.approx(0.55)
+        assert rm.worst_pres_dataset == "focal"
+
+    def test_cross_location_uses_per_head_best_probe(self, tmp_path):
+        """Per-dataset eval numbers come from each head's winning probe.
+        Otherwise the leaderboard's headline F1 (from probe X) and its
+        per-dataset F1 (from probe Y) would silently disagree."""
+        run = _build_fake_run(tmp_path, "r1")
+        # Second probe wins type-head val F1 → its eval reports should be
+        # the source of per-dataset type F1.
+        _write_downstream(
+            run,
+            probe="mlp_ztype__crl_best_aux_type",
+            best_pres_f1=0.70,
+            best_type_f1=0.80,
+        )
+        # Eval reports for the new probe with distinguishable per-dataset F1s.
+        _write_eval(
+            run,
+            probe="mlp_ztype__crl_best_aux_type",
+            per_dataset={"iobt": 0.90, "focal": 0.80, "m3nvc": 0.85},
+        )
+        rm = A.load_run_metrics(run)
+        # Type-head winner is mlp probe → per_dataset_type_f1 must come from it.
+        assert rm.per_dataset_type_f1 == {"iobt": 0.90, "focal": 0.80, "m3nvc": 0.85}
+        # Pres-head winner is the canonical probe → per_dataset_pres_f1 must
+        # come from _write_eval defaults (0.65/0.45/0.55 + 0.1).
+        assert rm.per_dataset_pres_f1 == {
+            "iobt": pytest.approx(0.75),
+            "focal": pytest.approx(0.55),
+            "m3nvc": pytest.approx(0.65),
+        }
 
     def test_cross_location_minimum(self, tmp_path):
         run = _build_fake_run(tmp_path, "r1")

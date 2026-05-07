@@ -1,0 +1,233 @@
+
+[1/12] multiscale/vae/v3_lowfreq head=pres probe=linear_fullz__crl_best filter=full
+  $ /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/.venv/bin/python /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/eval.py --save-dir /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/linear_fullz__crl_best --head pres --num-workers 4
+/Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/crl_vehicle/models/encoder_decoder.py:30: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Device: cpu
+  downstream_best_pres.pth missing — falling back to legacy combined-head checkpoint downstream_best.pth
+  Loaded checkpoint: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/linear_fullz__crl_best/downstream_best.pth (head=pres, probe_mode=linear_fullz)
+  Loading test set from ../data_files/parsed/test/ …
+  90,627 test windows (pre-filter)
+  Running inference …
+
+=======================================================
+  PRESENCE DETECTION
+=======================================================
+  accuracy           0.7783
+  precision          0.7833
+  recall             0.9524
+  specificity        0.3474
+  f1                 0.8596
+  balanced_accuracy  0.6499
+  mcc                0.3985
+
+  Report saved: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/linear_fullz__crl_best/eval_report.json
+  Plot saved:   /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/linear_fullz__crl_best/confusion_presence.png
+
+[2/12] multiscale/vae/v3_lowfreq head=pres probe=linear_fullz__crl_best filter=m3nvc
+  $ /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/.venv/bin/python /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/eval.py --save-dir /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/linear_fullz__crl_best --head pres --num-workers 4 --include-datasets m3nvc
+/Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/crl_vehicle/models/encoder_decoder.py:30: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Device: cpu
+  downstream_best_pres.pth missing — falling back to legacy combined-head checkpoint downstream_best.pth
+  Loaded checkpoint: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/linear_fullz__crl_best/downstream_best.pth (head=pres, probe_mode=linear_fullz)
+  Loading test set from ../data_files/parsed/test/ …
+  90,627 test windows (pre-filter)
+  Dataset filter ['m3nvc']: kept 59,675 windows (30,952 dropped)
+  Running inference …
+
+=======================================================
+  PRESENCE DETECTION
+=======================================================
+  accuracy           0.7686
+  precision          0.7635
+  recall             0.9891
+  specificity        0.1746
+  f1                 0.8618
+  balanced_accuracy  0.5818
+  mcc                0.3185
+
+  Report saved: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/linear_fullz__crl_best/filter_m3nvc/eval_report.json
+  Plot saved:   /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/linear_fullz__crl_best/filter_m3nvc/confusion_presence.png
+
+[3/12] multiscale/vae/v3_lowfreq head=type probe=mlp_ztype__crl_best_aux_type filter=full
+  $ /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/.venv/bin/python /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/eval.py --save-dir /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type --head type --num-workers 4
+/Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/crl_vehicle/models/encoder_decoder.py:30: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Device: cpu
+  downstream_best_type.pth missing — falling back to legacy combined-head checkpoint downstream_best.pth
+  Loaded checkpoint: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type/downstream_best.pth (head=type, probe_mode=mlp_ztype)
+  Loading test set from ../data_files/parsed/test/ …
+  90,627 test windows (pre-filter)
+  Running inference …
+
+=======================================================
+  VEHICLE TYPE CLASSIFICATION
+=======================================================
+  accuracy               0.6672
+  macro_f1               0.4907
+  macro_f1_support_only  0.4907
+  macro_precision        0.4985
+  macro_recall           0.4848
+
+  Per-class:
+    pedestrian     f1=0.269  prec=0.278  rec=0.260  n=5664
+    light          f1=0.293  prec=0.290  rec=0.295  n=4735
+    medium         f1=0.783  prec=0.762  rec=0.805  n=39139
+    heavy          f1=0.619  prec=0.663  rec=0.579  n=15018
+
+  Report saved: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type/eval_report.json
+  Plot saved:   /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type/confusion_type.png
+
+[4/12] multiscale/vae/v3_lowfreq head=type probe=mlp_ztype__crl_best_aux_type filter=m3nvc
+  $ /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/.venv/bin/python /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/eval.py --save-dir /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type --head type --num-workers 4 --include-datasets m3nvc
+/Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/crl_vehicle/models/encoder_decoder.py:30: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Device: cpu
+  downstream_best_type.pth missing — falling back to legacy combined-head checkpoint downstream_best.pth
+  Loaded checkpoint: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type/downstream_best.pth (head=type, probe_mode=mlp_ztype)
+  Loading test set from ../data_files/parsed/test/ …
+  90,627 test windows (pre-filter)
+  Dataset filter ['m3nvc']: kept 59,675 windows (30,952 dropped)
+  Running inference …
+
+=======================================================
+  VEHICLE TYPE CLASSIFICATION
+=======================================================
+  accuracy               0.8395
+  macro_f1               0.3933
+  macro_f1_support_only  0.7866
+  macro_precision        0.393
+  macro_recall           0.3937
+
+  Per-class:
+    pedestrian     f1=0.000  prec=0.000  rec=0.000  n=0
+    light          f1=0.000  prec=0.000  rec=0.000  n=0
+    medium         f1=0.894  prec=0.898  rec=0.890  n=32848
+    heavy          f1=0.680  prec=0.674  rec=0.685  n=10672
+
+  Report saved: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type/filter_m3nvc/eval_report.json
+  Plot saved:   /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/vae/v3_lowfreq/downstream/mlp_ztype__crl_best_aux_type/filter_m3nvc/confusion_type.png
+
+[5/12] multiscale/disentangled/v3_lowfreq head=pres probe=linear_fullz__crl_best_aux_type filter=full
+  $ /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/.venv/bin/python /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/eval.py --save-dir /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_fullz__crl_best_aux_type --head pres --num-workers 4
+/Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/crl_vehicle/models/encoder_decoder.py:30: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Device: cpu
+  downstream_best_pres.pth missing — falling back to legacy combined-head checkpoint downstream_best.pth
+  Loaded checkpoint: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_fullz__crl_best_aux_type/downstream_best.pth (head=pres, probe_mode=linear_fullz)
+  Loading test set from ../data_files/parsed/test/ …
+  90,627 test windows (pre-filter)
+  Running inference …
+
+=======================================================
+  PRESENCE DETECTION
+=======================================================
+  accuracy           0.7894
+  precision          0.7968
+  recall             0.9455
+  specificity        0.4027
+  f1                 0.8648
+  balanced_accuracy  0.6741
+  mcc                0.436
+
+  Report saved: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_fullz__crl_best_aux_type/eval_report.json
+  Plot saved:   /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_fullz__crl_best_aux_type/confusion_presence.png
+
+[6/12] multiscale/disentangled/v3_lowfreq head=pres probe=linear_fullz__crl_best_aux_type filter=m3nvc
+  $ /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/.venv/bin/python /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/eval.py --save-dir /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_fullz__crl_best_aux_type --head pres --num-workers 4 --include-datasets m3nvc
+/Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/crl_vehicle/models/encoder_decoder.py:30: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Device: cpu
+  downstream_best_pres.pth missing — falling back to legacy combined-head checkpoint downstream_best.pth
+  Loaded checkpoint: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_fullz__crl_best_aux_type/downstream_best.pth (head=pres, probe_mode=linear_fullz)
+  Loading test set from ../data_files/parsed/test/ …
+  90,627 test windows (pre-filter)
+  Dataset filter ['m3nvc']: kept 59,675 windows (30,952 dropped)
+  Running inference …
+
+=======================================================
+  PRESENCE DETECTION
+=======================================================
+  accuracy           0.7976
+  precision          0.797
+  recall             0.9694
+  specificity        0.3348
+  f1                 0.8748
+  balanced_accuracy  0.6521
+  mcc                0.4269
+
+  Report saved: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_fullz__crl_best_aux_type/filter_m3nvc/eval_report.json
+  Plot saved:   /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_fullz__crl_best_aux_type/filter_m3nvc/confusion_presence.png
+
+[7/12] multiscale/disentangled/v3_lowfreq head=type probe=linear_signal__crl_best_aux_type filter=full
+  $ /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/.venv/bin/python /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/eval.py --save-dir /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_signal__crl_best_aux_type --head type --num-workers 4
+/Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/crl_vehicle/models/encoder_decoder.py:30: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Device: cpu
+  downstream_best_type.pth missing — falling back to legacy combined-head checkpoint downstream_best.pth
+  Loaded checkpoint: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_signal__crl_best_aux_type/downstream_best.pth (head=type, probe_mode=linear_signal)
+  Loading test set from ../data_files/parsed/test/ …
+  90,627 test windows (pre-filter)
+  Running inference …
+
+=======================================================
+  VEHICLE TYPE CLASSIFICATION
+=======================================================
+  accuracy               0.6436
+  macro_f1               0.3775
+  macro_f1_support_only  0.3775
+  macro_precision        0.4476
+  macro_recall           0.4174
+
+  Per-class:
+    pedestrian     f1=0.031  prec=0.056  rec=0.022  n=5664
+    light          f1=0.105  prec=0.406  rec=0.060  n=4735
+    medium         f1=0.798  prec=0.898  rec=0.717  n=39139
+    heavy          f1=0.576  prec=0.430  rec=0.870  n=15018
+
+  Report saved: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_signal__crl_best_aux_type/eval_report.json
+  Plot saved:   /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_signal__crl_best_aux_type/confusion_type.png
+
+[8/12] multiscale/disentangled/v3_lowfreq head=type probe=linear_signal__crl_best_aux_type filter=m3nvc
+  $ /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/.venv/bin/python /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/eval.py --save-dir /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_signal__crl_best_aux_type --head type --num-workers 4 --include-datasets m3nvc
+/Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/crl_vehicle/models/encoder_decoder.py:30: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Device: cpu
+  downstream_best_type.pth missing — falling back to legacy combined-head checkpoint downstream_best.pth
+  Loaded checkpoint: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_signal__crl_best_aux_type/downstream_best.pth (head=type, probe_mode=linear_signal)
+  Loading test set from ../data_files/parsed/test/ …
+  90,627 test windows (pre-filter)
+  Dataset filter ['m3nvc']: kept 59,675 windows (30,952 dropped)
+  Running inference …
+
+=======================================================
+  VEHICLE TYPE CLASSIFICATION
+=======================================================
+  accuracy               0.8014
+  macro_f1               0.3842
+  macro_f1_support_only  0.7685
+  macro_precision        0.3772
+  macro_recall           0.4113
+
+  Per-class:
+    pedestrian     f1=0.000  prec=0.000  rec=0.000  n=0
+    light          f1=0.000  prec=0.000  rec=0.000  n=0
+    medium         f1=0.856  prec=0.947  rec=0.781  n=32848
+    heavy          f1=0.681  prec=0.562  rec=0.864  n=10672
+
+  Report saved: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_signal__crl_best_aux_type/filter_m3nvc/eval_report.json
+  Plot saved:   /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/multiscale/disentangled/v3_lowfreq/downstream/linear_signal__crl_best_aux_type/filter_m3nvc/confusion_type.png
+
+[9/12] morlet_per_sensor/vae/phase_v1_diag head=pres probe=mlp_ztype__crl_best_aux_type filter=full
+  $ /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/.venv/bin/python /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/eval.py --save-dir /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/morlet_per_sensor/vae/phase_v1_diag/downstream/mlp_ztype__crl_best_aux_type --head pres --num-workers 4
+/Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/crl_vehicle/models/encoder_decoder.py:30: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Device: cpu
+  downstream_best_pres.pth missing — falling back to legacy combined-head checkpoint downstream_best.pth
+  Loaded checkpoint: /Users/brandontaylor/Documents/CMU/CAPSTONE/Dark_Circle/crl-train/saved_crl/runs/morlet_per_sensor/vae/phase_v1_diag/downstream/mlp_ztype__crl_best_aux_type/downstream_best.pth (head=pres, probe_mode=mlp_ztype)
+  Loading test set from ../data_files/parsed/test/ …
+  90,627 test windows (pre-filter)
+  Running inference …
+/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/resource_tracker.py:396: UserWarning: resource_tracker: There appear to be 20 leaked semaphore objects to clean up at shutdown: {'/mp-uqg0y3d2', '/mp-dce14e6o', '/mp-yghubu29', '/mp-dy9iysws', '/mp-lxjbtake', '/mp-18wb1z_0', '/mp-zyvtun7t', '/mp-6ou5xh5i', '/mp-tf36cr18', '/mp-xonazrg9', '/mp-mkizspiz', '/mp-lxazc7bo', '/mp-vqhkzpac', '/mp-5mxdyspl', '/mp-51f41te5', '/mp-x_n828au', '/mp-8o9pwqcu', '/mp-cwshydgn', '/mp-ehmcko2j', '/mp-aw0gdujj'}
+  warnings.warn(
