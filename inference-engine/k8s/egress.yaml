@@ -52,4 +52,10 @@ spec:
       volumes:
         - name: fastdds-profiles
           configMap:
+            # OPTIONAL: split-egress DDS network. To give the egress pod
+            # its own FastDDS profile (different unicast peers / multicast
+            # scope from the ingestor side), change this name to
+            # ``fastdds-profiles-egress`` and uncomment the matching
+            # ConfigMap stub at the bottom of k8s/inference-engine-config.yaml.
+            # The Helm chart exposes this as ros2.egress.fastddsProfile.
             name: fastdds-profiles

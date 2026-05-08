@@ -103,6 +103,21 @@ ros2:
   # to get pod-network isolation.
   hostNetwork: true
 
+  # Egress-side overrides. Use these when the egress pod must speak DDS
+  # on a different network from the ingestor (e.g. sensors live on a
+  # low-trust acquisition VLAN, downstream consumers on a separate IT
+  # LAN). Leaving the override empty means egress uses the same
+  # fastddsProfile as ingestor — the common case.
+  egress:
+    # Optional FastDDS XML profile applied ONLY to the egress pod. When
+    # set, the chart renders a second ConfigMap (fastdds-profiles-egress)
+    # and points egress's FASTRTPS_DEFAULT_PROFILES_FILE at it. Use this
+    # to give the egress pod a different unicast peer list (typically:
+    # the IPs of the customer's downstream subscriber hosts) without
+    # changing what the ingestor sees on the sensor LAN. Leave empty to
+    # share the top-level fastddsProfile with the ingestor side.
+    fastddsProfile: ""
+
 # -----------------------------------------------------------------------------
 # Sensor inventory
 #

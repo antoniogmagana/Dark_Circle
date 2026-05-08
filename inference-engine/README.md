@@ -540,6 +540,119 @@ delivering each window three times.
 
 ---
 
+## Configuration reference
+
+Everything a customer adapts for their site lives in two places:
+
+- **Helm path:** edit `chart/values.yaml` (or a copy passed via `-f`).
+  All knobs are documented inline in that file.
+- **Raw-manifest path:** edit the matching ConfigMap in `k8s/`. The
+  manifests are split by concern so each ConfigMap is a single-purpose
+  edit point.
+
+The tables below are a roadmap — for the full set of comments on each
+field, see the inline documentation in the files themselves.
+
+### Helm path (`chart/values.yaml`)
+
+| What you're configuring | Field |
+|---|---|
+| Sensor inventory (array IDs + bundled-channel topics) | `expectedSensors` |
+| Channel-tag → buffer-role map (per firmware) | `channelMap` |
+| ADC bit depths per channel | `sensorConfig.audioBitDepth`, `seismicBitDepth`, `accelBitDepth` |
+| Native-rate vs legacy-resample mode | `sensorConfig.nativeRates`, `targetRate` |
+| Output ROS2 topic for `InferenceResult` | `ros2.outputTopic` |
+| ROS2 domain ID | `ros2.domainId` |
+| RMW implementation (FastDDS / Cyclone) | `ros2.rmwImplementation` |
+| FastDDS shared-memory off (kind / hostNetwork) | `ros2.fastddsBuiltinTransports` |
+| Shared FastDDS unicast profile (ingestor + egress) | `ros2.fastddsProfile` |
+| **Split egress DDS network (separate sensor / consumer LANs)** | `ros2.egress.fastddsProfile` |
+| `hostNetwork` on ROS2-speaking pods | `ros2.hostNetwork` |
+| Container registry + tag (mandatory) | `images.registry`, `images.tag`, `images.pullSecrets` |
+| CRL bundle selection (build-time, not Helm-rendered) | `bundles.detect`, `bundles.classify` — set as env vars on the build host |
+| Replica counts + resource limits per pod | `inference.inferDetect`, `inferClassify`, `egress`; `discovery`, `ingestor` |
+| PyTorch intra-op threads (match cgroup CPU limit) | `inference.inferDetect.torchThreads`, `inferClassify.torchThreads` |
+| NATS bundled vs external | `nats.enabled`, `nats.url` |
+| NATS JetStream storage class | `nats.storage.type` (`emptyDir` / `pvc`), `pvcSize`, `pvcStorageClass` |
+| KEDA autoscaling | `keda.enabled`, `lagThreshold`, `pollingInterval`, `cooldownPeriod` |
+| Smoke-test fake publisher | `fakePublisher.enabled` (and `topics`, `rateHz`, `channelTags`, `triggerEvery`) |
+
+Minimum edits before a Helm install:
+
+1. `images.registry` and `images.tag` — point at the registry you pushed to.
+2. `expectedSensors` — list your real Raspberry Shake arrays + topics.
+3. `channelMap` — only if your firmware uses channel tags other than the
+   default `MIC` / `EHZ` / `ENE` / `ENN` / `ENZ`.
+4. `ros2.fastddsProfile` — only on networks that block UDP multicast
+   (most enterprise / multi-host clusters). Add
+   `ros2.egress.fastddsProfile` on top of that if egress must speak DDS
+   on a different network from the sensors.
+
+### Raw-manifest path (`k8s/*.yaml`)
+
+| What you're configuring | File / ConfigMap | Key |
+|---|---|---|
+| Sensor inventory | `k8s/expected-sensors.yaml` (`expected-sensors`) | `arrays` |
+| Channel-tag map | `k8s/ingestor-channel-map.yaml` (`ingestor-channel-map`) | `channels.yaml` |
+| ADC bit depths, target rate | `k8s/sensor-config.yaml` (`sensor-config`) | `audio_bit_depth`, `seismic_bit_depth`, `accel_bit_depth`, `target_rate` |
+| Output ROS2 topic | `k8s/inference-engine-config.yaml` (`inference-engine-config`) | `INFERENCE_RESULT_TOPIC` |
+| ROS2 domain ID | same | `ROS_DOMAIN_ID` |
+| RMW implementation | same | `RMW_IMPLEMENTATION` |
+| FastDDS shared-memory off | same | `FASTDDS_BUILTIN_TRANSPORTS` |
+| Shared FastDDS unicast profile | `k8s/inference-engine-config.yaml` (`fastdds-profiles`) | `fastdds.xml` |
+| **Split egress DDS network** | `k8s/inference-engine-config.yaml` (`fastdds-profiles-egress`, commented stub) + `k8s/egress.yaml` volume `configMap.name` | uncomment both |
+| NATS URL | `k8s/inference-engine-config.yaml` (`inference-engine-config`) | `NATS_URL` |
+| Image references | each Deployment manifest (`k8s/discovery.yaml`, `k8s/egress.yaml`, `k8s/infer-detect.yaml`, `k8s/infer-classify.yaml`, `k8s/ingestor-template.yaml`, `k8s/fake-publisher.yaml`) | `containers[].image` |
+| KEDA autoscaling | `k8s/keda/*.yaml` | per-ScaledObject |
+
+The raw-manifest path doesn't reuse one big `values.yaml`, so several
+fields (image references, namespace, replica counts) need editing per
+Deployment. For multi-customer fleets, the Helm path scales better.
+
+### Switching to a split egress DDS network
+
+The egress pod can speak DDS on a different network from the ingestor
+side. Use this when sensors and downstream consumers live on separate
+VLANs — common in enterprise deployments where the acquisition network
+is firewalled off from the consumer / IT network.
+
+**Helm:**
+
+```yaml
+# values.yaml (excerpt)
+ros2:
+  fastddsProfile: |          # ingestor side: peers with sensor hosts
+    <?xml version="1.0" encoding="UTF-8"?>
+    <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+      ...sensor-LAN unicast peers...
+    </profiles>
+  egress:
+    fastddsProfile: |        # egress side: peers with consumer hosts
+      <?xml version="1.0" encoding="UTF-8"?>
+      <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+        ...consumer-LAN unicast peers...
+      </profiles>
+```
+
+When `ros2.egress.fastddsProfile` is set, the chart renders a second
+ConfigMap (`fastdds-profiles-egress`) and points only the egress pod
+at it. Ingestor / discovery / fake-publisher continue to use
+`ros2.fastddsProfile`.
+
+**Raw manifests:**
+
+1. Uncomment the `fastdds-profiles-egress` ConfigMap stub at the bottom
+   of `k8s/inference-engine-config.yaml` and replace the example
+   locator addresses with your downstream subscriber host IPs.
+2. In `k8s/egress.yaml`, change the volume's `configMap.name` from
+   `fastdds-profiles` to `fastdds-profiles-egress`.
+3. `kubectl apply -f k8s/inference-engine-config.yaml -f k8s/egress.yaml`
+   and `kubectl rollout restart deploy/egress`.
+
+The ingestor side keeps using the original `fastdds-profiles` ConfigMap.
+
+---
+
 ## Three customer modes
 
 Bringing up the pipeline on a single Linux server has three distinct

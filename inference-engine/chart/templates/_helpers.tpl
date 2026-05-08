@@ -37,12 +37,51 @@ baked-in Ingestor template (which mounts unconditionally) doesn't fail
 on a missing ConfigMap. The env var only renders when a profile is
 configured, so an empty XML doesn't get pointed at.
 
-Usage: {{ include "inference-engine.fastddsEnv" . | nindent 12 }}
+These helpers accept either the chart root (.) — used by ingress-side
+pods — or a dict {"root": ., "side": "egress"} — used by the egress
+Deployment to pick up its optional separate profile. When side=egress
+AND ros2.egress.fastddsProfile is set, the helpers point at the
+fastdds-profiles-egress ConfigMap. Otherwise they fall through to the
+shared fastdds-profiles ConfigMap.
+
+Usage (ingress / default):
+       {{ include "inference-engine.fastddsEnv" . | nindent 12 }}
        {{ include "inference-engine.fastddsMount" . | nindent 12 }}
        {{ include "inference-engine.fastddsVolume" . | nindent 6 }}
+Usage (egress):
+       {{ include "inference-engine.fastddsEnv" (dict "root" . "side" "egress") | nindent 12 }}
+       (same dict for fastddsMount / fastddsVolume)
 */}}
+{{- define "inference-engine.fastddsConfigMapName" -}}
+{{- $values := .Values -}}
+{{- $side := "" -}}
+{{- if hasKey . "root" -}}
+{{- $values = .root.Values -}}
+{{- $side = .side | default "" -}}
+{{- end -}}
+{{- if and (eq $side "egress") $values.ros2.egress.fastddsProfile -}}
+fastdds-profiles-egress
+{{- else -}}
+fastdds-profiles
+{{- end -}}
+{{- end -}}
+
+{{- define "inference-engine.fastddsHasProfile" -}}
+{{- $values := .Values -}}
+{{- $side := "" -}}
+{{- if hasKey . "root" -}}
+{{- $values = .root.Values -}}
+{{- $side = .side | default "" -}}
+{{- end -}}
+{{- if and (eq $side "egress") $values.ros2.egress.fastddsProfile -}}
+true
+{{- else if $values.ros2.fastddsProfile -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{- define "inference-engine.fastddsEnv" -}}
-{{- if .Values.ros2.fastddsProfile -}}
+{{- if eq (include "inference-engine.fastddsHasProfile" .) "true" -}}
 - name: FASTRTPS_DEFAULT_PROFILES_FILE
   value: /etc/fastdds/fastdds.xml
 {{- end -}}
@@ -57,5 +96,5 @@ Usage: {{ include "inference-engine.fastddsEnv" . | nindent 12 }}
 {{- define "inference-engine.fastddsVolume" -}}
 - name: fastdds-profiles
   configMap:
-    name: fastdds-profiles
+    name: {{ include "inference-engine.fastddsConfigMapName" . }}
 {{- end -}}

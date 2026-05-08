@@ -104,3 +104,54 @@ data:
         </rtps>
       </participant>
     </profiles>
+# ---
+# # OPTIONAL: split-egress FastDDS profile.
+# #
+# # Uncomment this ConfigMap (and the matching env/volume swap in
+# # k8s/egress.yaml) when the egress pod must speak DDS on a different
+# # network from the ingestor — e.g. sensors on a low-trust acquisition
+# # VLAN, downstream consumers on a separate IT LAN. Replace the locator
+# # addresses with the IPs of YOUR downstream subscriber hosts.
+# #
+# # The Helm chart exposes the same knob as ros2.egress.fastddsProfile.
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: fastdds-profiles-egress
+#   namespace: default
+# data:
+#   fastdds.xml: |
+#     <?xml version="1.0" encoding="UTF-8"?>
+#     <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+#       <participant profile_name="egress_participant" is_default_profile="true">
+#         <rtps>
+#           <defaultUnicastLocatorList>
+#             <locator>
+#               <udpv4>
+#                 <address>10.0.0.42</address>  <!-- downstream subscriber host -->
+#               </udpv4>
+#             </locator>
+#           </defaultUnicastLocatorList>
+#           <builtin>
+#             <discovery_config>
+#               <discoveryProtocol>SIMPLE</discoveryProtocol>
+#             </discovery_config>
+#             <metatrafficUnicastLocatorList>
+#               <locator>
+#                 <udpv4>
+#                   <address>10.0.0.42</address>
+#                 </udpv4>
+#               </locator>
+#             </metatrafficUnicastLocatorList>
+#             <initialPeersList>
+#               <locator>
+#                 <udpv4>
+#                   <address>10.0.0.42</address>
+#                 </udpv4>
+#               </locator>
+#             </initialPeersList>
+#             <avoid_builtin_multicast>true</avoid_builtin_multicast>
+#           </builtin>
+#         </rtps>
+#       </participant>
+#     </profiles>

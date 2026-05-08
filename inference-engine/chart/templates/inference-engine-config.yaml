@@ -25,3 +25,18 @@ metadata:
 data:
   fastdds.xml: |
 {{ .Values.ros2.fastddsProfile | default "" | indent 4 }}
+{{- if .Values.ros2.egress.fastddsProfile }}
+---
+# Egress-only FastDDS profile. Rendered only when ros2.egress.fastddsProfile
+# is set in values.yaml. Mounted exclusively by the egress Deployment so
+# downstream subscribers can sit on a different DDS network from the
+# sensor side without affecting how the ingestor discovers Raspberry
+# Shake topics.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastdds-profiles-egress
+data:
+  fastdds.xml: |
+{{ .Values.ros2.egress.fastddsProfile | indent 4 }}
+{{- end }}

@@ -24,7 +24,7 @@ spec:
             - configMapRef:
                 name: inference-engine-config
           env:
-            {{- include "inference-engine.fastddsEnv" . | nindent 12 }}
+            {{- include "inference-engine.fastddsEnv" (dict "root" . "side" "egress") | nindent 12 }}
           readinessProbe:
             exec:
               command: ["test", "-f", "/tmp/ready"]
@@ -32,11 +32,11 @@ spec:
             periodSeconds: 5
             failureThreshold: 60
           volumeMounts:
-            {{- include "inference-engine.fastddsMount" . | nindent 12 }}
+            {{- include "inference-engine.fastddsMount" (dict "root" . "side" "egress") | nindent 12 }}
           resources:
             {{- toYaml .Values.inference.egress.resources | nindent 12 }}
       volumes:
-        {{- include "inference-engine.fastddsVolume" . | nindent 8 }}
+        {{- include "inference-engine.fastddsVolume" (dict "root" . "side" "egress") | nindent 8 }}
 {{- if .Values.keda.enabled }}
 ---
 apiVersion: keda.sh/v1alpha1
