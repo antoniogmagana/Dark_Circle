@@ -542,13 +542,32 @@ delivering each window three times.
 
 ## Configuration reference
 
-Everything a customer adapts for their site lives in two places:
+> **⚠️ Pick one path and stay in it.** Helm and raw-manifest are
+> *alternatives*, not layers. The Helm chart in `chart/` and the raw
+> manifests in `k8s/` describe the same Kubernetes objects — they are
+> not chained. Editing one does **not** propagate to the other.
+>
+> - **If you are using Helm** (the customer-facing path), edit only
+>   `chart/values.yaml`. Do not edit anything in `k8s/`. The chart
+>   renders all ConfigMaps and Deployments at install time from your
+>   values file.
+> - **If you are using raw manifests** (the development path used by
+>   `local_smoke.sh` / `replay_in_kind.sh`), edit only the relevant
+>   `k8s/*.yaml` files. Do not edit `chart/values.yaml`; it is unread
+>   on this path.
+>
+> Mixing the two leads to silent drift — your Helm-rendered objects
+> and your hand-edited `k8s/` manifests diverge with no error, and the
+> last `kubectl apply` wins.
 
-- **Helm path:** edit `chart/values.yaml` (or a copy passed via `-f`).
-  All knobs are documented inline in that file.
-- **Raw-manifest path:** edit the matching ConfigMap in `k8s/`. The
-  manifests are split by concern so each ConfigMap is a single-purpose
-  edit point.
+Everything a customer adapts for their site lives in one of these two
+places, depending on which path you're on:
+
+- **Helm path:** `chart/values.yaml` (or a copy passed via `-f`). All
+  knobs are documented inline in that file. **Single source of truth
+  on this path.**
+- **Raw-manifest path:** the ConfigMaps in `k8s/`. The manifests are
+  split by concern so each ConfigMap is a single-purpose edit point.
 
 The tables below are a roadmap — for the full set of comments on each
 field, see the inline documentation in the files themselves.
@@ -589,6 +608,15 @@ Minimum edits before a Helm install:
    on a different network from the sensors.
 
 ### Raw-manifest path (`k8s/*.yaml`)
+
+> **⚠️ Expert development use only.** The raw-manifest path is what
+> `scripts/local_smoke.sh` and `scripts/replay_in_kind.sh` apply
+> during kind-cluster development, and it's the right path for
+> someone debugging the chart itself or running in a regulated
+> environment that disallows Helm. If you are deploying the inference
+> engine to run real sensors in production, use the Helm path above
+> and ignore this section — `chart/values.yaml` is the only file you
+> need to edit.
 
 | What you're configuring | File / ConfigMap | Key |
 |---|---|---|
