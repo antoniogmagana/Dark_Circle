@@ -16,6 +16,7 @@ What's been exercised end-to-end:
 | Egress → ROS2 `/inference_result` | ✅ Verified | One publish per window: positives carry full `InferenceResult`, negatives carry detection-only fields. Stamped with `publish_time` + `latency_seconds` (capture-timestamp → publish, includes 1.0s window-fill floor). |
 | Helm chart install | ✅ Verified | Single `helm install` brings up the pipeline. NATS bundled, KEDA optional. Note: on a kind cluster, run `scripts/build_containers.sh` (which auto-loads images into the kind node) *before* `helm install`, otherwise pods stay `Pending` with `ImagePullBackOff`. |
 | Local smoke test | ✅ Verified (2026-05-02) | `scripts/local_smoke.sh` brings up the full pipeline end-to-end on a single-node kind cluster: kind + Calico + KEDA + NATS + all six inference pods. Confirmed working on Ubuntu 24.04. |
+| Live bring-up from fresh clone | 🆕 Added 2026-05-07 | `scripts/cluster_up_live.sh` brings up the cluster without fake-publisher and fail-fasts if `expected-sensors.yaml` is still the unedited example. Single command for the customer's "first live inference" path. Not yet exercised end-to-end against real sensors. |
 | Replay on recorded data | ✅ Independent path | `scripts/replay_in_kind.sh` brings up the cluster (no fake-publisher) on demand and injects a recording. Reuses the smoke cluster if one exists; works equally well from a clean clone. |
 | Replay tool (parquet / CSV / WAV) | ✅ Verified | `scripts/replay_publisher.py` simulates a real ROS2 sensor source for testing on pre-recorded data. Format auto-detected from extension. Reports per-window precision/recall (when `present` ground-truth is in the file) and side-by-side client + cluster end-to-end latency. |
 | End-to-end on synthetic data | ✅ Verified | `fake-publisher` driving the full pipeline produces `InferenceResult` ROS2 messages. |
@@ -549,7 +550,7 @@ created on demand by whichever script you run first.
 |------|------------|--------------|-------------|
 | **Smoke** | `bash scripts/local_smoke.sh` | Cluster + synthetic fake-publisher driving every topic | One-time sanity check that the build + cluster-up logic works on this host. |
 | **Replay** | `bash scripts/replay_in_kind.sh <audio> <seismic>` | Cluster (no fake-publisher) + a one-off pod publishing recorded data | Real work on pre-recorded recordings. |
-| **Live** | point real ROS2 sensors at the cluster, no script | Cluster (no fake-publisher) + real Raspberry Shake topics | Real work on live sensor input. |
+| **Live** | `bash scripts/cluster_up_live.sh` | Cluster (no fake-publisher) ready to attach to real Raspberry Shake topics | Real work on live sensor input. |
 
 All three modes share the same cluster; you can switch between them
 without re-running the build or recreating the cluster. The
@@ -630,21 +631,41 @@ SKIP_CLUSTER_UP=1 bash scripts/replay_in_kind.sh audio.parquet seismic.parquet
 
 ### Live inference on real sensors
 
-No script needed. With the cluster up (from a prior smoke or replay
-invocation), point real Raspberry Shake topics at it:
+From a fresh clone, the bring-up is one script. Edit
+`k8s/expected-sensors.yaml` first to list your real array IDs and the
+topics they publish on, then:
 
-1. Edit `k8s/expected-sensors.yaml` (or your Helm values' `expectedSensors`)
-   to list your real array IDs and topics.
-2. `kubectl apply -f k8s/expected-sensors.yaml` if you used the
-   smoke/replay path; `helm upgrade` if Helm.
-3. Discovery picks the change up on its next 5-second poll and spawns
-   an Ingestor for each visible array.
-4. Watch results: `bash scripts/tail_egress.sh`.
+```bash
+bash scripts/cluster_up_live.sh
+```
 
-If you've been running smoke or replay and want to switch to live, no
-explicit teardown is needed — Discovery already only attaches to
-arrays listed in `expected-sensors.yaml`. Just remove `fake-publisher`
-(`kubectl delete deployment fake-publisher`) and update the ConfigMap.
+This builds the six images, brings up kind + Calico + KEDA + NATS,
+applies all manifests *without* fake-publisher, and waits for every
+Deployment to be Ready. Discovery starts polling immediately and will
+spawn an Ingestor for each array as soon as its bundled-channel topic
+appears on the ROS2 graph. The script aborts up front if
+`expected-sensors.yaml` still contains only the `shake-001` example,
+since Discovery would otherwise sit idle waiting for a topic that
+doesn't exist on your network.
+
+```bash
+# Watch the spawn decision
+kubectl logs -n default -l app=discovery -f
+
+# Watch inference results
+bash scripts/tail_egress.sh
+
+# Tear down
+bash scripts/cluster_up_live.sh --teardown
+```
+
+**Already running smoke or replay?** You don't need
+`cluster_up_live.sh` — the cluster is already up. Just:
+
+1. `kubectl delete deployment fake-publisher` (if you were running smoke).
+2. Edit `k8s/expected-sensors.yaml` and `kubectl apply -f` it (or
+   `helm upgrade` if you used the Helm path).
+3. Discovery picks up the change on its next 5-second poll.
 
 ### Re-running after a failed bring-up
 
