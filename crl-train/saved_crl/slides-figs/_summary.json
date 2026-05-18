@@ -1,22 +1,27 @@
 {
-  "multiscale": {
-    "downstream_best_pres_f1": 0.8779,
-    "downstream_best_type_f1": 0.4755,
-    "downstream_best_type_f1_epoch": 20,
-    "crl_best_ref_elbo": 0.170033,
-    "crl_best_aux_type_f1": 0.4802,
-    "crl_best_aux_type_epoch": 27,
+  "multiscale_vae": {
+    "downstream_best_pres_f1": 0.865,
+    "downstream_best_type_f1": 0.6428,
+    "downstream_best_type_f1_epoch": 1,
+    "crl_best_ref_elbo": 0.552606,
+    "crl_best_aux_type_f1": 0.6071,
+    "crl_best_aux_type_epoch": 4,
+    "crl_epochs_run": 51,
+    "down_epochs_run": 50
+  },
+  "multiscale_disentangled": {
+    "downstream_best_pres_f1": 0.8433,
+    "downstream_best_type_f1": 0.6462,
+    "downstream_best_type_f1_epoch": 1,
+    "crl_best_ref_elbo": 0.252379,
+    "crl_best_aux_type_f1": 0.6949,
+    "crl_best_aux_type_epoch": 32,
     "crl_epochs_run": 100,
     "down_epochs_run": 50
   },
-  "morlet_per_sensor": {
-    "downstream_best_pres_f1": 0.855,
-    "downstream_best_type_f1": 0.3754,
-    "downstream_best_type_f1_epoch": 8,
-    "crl_best_ref_elbo": 1.710139,
-    "crl_best_aux_type_f1": 0.3194,
-    "crl_best_aux_type_epoch": 25,
-    "crl_epochs_run": 83,
-    "down_epochs_run": 50
+  "_meta": {
+    "probe_variant": "linear_fullz__crl_best",
+    "vae_run": "runs/multiscale/vae/2026-05-03_05-02-44",
+    "dis_run": "runs/multiscale/disentangled/2026-05-03_05-03-14"
   }
 }

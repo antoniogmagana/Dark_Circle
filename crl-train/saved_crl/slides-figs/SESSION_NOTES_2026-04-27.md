@@ -41,30 +41,27 @@ Picks up the new audio kernel ladder automatically.
 
 | File | Status |
 |---|---|
-| `fig1_downstream_f1_bars.png` | done — multi vs morlet downstream F1 |
+| `fig1_downstream_f1_bars.png` | done — multiscale-VAE vs multiscale-Disentangled downstream F1 |
 | `fig2_downstream_type_f1_curves.png` | done — type F1 across downstream epochs |
 | `fig3_crl_val_ref_elbo.png` | done — β-invariant ELBO per pretraining epoch |
 | `fig4_crl_aux_type_f1.png` | done — aux type F1 with best-epoch markers |
-| `fig6_architecture.png` | done — frontend swap-point schematic |
+| `fig6_architecture.png` | done — multiscale forward-pass schematic |
 | `fig7_frontend_multiscale.png` | done — multiscale internals (boxes) |
-| `fig8_frontend_morlet.png` | done — morlet internals (boxes) |
-| `fig9_training_flow.png` | done — anchor + partner + dual checkpoint |
-| `fig10_morlet_anatomy.png` | done — wavelet = envelope × sinusoid |
+| `fig9_training_flow.png` | done — three training modes, shared encoder, mode-specific checkpoints |
 | `fig11_multiscale_anatomy.png` | done — receptive-field windows on shared signal |
 | `fig12_crl_concept.png` | done — vanilla vs causal representation |
-| `fig13_confusion_type_all_runs.png` | done — 3-run type CMs |
-| `fig14_confusion_presence_all_runs.png` | done — 3-run presence CMs |
-| `model_basics.md` | done — backbone + frontend differences + numbers |
-| `performance_table.md` | done — full performance table for 3 completed runs |
+| `fig13_confusion_type_all_runs.png` | done — type CMs across the multiscale comparison set |
+| `fig14_confusion_presence_all_runs.png` | done — presence CMs across the multiscale comparison set |
+| `model_basics.md` | done — backbone + objective differences + numbers |
+| `performance_table.md` | done — multiscale-only performance table |
 
 Generators (re-runnable, idempotent):
-- `_make_figures.py` — figs 1–4
-- `_make_diagrams.py` — figs 6–9
-- `_make_wavelet_diagram.py` — fig 10
+- `_make_figures.py` — figs 1–4 (multiscale-VAE vs multiscale-Disentangled)
+- `_make_diagrams.py` — figs 6, 7, 9
 - `_make_multiscale_diagram.py` — fig 11
 - `_make_crl_concept.py` — fig 12
 - `_make_confusion_all.py` — figs 13–14
-- `_make_confusion.py` — older 2-panel version (kept for reference)
+- `_make_confusion.py` — 2-panel CM, multiscale-VAE vs multiscale-Disentangled
 
 All figures: 300 DPI, 16:9 (or 1×N panels), viridis-friendly palette,
 presentation-scale fonts (titles 16–18 pt, sub-text 13–15 pt).

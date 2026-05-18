@@ -2,14 +2,12 @@
 
 Three figures, one matplotlib script, no graphviz dependency:
 
-  fig6_architecture.png      — forward-pass schematic, both frontends side by side
-  fig7_frontend_multiscale.png — multiscale frontend internals
-  fig8_frontend_morlet.png   — morlet (per-sensor) frontend internals
-  fig9_training_flow.png     — anchor/partner training graph + losses + dual ckpt
+  fig6_architecture.png         — forward-pass schematic (multiscale frontend)
+  fig7_frontend_multiscale.png  — multiscale frontend internals
+  fig9_training_flow.png        — three training modes, shared encoder, mode-specific checkpoints
 
 Style is consistent with _make_figures.py: 300 DPI, 16:9, sans-serif,
-viridis-pair accents (multi=#440154, morlet=#21918c), neutral gray for shared
-parts.
+viridis-pair accents (multi=#440154), neutral gray for shared parts.
 """
 
 from __future__ import annotations
@@ -22,12 +20,10 @@ from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 ROOT = Path(__file__).resolve().parent
 
 C_MULTI = "#440154"
-C_MORLET = "#21918c"
 C_SHARED = "#444444"
 C_LATENT = "#5b3a87"
 C_LOSS = "#b13a3a"
 C_BG_MULTI = "#e9defc"
-C_BG_MORLET = "#d6f0ee"
 C_BG_SHARED = "#eeeeee"
 C_BG_LATENT = "#e7e0f1"
 
@@ -144,9 +140,9 @@ def fig6_architecture(out: Path) -> None:
     # multi-sensor input
     box(
         ax,
-        (0.2, 3.2),
+        (0.2, 3.7),
         2.6,
-        2.6,
+        1.6,
         "Multi-sensor input",
         sub="audio  (B,1,16000)\nseismic (B,1,200)",
         edge=C_SHARED,
@@ -155,46 +151,24 @@ def fig6_architecture(out: Path) -> None:
         sub_fs=13,
     )
 
-    # frontend choice — wider boxes to fit the new font sizes
+    # multiscale frontend
     box(
         ax,
-        (3.2, 5.5),
-        4.0,
-        2.2,
-        "Frontend  (option A)",
-        sub="Multiscale\n3 × Conv1D [9,19,39]\ncat → 1×1 proj → d_model",
+        (3.4, 3.5),
+        3.8,
+        2.0,
+        "Multiscale frontend",
+        sub="3 × Conv1D [9, 19, 39]\ncat → 1×1 proj\n→ d_model = 64",
         edge=C_MULTI,
         face=C_BG_MULTI,
         title_fs=17,
         sub_fs=13,
     )
-    box(
-        ax,
-        (3.2, 1.3),
-        4.0,
-        2.2,
-        "Frontend  (option B)",
-        sub="Morlet (per-sensor)\nwavelet bank, w0=6\nlog_power + cos/sin phase",
-        edge=C_MORLET,
-        face=C_BG_MORLET,
-        title_fs=17,
-        sub_fs=13,
-    )
-    ax.text(
-        5.2,
-        4.5,
-        "either / or",
-        ha="center",
-        va="center",
-        fontsize=14,
-        color="#777777",
-        style="italic",
-    )
 
     # token annotation
     ax.text(
         7.85,
-        8.2,
+        7.2,
         "32 tokens · d_model = 64",
         ha="center",
         va="center",
@@ -206,7 +180,7 @@ def fig6_architecture(out: Path) -> None:
     # shared encoder
     box(
         ax,
-        (7.6, 3.4),
+        (7.8, 3.4),
         3.0,
         2.2,
         "Transformer\nencoder",
@@ -220,7 +194,7 @@ def fig6_architecture(out: Path) -> None:
     # latent posterior
     box(
         ax,
-        (11.0, 3.9),
+        (11.2, 3.9),
         1.8,
         1.4,
         "z  ~  q(z|x)",
@@ -232,8 +206,8 @@ def fig6_architecture(out: Path) -> None:
     )
 
     # latent partitions
-    split_x = 13.4
-    block_w = 2.6
+    split_x = 13.6
+    block_w = 2.4
     block_h = 1.5
     gap = 0.5
     blocks = [
@@ -260,19 +234,17 @@ def fig6_architecture(out: Path) -> None:
         )
         centers.append((cx, cy))
 
-    # arrows — input → frontends → encoder → z → splits
-    arrow(ax, (2.8, 5.0), (3.2, 6.6), color=C_MULTI, linewidth=1.4)
-    arrow(ax, (2.8, 4.2), (3.2, 2.4), color=C_MORLET, linewidth=1.4)
-    arrow(ax, (7.2, 6.6), (7.6, 5.0), color=C_MULTI, linewidth=1.4)
-    arrow(ax, (7.2, 2.4), (7.6, 4.2), color=C_MORLET, linewidth=1.4)
-    arrow(ax, (10.6, 4.6), (11.0, 4.6))
+    # straight-line arrows — input → frontend → encoder → z → splits
+    arrow(ax, (2.8, 4.5), (3.4, 4.5), color=C_MULTI, linewidth=1.4)
+    arrow(ax, (7.2, 4.5), (7.8, 4.5), color=C_MULTI, linewidth=1.4)
+    arrow(ax, (10.8, 4.6), (11.2, 4.6))
     for cx, cy in centers:
-        arrow(ax, (12.8, 4.6), (split_x, cy), linewidth=0.9)
+        arrow(ax, (13.0, 4.6), (split_x, cy), linewidth=0.9)
 
     ax.text(
         0.2,
-        8.6,
-        "Forward pass · CRL pretraining (frontend is the swap point)",
+        8.0,
+        "Forward pass · CRL pretraining",
         fontsize=15,
         color="#555555",
         style="italic",
@@ -389,370 +361,228 @@ def fig7_multiscale(out: Path) -> None:
     plt.close(fig)
 
 
-# ---------- fig 8: morlet frontend internals -------------------------------
-
-
-def fig8_morlet(out: Path) -> None:
-    fig, ax = setup_canvas()
-
-    box(
-        ax,
-        (0.4, 3.7),
-        2.2,
-        1.6,
-        "Per-sensor input",
-        sub="(B, 1, T)\naudio T = 16k\nseismic T = 200",
-        edge=C_SHARED,
-        face=C_BG_SHARED,
-        title_fs=16,
-        sub_fs=14,
-    )
-
-    # filter bank
-    box(
-        ax,
-        (3.4, 3.5),
-        4.0,
-        2.0,
-        "Morlet filter bank",
-        sub="log-spaced freqs · w0 = 6\naudio   ks = 4585  stride 500\nseismic ks = 573   stride 6",
-        edge=C_MORLET,
-        face=C_BG_MORLET,
-        title_fs=17,
-        sub_fs=14,
-    )
-    arrow(ax, (2.6, 4.5), (3.4, 4.5), color=C_MORLET, linewidth=1.4)
-
-    # complex output → three channels
-    box(
-        ax,
-        (8.4, 6.0),
-        2.8,
-        1.4,
-        "log_power",
-        sub="|Wx|² → log",
-        edge=C_MORLET,
-        face=C_BG_MORLET,
-        title_fs=17,
-        sub_fs=14,
-    )
-    box(
-        ax,
-        (8.4, 3.8),
-        2.8,
-        1.4,
-        "cos_phase",
-        sub="re / |Wx|",
-        edge=C_MORLET,
-        face=C_BG_MORLET,
-        title_fs=17,
-        sub_fs=14,
-    )
-    box(
-        ax,
-        (8.4, 1.6),
-        2.8,
-        1.4,
-        "sin_phase",
-        sub="im / |Wx|",
-        edge=C_MORLET,
-        face=C_BG_MORLET,
-        title_fs=17,
-        sub_fs=14,
-    )
-
-    arrow(ax, (7.4, 5.0), (8.4, 6.7), color=C_MORLET, linewidth=1.4)
-    arrow(ax, (7.4, 4.5), (8.4, 4.5), color=C_MORLET, linewidth=1.4)
-    arrow(ax, (7.4, 4.0), (8.4, 2.3), color=C_MORLET, linewidth=1.4)
-
-    # concat / pool to tokens
-    box(
-        ax,
-        (11.8, 3.7),
-        2.2,
-        1.6,
-        "channel-cat\n+ pool",
-        sub="3 × out_C\n→ 32 tokens",
-        edge=C_MORLET,
-        face=C_BG_MORLET,
-        title_fs=16,
-        sub_fs=13,
-    )
-    arrow(ax, (11.2, 6.7), (11.8, 4.8), color=C_MORLET, linewidth=1.2)
-    arrow(ax, (11.2, 4.5), (11.8, 4.5), color=C_MORLET, linewidth=1.2)
-    arrow(ax, (11.2, 2.3), (11.8, 4.2), color=C_MORLET, linewidth=1.2)
-
-    box(
-        ax,
-        (14.2, 3.7),
-        1.6,
-        1.6,
-        "to encoder",
-        sub="(B, C, 32)",
-        edge=C_SHARED,
-        face=C_BG_SHARED,
-        title_fs=15,
-        sub_fs=13,
-    )
-    arrow(ax, (14.0, 4.5), (14.2, 4.5))
-
-    ax.text(
-        0.4,
-        8.55,
-        "Morlet (per-sensor) frontend · fixed wavelet bank with phase channel",
-        fontsize=15,
-        color="#555555",
-        style="italic",
-    )
-    fig.tight_layout(pad=0.5)
-    fig.savefig(out)
-    plt.close(fig)
-
-
 # ---------- fig 9: training flow + losses + dual checkpoint ---------------
 
 
 def fig9_training_flow(out: Path) -> None:
-    fig, ax = setup_canvas(figsize=(16, 9))
+    """Three training modes share an encoder; each row carries its own loss
+    and checkpoint metric. Strictly horizontal flow, no crossings."""
 
-    # ---- column 1: inputs ----
-    box(
-        ax,
-        (0.2, 6.6),
-        2.0,
-        1.3,
-        "Anchor x_t",
-        sub="audio + seismic",
-        edge=C_SHARED,
-        face=C_BG_SHARED,
-        title_fs=16,
-        sub_fs=13,
-    )
-    box(
-        ax,
-        (0.2, 1.1),
-        2.0,
-        1.3,
-        "Partner x_tn",
-        sub="stratified pair",
-        edge=C_SHARED,
-        face=C_BG_SHARED,
-        title_fs=16,
-        sub_fs=13,
-    )
+    # 20.4:10 canvas — wider gutters, row pitch 3.0, rows centered on y = 5.0.
+    fig, ax = plt.subplots(figsize=(20.4, 10))
+    ax.set_xlim(0, 20.4)
+    ax.set_ylim(0, 10)
+    ax.set_aspect("equal")
+    ax.set_axis_off()
 
-    # ---- column 2: shared encoder applied twice ----
-    box(
-        ax,
-        (2.6, 6.4),
-        2.6,
-        1.7,
-        "Encoder",
-        sub="frontend +\ntransformer → z_t",
-        edge=C_SHARED,
-        face=C_BG_SHARED,
-        title_fs=17,
-        sub_fs=13,
-    )
-    box(
-        ax,
-        (2.6, 0.9),
-        2.6,
-        1.7,
-        "Encoder (shared)",
-        sub="→ z_tn",
-        edge=C_SHARED,
-        face=C_BG_SHARED,
-        title_fs=17,
-        sub_fs=13,
-    )
-    arrow(ax, (2.2, 7.25), (2.6, 7.25))
-    arrow(ax, (2.2, 1.75), (2.6, 1.75))
+    C_VAE = C_LOSS                      # red — VAE/recon family
+    C_DIS = C_LATENT                    # purple — disentangled
+    C_CON = "#1f7a8c"                   # teal — contrastive
+    C_BG_VAE = "#f7e5e5"
+    C_BG_DIS = C_BG_LATENT
+    C_BG_CON = "#dceef2"
 
-    # ---- column 3: latent splits ----
-    box(
-        ax,
-        (5.6, 6.4),
-        2.4,
-        1.7,
-        "z_t  split",
-        sub="pres · type\nprox · env · free",
-        edge=C_LATENT,
-        face=C_BG_LATENT,
-        title_fs=17,
-        sub_fs=13,
-    )
-    box(
-        ax,
-        (5.6, 0.9),
-        2.4,
-        1.7,
-        "z_tn  split",
-        sub="env block used",
-        edge=C_LATENT,
-        face=C_BG_LATENT,
-        title_fs=17,
-        sub_fs=13,
-    )
-    arrow(ax, (5.2, 7.25), (5.6, 7.25))
-    arrow(ax, (5.2, 1.75), (5.6, 1.75))
+    # Vertical layout — three rows centered on y = 5.0 with equal pitch.
+    center_y = 5.0
+    row_pitch = 3.0
+    row_h = 1.4
+    row_y_vae = center_y + row_pitch - row_h / 2          # top row, y of bottom edge
+    row_y_dis = center_y - row_h / 2                       # middle row
+    row_y_con = center_y - row_pitch - row_h / 2           # bottom row
+    row_centers = {
+        row_y_vae: row_y_vae + row_h / 2,
+        row_y_dis: row_y_dis + row_h / 2,
+        row_y_con: row_y_con + row_h / 2,
+    }
 
-    # right-edge waypoints on the split boxes
-    z_t_right_top = (8.0, 7.7)
-    z_t_right_mid = (8.0, 7.3)
-    z_t_right_bot = (8.0, 6.9)
-    z_tn_right = (8.0, 1.75)
+    # Left column — Inputs / Shared encoder / Latent z, all vertically centered on y = 5.0.
+    # Equal horizontal gap (0.6) before AND after the Shared encoder.
+    enc_w, enc_h = 2.8, 1.8
+    z_w, z_h = 2.0, 1.8
+    inputs_right = 1.8
+    col_gap = 0.6
+    enc_x = inputs_right + col_gap                 # 2.4
+    enc_y = center_y - enc_h / 2
+    z_x = enc_x + enc_w + col_gap                  # 5.8
+    z_y = center_y - z_h / 2
 
-    # ---- column 4: downstream consumers ----
-    dec_x, dec_y = 9.0, 7.3
     box(
         ax,
-        (dec_x, dec_y),
-        2.4,
+        (0.2, center_y - 0.6),
+        1.6,
         1.2,
-        "Decoder",
-        sub="MSE recon → x̂",
-        edge=C_SHARED,
-        face=C_BG_SHARED,
-        title_fs=16,
-        sub_fs=13,
-    )
-    arrow(ax, z_t_right_top, (dec_x, dec_y + 0.6))
-
-    aux_x, aux_y = 9.0, 5.5
-    box(
-        ax,
-        (aux_x, aux_y),
-        2.4,
-        1.2,
-        "Aux heads",
-        sub="pres · type · prox",
-        edge=C_SHARED,
-        face=C_BG_SHARED,
-        title_fs=16,
-        sub_fs=13,
-    )
-    arrow(ax, z_t_right_bot, (aux_x, aux_y + 0.6))
-
-    interv_x, interv_y = 9.0, 3.0
-    interv_w, interv_h = 2.4, 1.6
-    box(
-        ax,
-        (interv_x, interv_y),
-        interv_w,
-        interv_h,
-        "Intervention\nclassifier",
-        sub="MLP on\n[z_env_t, z_env_tn]",
-        edge=C_LATENT,
-        face=C_BG_LATENT,
-        title_fs=16,
-        sub_fs=13,
-    )
-
-    # waypoint x: between split boxes and consumer column, away from the box
-    way_x = 8.55
-    # anchor env feed
-    arrow(ax, z_t_right_mid, (way_x, 7.3), color=C_LATENT, linewidth=1.4, head=False)
-    arrow(
-        ax,
-        (way_x, 7.3),
-        (way_x, interv_y + interv_h - 0.4),
-        color=C_LATENT,
-        linewidth=1.4,
-        head=False,
-    )
-    arrow(
-        ax,
-        (way_x, interv_y + interv_h - 0.4),
-        (interv_x, interv_y + interv_h - 0.4),
-        color=C_LATENT,
-        linewidth=1.4,
-    )
-    # partner env feed
-    arrow(ax, z_tn_right, (way_x, 1.75), color=C_LATENT, linewidth=1.4, head=False)
-    arrow(
-        ax,
-        (way_x, 1.75),
-        (way_x, interv_y + 0.4),
-        color=C_LATENT,
-        linewidth=1.4,
-        head=False,
-    )
-    arrow(
-        ax,
-        (way_x, interv_y + 0.4),
-        (interv_x, interv_y + 0.4),
-        color=C_LATENT,
-        linewidth=1.4,
-    )
-
-    # ---- column 5: loss block ----
-    loss_x, loss_y, loss_w, loss_h = 12.0, 4.0, 3.6, 2.6
-    box(
-        ax,
-        (loss_x, loss_y),
-        loss_w,
-        loss_h,
-        "ELBO + Aux + Interv",
-        sub="recon · β · KL\n+ pres / type / prox\n+ BCE(intervention)",
-        edge=C_LOSS,
-        face="#f7e5e5",
-        title_fs=17,
-        sub_fs=13,
-    )
-    arrow(
-        ax,
-        (dec_x + 2.4, dec_y + 0.6),
-        (loss_x, loss_y + loss_h - 0.5),
-        color=C_LOSS,
-        linewidth=1.4,
-    )
-    arrow(
-        ax,
-        (aux_x + 2.4, aux_y + 0.6),
-        (loss_x, loss_y + loss_h / 2),
-        color=C_LOSS,
-        linewidth=1.4,
-    )
-    arrow(
-        ax,
-        (interv_x + interv_w, interv_y + interv_h - 0.4),
-        (loss_x, loss_y + 0.5),
-        color=C_LOSS,
-        linewidth=1.4,
-    )
-
-    # ---- column 6: dual checkpoint ----
-    ckpt_x, ckpt_y, ckpt_w, ckpt_h = 12.0, 1.0, 3.6, 1.8
-    box(
-        ax,
-        (ckpt_x, ckpt_y),
-        ckpt_w,
-        ckpt_h,
-        "Dual checkpoint",
-        sub="crl_best.pth      ← min val_ref_elbo\ncrl_best_aux_type ← max val_aux_type_f1",
+        "Inputs",
+        sub="audio +\nseismic",
         edge=C_SHARED,
         face=C_BG_SHARED,
         title_fs=16,
         sub_fs=12,
     )
-    arrow(
+    box(
         ax,
-        (loss_x + loss_w / 2, loss_y),
-        (ckpt_x + ckpt_w / 2, ckpt_y + ckpt_h),
-        color=C_LOSS,
-        linewidth=1.4,
+        (enc_x, enc_y),
+        enc_w,
+        enc_h,
+        "Shared encoder",
+        sub="frontend +\ntransformer\n→ μ, log σ²",
+        edge=C_SHARED,
+        face=C_BG_SHARED,
+        title_fs=16,
+        sub_fs=12,
+    )
+    box(
+        ax,
+        (z_x, z_y),
+        z_w,
+        z_h,
+        "Latent  z",
+        sub="pres · type\nprox · env\nfree",
+        edge=C_LATENT,
+        face=C_BG_LATENT,
+        title_fs=16,
+        sub_fs=12,
+    )
+    arrow(ax, (1.8, center_y), (enc_x, center_y))
+    arrow(ax, (enc_x + enc_w, center_y), (z_x, center_y))
+
+    z_right = z_x + z_w
+    z_mid = (z_right, center_y)
+
+    # Wider horizontal spacing — gap doubled, label gutter added.
+    head_w = 2.2
+    loss_w = 3.4
+    ckpt_w = 3.4
+    gap = 0.6
+
+    label_gutter = 1.6                                     # space for VAE/Disent./Contrastive labels
+    fan_x = z_right + 0.6
+    head_x = fan_x + label_gutter
+    loss_x = head_x + head_w + gap
+    ckpt_x = loss_x + loss_w + gap
+
+    arrow(ax, z_mid, (fan_x, center_y), color=C_SHARED, linewidth=1.4, head=False)
+
+    for row_y, color in [
+        (row_y_vae, C_VAE),
+        (row_y_dis, C_DIS),
+        (row_y_con, C_CON),
+    ]:
+        cy = row_centers[row_y]
+        arrow(ax, (fan_x, center_y), (fan_x, cy), color=color, linewidth=1.4, head=False)
+        arrow(ax, (fan_x, cy), (head_x, cy), color=color, linewidth=1.4)
+
+    def mode_row(y, label, head_title, head_sub, loss_title, loss_sub, ckpt_title, ckpt_sub, edge, face_bg, face_loss):
+        cy = y + row_h / 2
+        box(
+            ax,
+            (head_x, y),
+            head_w,
+            row_h,
+            head_title,
+            sub=head_sub,
+            edge=edge,
+            face=face_bg,
+            title_fs=14,
+            sub_fs=11,
+        )
+        box(
+            ax,
+            (loss_x, y),
+            loss_w,
+            row_h,
+            loss_title,
+            sub=loss_sub,
+            edge=edge,
+            face=face_loss,
+            title_fs=14,
+            sub_fs=11,
+        )
+        box(
+            ax,
+            (ckpt_x, y),
+            ckpt_w,
+            row_h,
+            ckpt_title,
+            sub=ckpt_sub,
+            edge=C_SHARED,
+            face=C_BG_SHARED,
+            title_fs=13,
+            sub_fs=11,
+        )
+        arrow(ax, (head_x + head_w, cy), (loss_x, cy), color=edge, linewidth=1.4)
+        arrow(ax, (loss_x + loss_w, cy), (ckpt_x, cy), color=edge, linewidth=1.4)
+        # Mode label sits in the gutter between the fan column and the head box,
+        # vertically centered on the row's horizontal arrow — never on the vertical fan line.
+        ax.text(
+            head_x - 0.15,
+            cy + 0.22,
+            label,
+            ha="right",
+            va="bottom",
+            fontsize=13,
+            fontweight="bold",
+            color=edge,
+        )
+
+    mode_row(
+        row_y_vae,
+        "VAE",
+        "Decoder +\nAux heads",
+        "MSE recon\npres / type",
+        "ELBO + Aux",
+        "L_recon + β·L_KL\n+ λ_p·L_pres + λ_t·L_type",
+        "Dual ckpt",
+        "best ← min val_ref_elbo\naux  ← max val_aux_type_f1",
+        edge=C_VAE,
+        face_bg=C_BG_VAE,
+        face_loss="#f7e5e5",
+    )
+
+    mode_row(
+        row_y_dis,
+        "Disentangled",
+        "Split latent\n+ paired enc.",
+        "z_signal / z_env\n(audio, seismic)",
+        "ELBO + Disent.",
+        "L_recon + β·L_KL\n+ L_align + L_stable + L_invar",
+        "Dual ckpt",
+        "best ← min val_ref_elbo\naux  ← max val_aux_type_f1",
+        edge=C_DIS,
+        face_bg=C_BG_DIS,
+        face_loss=C_BG_DIS,
+    )
+
+    mode_row(
+        row_y_con,
+        "Contrastive",
+        "Proj. MLP +\nstratified pairs",
+        "L2-norm μ\nP_b positives",
+        "NT-Xent",
+        "L_NTXent\n(temperature τ = 0.1)",
+        "Single ckpt",
+        "best ← min\nval_contrastive_loss",
+        edge=C_CON,
+        face_bg=C_BG_CON,
+        face_loss=C_BG_CON,
     )
 
     ax.text(
         0.2,
-        8.6,
-        "CRL training graph · anchor + partner + dual checkpoint  ·  "
-        "β anneals 0.02 → 1.0; val_ref_elbo evaluated at β = 1",
-        fontsize=14,
+        9.5,
+        "CRL training modes · shared encoder, three objectives, mode-specific checkpoints",
+        fontsize=15,
         color="#555555",
         style="italic",
     )
+    ax.text(
+        0.2,
+        9.05,
+        "β anneals 0.02 → 1.0 in VAE / Disentangled; val_ref_elbo evaluated at β = 1",
+        fontsize=12,
+        color="#888888",
+        style="italic",
+    )
+
     fig.tight_layout(pad=0.5)
     fig.savefig(out)
     plt.close(fig)
@@ -761,9 +591,8 @@ def fig9_training_flow(out: Path) -> None:
 def main() -> None:
     fig6_architecture(ROOT / "fig6_architecture.png")
     fig7_multiscale(ROOT / "fig7_frontend_multiscale.png")
-    fig8_morlet(ROOT / "fig8_frontend_morlet.png")
     fig9_training_flow(ROOT / "fig9_training_flow.png")
-    print("wrote 4 diagram PNGs to", ROOT)
+    print("wrote 3 diagram PNGs to", ROOT)
 
 
 if __name__ == "__main__":

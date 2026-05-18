@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pyarrow.parquet as pq
 import torch
 from torch.utils.data import Dataset
 
@@ -19,6 +18,7 @@ from crl_vehicle.config import (
     LABEL_MULTI,
     CRLConfig,
 )
+from crl_vehicle.data import _table_io
 from crl_vehicle.data.transforms import remove_dc
 
 # Stratum identifiers for partner sampling
@@ -99,36 +99,13 @@ def _read_parquet_numpy(
     source_rate: int,
     target_rate: int,
 ) -> np.ndarray:
-    """Read a flat time-series parquet → float32 array (N_windows, target_window_size).
-
-    Expects an 'amplitude' signal column at source_rate. Resamples to target_rate
-    if they differ, then reshapes into 1-second windows (target_window_size = target_rate).
-    Trailing samples that don't fill a complete window are discarded.
-    """
-    col = pq.read_table(path, columns=["amplitude"], use_threads=True)
-    arr = col.column("amplitude").to_numpy().astype(np.float32)
-    arr = _resample_to_target(arr, source_rate, target_rate)
-    n_windows = len(arr) // target_window_size
-    return arr[: n_windows * target_window_size].reshape(n_windows, target_window_size)
+    """Compatibility shim — see _table_io.read_amplitude."""
+    return _table_io.read_amplitude(path, target_window_size, source_rate, target_rate)
 
 
-def _read_parquet_present(
-    path: Path,
-    source_rate: int,
-) -> np.ndarray:
-    """Read the 'present' boolean column → per-window majority vote.
-
-    Returns bool array of shape (N_windows,) where each entry corresponds to a
-    1-second window. A window is True iff strictly more than 50% of its source
-    samples have present=True. Computed at source_rate (no resampling needed for
-    bools): a 1-second window contains source_rate samples on disk regardless of
-    the target rate the amplitude is resampled to.
-    """
-    col = pq.read_table(path, columns=["present"], use_threads=True)
-    arr = col.column("present").to_numpy()
-    n_windows = len(arr) // source_rate
-    arr = arr[: n_windows * source_rate].reshape(n_windows, source_rate)
-    return arr.mean(axis=1) > 0.5
+def _read_parquet_present(path: Path, source_rate: int) -> np.ndarray:
+    """Compatibility shim — see _table_io.read_present."""
+    return _table_io.read_present(path, source_rate)
 
 
 def _parse_stem(stem: str, sensor: str) -> tuple[str, str, str] | None:
@@ -232,20 +209,32 @@ class SensorDataset(Dataset):
                     else self.id_root.parent / "id_cache"
                 ),
             )
-            # Scan all subdirs of id_root, dedupe by stem
-            seen: dict[str, Path] = {}
+            # Scan all subdirs of id_root for both .parquet and .csv. Within
+            # each stem, prefer parquet via _table_io.merge_with_parquet_priority.
+            pq_by_stem: dict[str, Path] = {}
+            csv_by_stem: dict[str, Path] = {}
             for p in sorted(self.id_root.glob("*/*.parquet")):
-                seen.setdefault(p.stem, p)
-            parquet_files = sorted(seen.values())
+                pq_by_stem.setdefault(p.stem, p)
+            for p in sorted(self.id_root.glob("*/*.csv")):
+                csv_by_stem.setdefault(p.stem, p)
+            source_files = _table_io.merge_with_parquet_priority(
+                list(pq_by_stem.values()),
+                list(csv_by_stem.values()),
+                logger=logging.getLogger(__name__),
+            )
         else:
             self._id_manifest = None
-            parquet_files = sorted(self.parquet_dir.glob("*.parquet"))
-        if not parquet_files:
+            source_files = _table_io.merge_with_parquet_priority(
+                sorted(self.parquet_dir.glob("*.parquet")),
+                sorted(self.parquet_dir.glob("*.csv")),
+                logger=logging.getLogger(__name__),
+            )
+        if not source_files:
             raise FileNotFoundError(
-                f"No parquet files found "
+                f"No parquet/csv files found "
                 f"({'id_root=' + str(self.id_root) if self.use_id_split else 'parquet_dir=' + str(self.parquet_dir)})"
             )
-        self._build_from_parquet(parquet_files)
+        self._build_from_sources(source_files)
         if self.use_id_split and self._id_skip_counts:
             summary = ", ".join(f"{k}={v}" for k, v in sorted(self._id_skip_counts.items()))
             logging.getLogger(__name__).info(
@@ -253,7 +242,13 @@ class SensorDataset(Dataset):
             )
         self._preload_shared(cache_dir)
 
-    def _build_from_parquet(self, files: list[Path]) -> None:
+    def _build_from_sources(self, files: list[Path]) -> None:
+        # Per-build CSV row-count cache. Parquet reads ignore it (O(1) via
+        # footer). For CSV, the first call per path scans the file once;
+        # subsequent calls for the same path (e.g. across amplitude/present
+        # passes within a build) reuse the cached count.
+        row_count_cache: dict[str, int] = {}
+
         # Group files by (dataset, vehicle, rs_node) and sensor
         audio_files: dict[tuple, Path] = {}
         seismic_files: dict[tuple, Path] = {}
@@ -295,25 +290,31 @@ class SensorDataset(Dataset):
             if a_file:
                 # Window count comes from source rate (1 window = 1 second of source).
                 src_sr_a = _source_sample_rate(audio_stem, "audio")
-                audio_nw = pq.read_metadata(a_file).num_rows // src_sr_a
+                audio_nw = (
+                    _table_io.get_num_rows(a_file, row_count_cache=row_count_cache)
+                    // src_sr_a
+                )
                 self._cache["audio"][(audio_stem, None)] = {
                     "path": a_file,
                     "n_windows": audio_nw,
                 }
                 seg_id += 1
                 audio_seg_id = seg_id
-                audio_present_per_window = _read_parquet_present(a_file, src_sr_a)
+                audio_present_per_window = _table_io.read_present(a_file, src_sr_a)
 
             if s_file:
                 src_sr_s = _source_sample_rate(seismic_stem, "seismic")
-                seismic_nw = pq.read_metadata(s_file).num_rows // src_sr_s
+                seismic_nw = (
+                    _table_io.get_num_rows(s_file, row_count_cache=row_count_cache)
+                    // src_sr_s
+                )
                 self._cache["seismic"][(seismic_stem, None)] = {
                     "path": s_file,
                     "n_windows": seismic_nw,
                 }
                 seg_id += 1
                 seismic_seg_id = seg_id
-                seismic_present_per_window = _read_parquet_present(s_file, src_sr_s)
+                seismic_present_per_window = _table_io.read_present(s_file, src_sr_s)
 
             n_windows = (
                 min(audio_nw, seismic_nw) if audio_nw and seismic_nw else (audio_nw or seismic_nw)
@@ -462,8 +463,8 @@ class SensorDataset(Dataset):
                     data_dict = loaded
 
                 if data_dict is None:
-                    arr = _read_parquet_numpy(src, W, source_sr, target_sr)
-                    pres_arr = _read_parquet_present(src, source_sr)
+                    arr = _table_io.read_amplitude(src, W, source_sr, target_sr)
+                    pres_arr = _table_io.read_present(src, source_sr)
                     if source_sr != target_sr:
                         logging.getLogger(__name__).info(
                             f"Loaded {stem}: resampled {source_sr}→{target_sr} Hz, "

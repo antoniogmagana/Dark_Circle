@@ -2,4 +2,3 @@ name,frontend_type,morlet_use_phase,prior_type,training_mode,stage2,epochs_compl
 2026-05-03_05-03-14,multiscale,False,standard,disentangled,False,100,0.8438,linear_signal,0.786,0.6702,linear_signal_aux,0.4365,focal,0.2524,0.6069,0.6126,0.2717,False,False
 2026-05-03_15-26-22,,,,,False,0,0.8714,mlp_ztype,0.8224,0.6551,linear_fullz_aux,0.4572,focal,,0.6068,0.6837,0.4388,True,False
 2026-05-03_05-02-44,multiscale,False,standard,vae,False,51,0.867,mlp_ztype,0.6166,0.6391,linear_ztype,0.4554,focal,0.5526,0.5833,0.7461,0.4754,False,False
-2026-05-04_05-49-26,morlet_per_sensor,False,standard,vae,False,78,0.8121,mlp_ztype_aux,0.6069,0.5237,mlp_ztype_aux,0.3085,focal,4.46,0.4817,0.7187,0.3986,False,False

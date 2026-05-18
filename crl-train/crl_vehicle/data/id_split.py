@@ -17,7 +17,8 @@ import time
 from pathlib import Path
 
 import numpy as np
-import pyarrow.parquet as pq
+
+from crl_vehicle.data import _table_io
 
 logger = logging.getLogger(__name__)
 
@@ -64,15 +65,15 @@ def compute_split_intervals(n_paired: int) -> dict[str, list[tuple[int, int]]] |
 
 
 def extract_runs(
-    parquet_path: Path,
+    source_path: Path,
     window_size: int,
 ) -> dict[tuple[int, int], tuple[int, int]]:
-    """Extract per-run window ranges from a parquet with scene_id/run_id.
+    """Extract per-run window ranges from a parquet or CSV with scene_id/run_id.
 
     Args:
-        parquet_path: parquet with columns 'scene_id' (int64), 'run_id' (int64).
+        source_path: .parquet or .csv with columns 'scene_id' (int64), 'run_id' (int64).
         window_size: source samples per 1-second window (i.e. the source
-            sample rate of the parquet on disk — 16000 for focal/iobt audio,
+            sample rate of the file on disk — 16000 for focal/iobt audio,
             1600 for m3nvc audio, 100 for focal/iobt seismic, 200 for m3nvc
             seismic). Window indices are computed in 1-second units so audio
             and seismic ranges become directly comparable.
@@ -86,19 +87,8 @@ def extract_runs(
         ValueError: if scene_id or run_id columns are missing, or if any
             (scene, run) key is non-contiguous in the file.
     """
-    parquet_path = Path(parquet_path)
-    # Check schema before reading to raise a clear ValueError on missing columns.
-    schema_cols = set(pq.read_schema(parquet_path).names)
-    for col in ("scene_id", "run_id"):
-        if col not in schema_cols:
-            raise ValueError(
-                f"{parquet_path.name}: missing required column {col!r} " f"for split_runs marker"
-            )
-    table = pq.read_table(parquet_path, columns=["scene_id", "run_id"])
-    set(table.column_names)
-
-    scene = table.column("scene_id").to_numpy()
-    run = table.column("run_id").to_numpy()
+    source_path = Path(source_path)
+    scene, run = _table_io.read_scene_run(source_path)
     n = len(scene)
     if n == 0:
         return {}
@@ -115,7 +105,7 @@ def extract_runs(
         key = (int(scene[s]), int(run[s]))
         if key in seen:
             raise ValueError(
-                f"{parquet_path.name}: (scene_id={key[0]}, run_id={key[1]}) "
+                f"{source_path.name}: (scene_id={key[0]}, run_id={key[1]}) "
                 f"appears in non-contiguous blocks (sample ranges "
                 f"[{seen[key][0]},{seen[key][1]}) and [{s},{e}))"
             )
@@ -236,7 +226,7 @@ def compute_manifest_hash(
     Args:
         mapping: DATASET_VEHICLE_MAP (or a subset).
         window_sizes: {"audio": int, "seismic": int}.
-        source_files: list of (stem, parquet_path) for files whose
+        source_files: list of (stem, path) for files (parquet or CSV) whose
             routing depends on per-file computation (split / split_runs).
 
     Returns:
@@ -272,14 +262,21 @@ def _group_key(dataset: str, vehicle: str, rs: str) -> str:
     return f"{dataset}__{vehicle}__{rs}"
 
 
-def _file_n_windows(path: Path, window_size: int) -> int:
-    """Number of complete 1-second windows in the parquet.
+def _file_n_windows(
+    path: Path,
+    window_size: int,
+    *,
+    row_count_cache: dict[str, int] | None = None,
+) -> int:
+    """Number of complete 1-second windows in the source file.
 
-    `window_size` here is samples-per-second at the parquet's source rate
-    (i.e. for a 16 kHz audio parquet, pass 16000; for 100 Hz seismic, pass
-    100). The function divides total rows by that to get 1-second windows.
+    `window_size` is samples-per-second at the file's source rate
+    (e.g. 16000 for focal/iobt audio, 100 for focal/iobt seismic).
+
+    Parquet reads are O(1) via footer metadata. CSV reads are cached via
+    `row_count_cache` (shared across the build) to avoid re-scanning.
     """
-    return pq.read_metadata(path).num_rows // window_size
+    return _table_io.get_num_rows(path, row_count_cache=row_count_cache) // window_size
 
 
 def build_manifest(
@@ -309,10 +306,18 @@ def build_manifest(
         Manifest dict matching the schema in the design spec.
     """
     id_root = Path(id_root)
-    # Scan all subdirs, dedupe by stem
-    all_files: dict[str, Path] = {}
-    for parquet in id_root.glob("*/*.parquet"):
-        all_files.setdefault(parquet.stem, parquet)
+    # Scan all subdirs for both .parquet and .csv. Within each stem, prefer
+    # parquet via _table_io.merge_with_parquet_priority.
+    pq_by_stem: dict[str, Path] = {}
+    csv_by_stem: dict[str, Path] = {}
+    for p in id_root.glob("*/*.parquet"):
+        pq_by_stem.setdefault(p.stem, p)
+    for p in id_root.glob("*/*.csv"):
+        csv_by_stem.setdefault(p.stem, p)
+    merged = _table_io.merge_with_parquet_priority(
+        list(pq_by_stem.values()), list(csv_by_stem.values()), logger=logger
+    )
+    all_files: dict[str, Path] = {p.stem: p for p in merged}
 
     # Group by (dataset, vehicle, rs)
     audio_files: dict[tuple[str, str, str], Path] = {}
@@ -326,6 +331,8 @@ def build_manifest(
 
     groups: dict[str, dict] = {}
     all_keys = set(audio_files) | set(seismic_files)
+    # Per-build CSV row-count cache; parquet reads are O(1) and ignore it.
+    row_count_cache: dict[str, int] = {}
 
     for ds, vehicle, rs in sorted(all_keys):
         ds_map = mapping.get(ds, {})
@@ -343,12 +350,20 @@ def build_manifest(
 
         if marker == "split":
             audio_nw = (
-                _file_n_windows(a_path, _source_rate_for_stem(a_path.stem, "audio"))
+                _file_n_windows(
+                    a_path,
+                    _source_rate_for_stem(a_path.stem, "audio"),
+                    row_count_cache=row_count_cache,
+                )
                 if a_path
                 else 0
             )
             seismic_nw = (
-                _file_n_windows(s_path, _source_rate_for_stem(s_path.stem, "seismic"))
+                _file_n_windows(
+                    s_path,
+                    _source_rate_for_stem(s_path.stem, "seismic"),
+                    row_count_cache=row_count_cache,
+                )
                 if s_path
                 else 0
             )
@@ -436,11 +451,27 @@ def build_manifest(
 
 
 def _collect_split_source_files(id_root: Path, mapping: dict) -> list[tuple[str, Path]]:
-    """List (stem, path) for every parquet whose marker is split / split_runs."""
+    """List (stem, path) for every source file whose marker is split / split_runs.
+
+    Walks both .parquet and .csv under id_root/*/, preferring parquet on stem
+    conflicts (so the manifest hash sees the same source each time and CSV
+    shadowed by a parquet doesn't leak into invalidation tracking).
+    """
+    id_root = Path(id_root)
+    pq_by_stem: dict[str, Path] = {}
+    csv_by_stem: dict[str, Path] = {}
+    for p in id_root.glob("*/*.parquet"):
+        pq_by_stem.setdefault(p.stem, p)
+    for p in id_root.glob("*/*.csv"):
+        csv_by_stem.setdefault(p.stem, p)
+    merged = _table_io.merge_with_parquet_priority(
+        list(pq_by_stem.values()), list(csv_by_stem.values()), logger=logger
+    )
+
     out: list[tuple[str, Path]] = []
     seen_stems: set[str] = set()
-    for parquet in sorted(Path(id_root).glob("*/*.parquet")):
-        stem = parquet.stem
+    for source in merged:
+        stem = source.stem
         if stem in seen_stems:
             continue
         seen_stems.add(stem)
@@ -451,7 +482,7 @@ def _collect_split_source_files(id_root: Path, mapping: dict) -> list[tuple[str,
             ds, vehicle, _ = parsed
             entry = mapping.get(ds, {}).get(vehicle)
             if entry is not None and len(entry) >= 3 and entry[2] in ("split", "split_runs"):
-                out.append((stem, parquet))
+                out.append((stem, source))
             break
     return out
 

@@ -19,11 +19,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent  # crl-train/saved_crl/slides-figs/
 SAVED_CRL = ROOT.parent  # crl-train/saved_crl/
 
-DEFAULT_MULTI = SAVED_CRL / "id_split" / "multiscale_run1"
-DEFAULT_MORLET = SAVED_CRL / "id_split" / "morlet_per_sensor_phase_run1"
+DEFAULT_VAE = SAVED_CRL / "runs" / "multiscale" / "vae" / "2026-05-03_05-02-44"
+DEFAULT_DIS = SAVED_CRL / "runs" / "multiscale" / "disentangled" / "2026-05-03_05-03-14"
 
-LABEL_MULTI = "Multiscale frontend"
-LABEL_MORLET = "Morlet (per-sensor) frontend"
+LABEL_VAE = "Multiscale + VAE"
+LABEL_DIS = "Multiscale + Disentangled"
 
 CLASS_ORDER = ["pedestrian", "light", "medium", "heavy"]
 
@@ -46,36 +46,37 @@ mpl.rcParams.update(
 )
 
 
-def find_report(run_dir: Path) -> Path | None:
-    """Locate the eval_report.json that matches the run's headline probe.
+def find_report(run_dir: Path, head: str = "type") -> Path | None:
+    """Locate the eval_report.json for a given head ("type" or "pres").
 
-    Resolution order (only 'full' splits are considered — per-dataset
-    filtered reports like focal/iobt are skipped):
-      1. Top-level <run_dir>/eval_report.json (eval.py default).
-      2. <run_dir>/eval/<probe_mode>__<ckpt_stem>/full/eval_report.json,
-         where probe_mode and ckpt_name come from meta.json — i.e. the
-         same probe×checkpoint that produced the training-curve figures.
-      3. Any <run_dir>/eval/**/full/eval_report.json as a last resort.
+    The eval pipeline writes per-head reports at
+    `<run>/eval/<probe>__<ckpt>/<head>/full/eval_report.json`. Older runs
+    may have a single combined `<run>/eval_report.json` at the top level —
+    we use that if present, since it carries both heads.
     """
     top = run_dir / "eval_report.json"
     if top.is_file():
         return top
 
-    meta_path = run_dir / "meta.json"
-    if meta_path.is_file():
-        meta = json.loads(meta_path.read_text())
-        probe = meta.get("probe_mode")
-        ckpt_name = meta.get("ckpt_name")
-        if probe and ckpt_name:
-            ckpt_stem = Path(ckpt_name).stem
-            preferred = (
-                run_dir / "eval" / f"{probe}__{ckpt_stem}" / "full" / "eval_report.json"
-            )
-            if preferred.is_file():
-                return preferred
+    # Per-head layout. Look at meta.json first (for crl/<...> nested layouts
+    # too), then fall back to alphabetical pick under any probe×ckpt dir.
+    meta_paths = (run_dir / "meta.json", run_dir / "crl" / "meta.json")
+    for meta_path in meta_paths:
+        if meta_path.is_file():
+            meta = json.loads(meta_path.read_text())
+            probe = meta.get("probe_mode")
+            ckpt_name = meta.get("ckpt_name")
+            if probe and ckpt_name:
+                ckpt_stem = Path(ckpt_name).stem
+                preferred = (
+                    run_dir / "eval" / f"{probe}__{ckpt_stem}" / head / "full" / "eval_report.json"
+                )
+                if preferred.is_file():
+                    return preferred
+            break
 
-    full_only = sorted(run_dir.glob("eval/**/full/eval_report.json"))
-    return full_only[0] if full_only else None
+    matches = sorted(run_dir.glob(f"eval/*/{head}/full/eval_report.json"))
+    return matches[0] if matches else None
 
 
 def cm_panel(ax, cm: np.ndarray, title: str) -> None:
@@ -108,16 +109,16 @@ def cm_panel(ax, cm: np.ndarray, title: str) -> None:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "--multi-run",
+        "--vae-run",
         type=Path,
-        default=DEFAULT_MULTI,
-        help="Run dir for the multiscale model (default: %(default)s)",
+        default=DEFAULT_VAE,
+        help="Run dir for the multiscale-VAE model (default: %(default)s)",
     )
     p.add_argument(
-        "--morlet-run",
+        "--dis-run",
         type=Path,
-        default=DEFAULT_MORLET,
-        help="Run dir for the morlet model (default: %(default)s)",
+        default=DEFAULT_DIS,
+        help="Run dir for the multiscale-Disentangled model (default: %(default)s)",
     )
     p.add_argument(
         "--out",
@@ -127,14 +128,14 @@ def main() -> int:
     )
     args = p.parse_args()
 
-    multi_report = find_report(args.multi_run)
-    morlet_report = find_report(args.morlet_run)
+    vae_report = find_report(args.vae_run, head="type")
+    dis_report = find_report(args.dis_run, head="type")
 
     missing = []
-    if multi_report is None:
-        missing.append(f"  multiscale: {args.multi_run}")
-    if morlet_report is None:
-        missing.append(f"  morlet:     {args.morlet_run}")
+    if vae_report is None:
+        missing.append(f"  vae:           {args.vae_run}")
+    if dis_report is None:
+        missing.append(f"  disentangled:  {args.dis_run}")
     if missing:
         print("eval_report.json not found for:", *missing, sep="\n")
         print(
@@ -142,20 +143,20 @@ def main() -> int:
         )
         return 0  # soft exit
 
-    multi = json.loads(multi_report.read_text())
-    morlet = json.loads(morlet_report.read_text())
+    vae = json.loads(vae_report.read_text())
+    dis = json.loads(dis_report.read_text())
 
-    multi_cm = multi["type"]["confusion_matrix"]
-    morlet_cm = morlet["type"]["confusion_matrix"]
+    vae_cm = vae["type"]["confusion_matrix"]
+    dis_cm = dis["type"]["confusion_matrix"]
 
     fig, axes = plt.subplots(1, 2, figsize=(13.5, 6.75))
     cm_panel(
-        axes[0], multi_cm, f"{LABEL_MULTI}  •  macro F1 {multi['type']['macro_f1']:.3f}"
+        axes[0], vae_cm, f"{LABEL_VAE}  •  macro F1 {vae['type']['macro_f1']:.3f}"
     )
     im = cm_panel(
         axes[1],
-        morlet_cm,
-        f"{LABEL_MORLET}  •  macro F1 {morlet['type']['macro_f1']:.3f}",
+        dis_cm,
+        f"{LABEL_DIS}  •  macro F1 {dis['type']['macro_f1']:.3f}",
     )
     axes[1].set_ylabel("")
     axes[1].tick_params(axis="y", labelleft=False)
@@ -167,8 +168,8 @@ def main() -> int:
     fig.savefig(args.out)
     plt.close(fig)
     print(f"wrote {args.out}")
-    print(f"  multiscale eval: {multi_report}")
-    print(f"  morlet eval:     {morlet_report}")
+    print(f"  vae eval:           {vae_report}")
+    print(f"  disentangled eval:  {dis_report}")
     return 0
 
 
